@@ -1,0 +1,4 @@
+node_modules/
+cashu-tollgate
+*.exe
+.env

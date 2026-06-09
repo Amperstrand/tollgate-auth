@@ -1,0 +1,25 @@
+#!/bin/bash
+# Cashu Tollgate - show remaining session time
+META="$HOME/.tollgate"
+if [ ! -f "$META" ]; then
+    echo "Not in a tollgate session"
+    exit 1
+fi
+STARTED=$(python3 -c "import json; print(json.load(open('$META'))['started'])")
+DURATION=$(python3 -c "import json; print(json.load(open('$META'))['duration'])")
+AMOUNT=$(python3 -c "import json; print(json.load(open('$META'))['amount'])")
+NOW=$(date +%s)
+ELAPSED=$((NOW - STARTED))
+REMAINING=$((DURATION - ELAPSED))
+if [ $REMAINING -le 0 ]; then
+    echo "Time's up!"
+    exit 0
+fi
+MINS=$((REMAINING / 60))
+SECS=$((REMAINING % 60))
+FILLED=$((REMAINING * 30 / DURATION))
+BAR=$(printf '█%.0s' $(seq 1 $FILLED))$(printf '░%.0s' $(seq $((FILLED+1)) 30))
+echo "  Time remaining: ${MINS}m ${SECS}s (${REMAINING}s)"
+echo "  Paid for:       ${AMOUNT} minutes"
+echo "  [${BAR}]"
+echo "  Session ends automatically. No refund for unused time."
