@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tollgate-ssh — ecash for SSH</title>
+<title>tollgate-ssh — test faucet</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -139,14 +139,14 @@
 <h1>tollgate-ssh</h1>
 <p class="tagline">ecash for SSH</p>
 <p class="subtitle">
-  Get a free test token, paste one command, get a Linux shell for 8 minutes.
-  Powered by <a href="https://cashu.space">Cashu</a> ecash.
+  Get a free <strong>worthless</strong> test token from the <a href="https://testnut.cashu.exchange">testnut</a> fake mint, paste one command, get a Linux shell for 8 minutes.
+  These tokens have <strong>zero monetary value</strong> — they're for testing only.
 </p>
 
 <div class="card">
   <h2>Try it</h2>
   <ol class="steps">
-    <li>Click the button to mint a free test token (8 sats = 8 minutes)</li>
+    <li>Click the button to mint a free test token (8 test sats = 8 minutes — <strong>not real Bitcoin</strong>)</li>
     <li>Copy the SSH command that appears</li>
     <li>Paste it in your terminal — you get an interactive Linux shell</li>
     <li>Run <code>timeleft</code> to check remaining time</li>
@@ -176,7 +176,7 @@
     account is destroyed.
   </p>
   <p class="warn">
-    This is a proof of concept. Tokens are from a test mint (no real bitcoin).
+    Tokens are from <strong>testnut</strong> — a fake mint for testing Cashu wallets. They are <strong>not real Bitcoin</strong> and have zero monetary value.
     Guests get real shell access on a real server. <a href="https://github.com/Amperstrand/tollgate-ssh#security-disclaimer">Read the security disclaimer</a>.
   </p>
 </div>
@@ -239,7 +239,7 @@ window.mint = async function() {
     document.getElementById('sshBox').textContent = `ssh -t ${token}@${TOLLGATE_HOST}`;
 
     result.classList.remove('hidden');
-    status.textContent = `Token minted! ${AMOUNT} sats = ${AMOUNT} minutes of shell time.`;
+    status.textContent = `Token minted! ${AMOUNT} test sats = ${AMOUNT} minutes of shell time. (Not real Bitcoin.)`;
 
   } catch (e) {
     status.textContent = `Error: ${e.message}`;

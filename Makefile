@@ -23,7 +23,7 @@ deploy: build-linux
 		 sudo systemctl status cashu-tollgate --no-pager | tail -5'
 
 deploy-faucet:
-	scp -P $(REMOTE_PORT) faucet/index.html $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-faucet.html
+	scp -P $(REMOTE_PORT) docs/index.html $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-faucet.html
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
 		'sudo mkdir -p /var/www/tollgate && \
 		 sudo cp /tmp/tollgate-faucet.html /var/www/tollgate/index.html'
