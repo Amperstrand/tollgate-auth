@@ -2,6 +2,10 @@
 
 **Ecash for SSH.** Pay-per-minute shell access with [Cashu](https://cashu.space) tokens.
 
+Built as a hackathon project to explore what it looks like when internet infrastructure accepts ecash natively. Part of the [OpenTollGate](https://github.com/OpenTollGate) concept — "ecash for internet access" — this is "ecash for SSH access."
+
+> **Status:** Not currently running a public instance. The code works — you can spin it up on a fresh VPS in about 10 minutes using the install guide below. See [Deploy to your own server](#deploy-to-your-own-server).
+
 Users paste a Cashu ecash token as their SSH username. The server redeems it, creates a throwaway guest account, and gives them an interactive bash shell for as many minutes as the token is worth (1 sat = 1 minute). When time runs out or they disconnect, the account is destroyed.
 
 ```
@@ -29,11 +33,12 @@ g-c3aa7bfb@tollgate:~$ timeleft
 
 ## Quick Start
 
-### Try the live demo
+### Try it yourself
 
-1. Visit the **[faucet](https://amperstrand.github.io/tollgate-ssh/)** to mint a free test token
-2. Copy the SSH command
-3. Paste in your terminal — you get 8 minutes of shell time
+1. Spin up a VPS (any Debian 12 machine works)
+2. Follow the [install guide](#install) — about 10 minutes
+3. Visit the **[faucet](https://amperstrand.github.io/tollgate-ssh/)** (hosted on GitHub Pages) to mint a free test token
+4. Copy the SSH command, paste in your terminal — you get 8 minutes of shell time
 
 > The faucet mints tokens from [testnut](https://testnut.cashu.exchange), a test mint with fake Bitcoin. All Lightning invoices auto-pay. No real money involved.
 
