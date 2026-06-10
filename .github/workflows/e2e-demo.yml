@@ -138,6 +138,7 @@ jobs:
             echo "CFLAGS += -Wno-deprecated-declarations" >> .config
             make -j$(nproc) eapol_test 2>&1 | tail -10
             sudo cp eapol_test /usr/local/bin/
+            cd "$GITHUB_WORKSPACE"
           fi
           echo "eapol_test: $(which eapol_test)"
 
