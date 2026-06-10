@@ -1,0 +1,15 @@
+# /etc/freeradius/3.0/mods-available/cashu-exec
+# FreeRADIUS exec module that calls tollgate-auth-radius for token validation.
+#
+# FreeRADIUS passes:
+#   %{User-Name}       = inner username (the Cashu token, from PEAP tunnel)
+#   %{Calling-Station-Id} = client MAC address (e.g. "aa-bb-cc-dd-ee-ff" or "AA:BB:CC:DD:EE:FF")
+#
+# The binary exits 0 (Accept) or 1 (Reject).
+
+exec cashu-auth {
+    wait = yes
+    program = "/usr/local/bin/tollgate-auth-radius %{User-Name} %{Calling-Station-Id}"
+    output = none
+    timeout = 15
+}

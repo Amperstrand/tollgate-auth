@@ -1,0 +1,12 @@
+# /etc/freeradius/3.0/users
+# Route Cashu token usernames to exec validation.
+# All other users are rejected.
+
+# Match any username starting with "cashuA" or "cashuB" (Cashu token prefix)
+DEFAULT User-Name =~ "^cashu[AB]"
+    Auth-Type := Accept,
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius %{User-Name} %{Calling-Station-Id}"
+
+# Reject everything else
+DEFAULT
+    Auth-Type := Reject
