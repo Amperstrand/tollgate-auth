@@ -65,11 +65,12 @@ g-c3aa7bfb@tollgate:~$ timeleft
 WiFi access points send RADIUS Access-Request to FreeRADIUS, which calls `tollgate-auth-radius` to validate payment. Supports EAP-TTLS+PAP (recommended) and PEAP+MSCHAPv2 (legacy). Payment goes in the username or password field — whichever starts with `cashu` or `lnurlw`.
 
 ```
-$ radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7" "anything" nodns.shop 0 tollgate
+$ radtest "cashuBo2FteB5odHRwczovL3Rlc3RudXQuY2FzaHUuZXhjaGFuZ2VhdWN..." "anything" nodns.shop 0 tollgate
 
 Received Access-Accept
-    Reply-Message = "Valid LNURLw code: 60m access (TODO: claim Lightning payment)"
-    Session-Timeout = 3600
+    Reply-Message = "Valid Cashu token: 8 sat = 8m access from https://testnut.cashu.exchange"
+    Session-Timeout = 480
+    Acct-Interim-Interval = 60
 ```
 
 ### RADIUS features
@@ -78,11 +79,13 @@ Received Access-Accept
 - **Dual EAP**: EAP-TTLS+PAP (no-DLEQ 230b token in single password field, or split 378b across password+identity) + PEAP+MSCHAPv2 (token in username, <253 bytes)
 - **Payment from either field**: username or password — whichever has the `cashu`/`lnurlw` prefix
 - **Reply-Message**: Decoded payment info in Access-Accept (amount, duration, mint)
-- **Session tracking**: MAC-based reconnection — active sessions skip payment check
+- **Session-Timeout**: Derived from payment amount (1 sat = 60 seconds), sent in Access-Accept for NAS enforcement
+- **Acct-Interim-Interval**: NAS reports usage every 60 seconds for real-time metering
+- **Session tracking**: MAC-based reconnection — active sessions skip payment check, remaining time returned in Session-Timeout
 - **Replay protection**: SHA256 hash of used tokens/codes
 - **Mint allowlist**: Only test mints accepted (regex `(?i)test` in hostname). Test tokens are validated and redeemed (NUT-03 swap). Non-test mints are rejected before any network call.
 
-See [docs/radius-testing.md](docs/radius-testing.md) for the full testing guide with real AP, phone, and CI examples, plus config examples for VPN, wired 802.1X, and captive portals.
+See [docs/radius-testing.md](docs/radius-testing.md) for the full testing guide with real AP, phone, and CI examples, plus config examples for VPN, wired 802.1X, and captive portals. See [docs/radius-payment-models.md](docs/radius-payment-models.md) for session management, accounting, operator credit collection, and infrastructure use cases (5G, PAM-RADIUS, EV charging, IoT).
 
 ## Quick Start
 
@@ -170,7 +173,7 @@ Currently configured for test mints only (`(?i)test` in hostname). To accept rea
 
 ### Configuration examples for non-WiFi use cases
 
-See [docs/radius-testing.md](docs/radius-testing.md) for practical config examples covering VPN (OpenVPN, WireGuard), wired 802.1X switch authentication, and captive portal setup.
+See [docs/radius-testing.md](docs/radius-testing.md) for practical config examples covering VPN (OpenVPN, WireGuard), wired 802.1X switch authentication, and captive portal setup. See [docs/radius-payment-models.md](docs/radius-payment-models.md) for the full analysis of infrastructure use cases including 5G cellular (Diameter Credit Control), PAM-RADIUS for SSH login, PPPoE/ISP access, satellite, EV charging, and IoT — with RFC references and payment settlement models.
 
 ## Components
 
@@ -183,6 +186,8 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `scripts/` | Setup scripts — FreeRADIUS, jail, e2e tests |
 | `docs/index.html` | Faucet — static page that mints free test tokens |
 | `docs/radius-testing.md` | Live demo guide with copy-paste examples |
+| `docs/radius-payment-models.md` | Session management, accounting, infrastructure use cases |
+| `docs/radius-token-size.md` | Token size analysis, payment approaches, bootstrap spec |
 
 ## Requirements
 
@@ -385,9 +390,11 @@ The Go binary detects the split (password starts with `cashuB` + username is bas
 
 ### FreeRADIUS exec module runs as `freerad` user, not root
 
-FreeRADIUS exec module runs external programs as the `freerad` system user. This caused two issues:
-1. **PATH**: `sudo` and `cdk-cli` weren't in the default PATH. Fixed by using absolute paths (`/usr/bin/sudo`, `/usr/local/bin/cdk-cli`).
-2. **Sudoers**: `freerad` needs passwordless sudo to run `cdk-cli` as `cashu-wallet`. Fixed with `/etc/sudoers.d/freerad-cdk`: `freerad ALL=(cashu-wallet) NOPASSWD: /usr/local/bin/cdk-cli`.
+FreeRADIUS exec module runs external programs as the `freerad` system user. This caused a chain of issues:
+
+1. **NO_NEW_PRIVS**: FreeRADIUS sets the `NO_NEW_PRIVS` flag on exec modules, which blocks `sudo` and `runuser` from switching users. Both failed silently — `sudo` returned exit code 1, `runuser` reported "may not be used by non-root users."
+2. **PATH**: `cdk-cli` wasn't in the default PATH. Fixed by using absolute path `/usr/local/bin/cdk-cli`.
+3. **Group permissions**: Final fix — `freerad` added to `cashu-wallet` group, wallet directory set to mode 775 (group-writable), SQLite files set to mode 664. `cdk-cli` runs directly as `freerad` without privilege escalation.
 
 ### Cleartext-Password vs User-Password in inner tunnel
 
@@ -414,9 +421,12 @@ Inside EAP-TTLS, the PAP password arrives as `Cleartext-Password` (not `User-Pas
 
 6. **Session:** JSON file per MAC in `/opt/tollgate-auth/radius-sessions/`
 7. **Split token detection**: If password starts with `cashuB` but is NOT a complete token (too short), and username is base64url-only, concatenate password+username to reassemble the full 378-byte token
-8. **Reconnection:** Same MAC + active session → accept without payment
+8. **Reconnection:** Same MAC + active session → accept without payment, Session-Timeout set to remaining time (min 1 second)
 9. **Reply-Message:** Binary prints `Reply-Message = "..."` to stdout, FreeRADIUS parses it into Access-Accept
-10. **Session-Timeout:** Set by FreeRADIUS policy (3600s default)
+10. **Session-Timeout:** Derived from payment amount (`amount × 60` seconds), output by Go binary to stdout
+11. **Acct-Interim-Interval:** Set to 60s — NAS sends periodic usage reports for real-time metering
+
+See [docs/radius-payment-models.md](docs/radius-payment-models.md) for the full analysis of RADIUS session lifecycle, accounting (RFC 2866), dynamic authorization/CoA (RFC 5176), operator credit collection, and infrastructure use cases beyond WiFi.
 
 ### Why shell out to cdk-cli
 
@@ -432,7 +442,7 @@ tollgate-auth is an implementation of the **tollgate bootstrap token** spec — 
 2. **Upgrade**: Once online, peer opens a Spilman channel for sustained micropayment
 3. **Streaming**: Channel enables per-second payment, no token size constraints
 
-Our current implementation is **bootstrap-only** — single token, fixed session duration, no in-session top-up. The natural upgrade path: **RADIUS for bootstrap, HTTP for sustained payment**. Once the user has connectivity (via the RADIUS bootstrap token), an HTTP API or captive portal handles Spilman channel setup. RADIUS then handles only session management (MAC authorization). The 253-byte RADIUS attribute limit becomes irrelevant. See [docs/radius-token-size.md](docs/radius-token-size.md) for the full analysis.
+Our current implementation is **bootstrap-only** — single token, fixed session duration, no in-session top-up. The natural upgrade path: **RADIUS for bootstrap, HTTP for sustained payment**. Once the user has connectivity (via the RADIUS bootstrap token), an HTTP API or captive portal handles Spilman channel setup. RADIUS then handles only session management (MAC authorization). The 253-byte RADIUS attribute limit becomes irrelevant. Mid-session top-up uses RADIUS CoA (Change of Authorization, [RFC 5176](https://datatracker.ietf.org/doc/html/rfc5176)) to extend `Session-Timeout` without disconnecting the user. See [docs/radius-token-size.md](docs/radius-token-size.md) for the full analysis and [docs/radius-payment-models.md](docs/radius-payment-models.md) for session lifecycle, accounting, and top-up flows.
 
 ### Lightning HTLC preimage as RADIUS credential (L402-over-RADIUS)
 

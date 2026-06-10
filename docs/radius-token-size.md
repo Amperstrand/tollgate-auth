@@ -367,6 +367,7 @@ This is the natural architecture: **RADIUS for bootstrap, HTTP for sustained pay
 ## See Also
 
 - [RFC 2865 Section 5.2](https://datatracker.ietf.org/doc/html/rfc2865#section-5.2) — User-Password attribute (max 253 bytes)
+- [RFC 2865 Section 5.27](https://datatracker.ietf.org/doc/html/rfc2865#section-5.27) — Session-Timeout attribute
 - [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md) — Cashu token encoding (V3/V4)
 - [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) — DLEQ proofs (optional, client-side verification)
 - [Tollgate Bootstrap Token Spec](https://github.com/OpenTollGate/tollgate-rs/blob/master/docs/design/core/tollgate-bootstrap.md) — Cashu ecash bootstrap mechanism for connectivity
@@ -378,4 +379,5 @@ This is the natural architecture: **RADIUS for bootstrap, HTTP for sustained pay
 - [OpenTollGate/tollgate](https://github.com/OpenTollGate/tollgate) — Captive portal approach with OpenNDS + BTCPayServer
 - [Ark Protocol](https://ark-protocol.org/) — Bitcoin scaling with Virtual Transaction Outputs
 - [Bark wallet](https://gitlab.com/ark-bitcoin/bark) — Ark on Bitcoin (Rust, by Second)
+- [radius-payment-models.md](radius-payment-models.md) — Session management, accounting, operator credit collection, and infrastructure use cases
 - [radius-testing.md](radius-testing.md) — Full testing guide with eapol_test examples

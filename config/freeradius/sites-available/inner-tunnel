@@ -27,9 +27,6 @@ server inner-tunnel {
             (Cleartext-Password =~ /^LNURLW/)) {
             cashu-auth
             if (ok) {
-                update reply {
-                    Session-Timeout := 3600
-                }
                 update control {
                     Auth-Type := Accept
                 }

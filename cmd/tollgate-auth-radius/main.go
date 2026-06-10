@@ -231,6 +231,12 @@ func replyMessage(format string, args ...interface{}) {
 	fmt.Printf("Reply-Message = \"%s\"\n", msg)
 }
 
+// radiusAttr outputs a RADIUS attribute to stdout as an integer pair.
+// FreeRADIUS exec module with output_pairs = reply parses these into Access-Accept.
+func radiusAttr(name string, value int) {
+	fmt.Printf("%s = %d\n", name, value)
+}
+
 // isTestMint checks if a mint URL matches the allowed test mint pattern.
 func isTestMint(mintURL string) bool {
 	return testMintPattern.MatchString(mintURL)
@@ -281,6 +287,8 @@ func main() {
 			log.Printf("Reconnection: MAC=%s session active (%dm remaining), accepting", mac, int(remaining.Minutes()))
 			replyMessage("Session resumed: %dm remaining (type=%s, amount=%d sat)",
 				int(remaining.Minutes()), rec.PayType, rec.Amount)
+			radiusAttr("Session-Timeout", max(1, int(remaining.Seconds())))
+			radiusAttr("Acct-Interim-Interval", 60)
 			os.Exit(0)
 		}
 		log.Printf("Reconnection: MAC=%s session expired, removing", mac)
@@ -318,6 +326,12 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 	thash := cashu.TokenHash(cred.Value)
 	seconds := tokenData.Amount * RateSecPerSat
 	minutes := seconds / 60
+
+	if tokenData.Amount <= 0 {
+		log.Printf("Reject: zero or negative amount (%d) in token", tokenData.Amount)
+		replyMessage("Rejected: token has zero value")
+		os.Exit(1)
+	}
 
 	// Replay check
 	if replay.IsSpent(thash) {
@@ -374,6 +388,8 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 
 	replyMessage("Valid Cashu token: %d sat = %dm access from %s",
 		tokenData.Amount, minutes, tokenData.Mint)
+	radiusAttr("Session-Timeout", seconds)
+	radiusAttr("Acct-Interim-Interval", 60)
 	os.Exit(0)
 }
 
@@ -422,6 +438,8 @@ func handleLNURLw(cred PaymentCredential, mac string, sessions *SessionStore, re
 	}
 
 	replyMessage("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60)
+	radiusAttr("Session-Timeout", LNURLWDefaultSec)
+	radiusAttr("Acct-Interim-Interval", 60)
 	os.Exit(0)
 }
 
