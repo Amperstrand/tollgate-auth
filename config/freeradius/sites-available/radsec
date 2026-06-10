@@ -1,0 +1,52 @@
+# /etc/freeradius/3.0/sites-available/radsec
+# RadSec (RADIUS over TLS) — RFC 6614
+# Encrypts the entire RADIUS conversation between NAS and server.
+# Uses Let's Encrypt cert for nodns.shop (valid, trusted by most clients).
+# Runs alongside UDP 1812 (plain RADIUS with shared secret).
+
+server radsec {
+	listen {
+		type = auth
+		ipaddr = *
+		port = 2083
+		proto = tcp
+
+		tls {
+			private_key_file = ${certdir}/radsec/server.key
+			certificate_file = ${certdir}/radsec/server.crt
+			ca_file = ${certdir}/radsec/server.crt
+			dh_file = ${certdir}/dh
+			fragment_size = 1024
+		}
+	}
+
+	authorize {
+		eap {
+			ok = return
+		}
+		cashu-payment
+		files
+		-realm
+		-sql
+		-ldap
+		expiration
+		logintime
+		pap
+	}
+
+	authenticate {
+		Auth-Type PAP {
+			pap
+		}
+		Auth-Type MS-CHAP {
+			mschap
+		}
+		eap
+	}
+
+	session {
+	}
+
+	post-auth {
+	}
+}

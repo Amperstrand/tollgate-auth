@@ -1,12 +1,13 @@
 # tollgate-auth — Live Demo & Testing Guide
 
-**Live instance**: `nodns.shop:1812` (RADIUS) + `nodns.shop:2222` (SSH)
-**Shared secret**: `tollgate`
+**Live instance**: `nodns.shop:1812` (RADIUS UDP) + `nodns.shop:2083` (RadSec TLS) + `nodns.shop:2222` (SSH)
+**Shared secret**: `tollgate` (UDP 1812) / `radsec` (TCP 2083)
 **CI status**: [![E2E Demo](https://github.com/Amperstrand/tollgate-auth/actions/workflows/e2e-demo.yml/badge.svg)](https://github.com/Amperstrand/tollgate-auth/actions/workflows/e2e-demo.yml)
 
 ## What's live
 
-- **RADIUS** (WiFi auth): FreeRADIUS 3 on `nodns.shop:1812/1813`
+- **RADIUS** (WiFi auth): FreeRADIUS 3 on `nodns.shop:1812/1813` (UDP, shared secret)
+- **RadSec** (encrypted RADIUS): FreeRADIUS 3 on `nodns.shop:2083` (TCP/TLS, Let's Encrypt cert)
 - **SSH** (shell access): tollgate-auth-ssh on `nodns.shop:2222`
 - **Accepted payment methods**:
   - **Cashu tokens** (`cashuA...` / `cashuB...`) — full decode → verify → redeem
@@ -118,14 +119,71 @@ NAS-Port = 0' | radclient -x nodns.shop auth tollgate
 
 ---
 
+## RadSec (RADIUS over TLS, TCP port 2083)
+
+The server also accepts RadSec connections — RADIUS over TLS with a valid Let's Encrypt certificate for `nodns.shop`. This encrypts the entire RADIUS conversation (including the Cashu token), unlike plain RADIUS where the shared secret only obfuscates the password.
+
+**Why RadSec matters:**
+- Plain RADIUS (UDP 1812): password is MD5-obfuscated with shared secret — weak if secret is public
+- EAP-TTLS+PAP: token is inside TLS tunnel between client and FreeRADIUS — already encrypted
+- **RadSec**: encrypts the NAS → FreeRADIUS hop — protects everything, including non-EAP requests
+
+Most enterprise NAS devices support RadSec (Cisco, Aruba, Juniper, MikroTik RouterOS 7+).
+
+### Test RadSec with socat + radclient
+
+FreeRADIUS 3.x `radclient` doesn't support TLS natively. Use `socat` as a TLS tunnel:
+
+```bash
+sudo apt install socat freeradius-utils
+
+# Create local TLS tunnel to RadSec port
+socat TCP-LISTEN:11812,reuseaddr,fork SSL:nodns.shop:2083,verify=0 &
+SOCAT_PID=$!
+sleep 1
+
+# Test through the tunnel (secret = radsec for RadSec)
+echo 'User-Name = "lnurlw1radsectest111kx2ar0veekzar0wd5xjtnrdakj7z"
+User-Password = "anything"
+NAS-IP-Address = 10.0.0.1
+Calling-Station-Id = "aa-00-11-22-33-44"
+NAS-Port = 0' | radclient -x -P tcp -r 1 -t 5 127.0.0.1:11812 auth radsec
+
+# → Access-Accept with Reply-Message and Session-Timeout
+
+kill $SOCAT_PID
+```
+
+### RadSec with real NAS devices
+
+**Cisco (IOS-XE):**
+```
+radius server tollgate-radsec
+ address ipv4 <server-ip> auth-port 2083 acct-port 2083
+ key radsec
+ transport tls
+```
+
+**Aruba (AOS-CX):**
+```
+radius-server host <server-ip> key radsec tls
+```
+
+**MikroTik (RouterOS 7.x+):**
+```
+/radius add address=<server-ip> secret=radsec service=login transport=tls
+```
+
+---
+
 ## Full E2E test with eapol_test
 
 `eapol_test` simulates a real WiFi supplicant performing WPA2-Enterprise auth.
-This is the closest you can get to testing with a real phone.
+This is the closest you can get to testing with a real phone, and the **only way** to test Cashu tokens over RADIUS — tokens are 378 bytes and exceed the 253-byte RADIUS attribute limit. EAP-TTLS+PAP sends the password inside a TLS tunnel where there's no length limit. See [radius-token-size.md](radius-token-size.md) for details.
 
-### EAP-TTLS+PAP (recommended)
+### EAP-TTLS+PAP (recommended — Cashu tokens work here)
 
-Token goes in the **password** field. No length limit.
+Token goes in the **password** field. No length limit inside TLS tunnel.
 
 ```bash
 sudo apt install wpasupplicant
@@ -133,38 +191,39 @@ sudo apt install wpasupplicant
 cat > /tmp/eapol-ttls-pap.conf << 'EOF'
 network={
     ssid="Cashu-WiFi"
-    key_mgmt=WPA-EAP
+    key_mgmt=IEEE8021X
     eap=TTLS
     identity="tollgate"
     password="cashuB...paste-your-token-here..."
     phase2="auth=PAP"
-    ca_cert=""
-    altsubject_match="DNS:radius.nodns.shop"
+    anonymous_identity="anonymous"
 }
 EOF
 
-sudo eapol_test -c /tmp/eapol-ttls-pap.conf -a nodns.shop -p 1812 -s tollgate
-# Success: "RADIUS: Received RADIUS message: Access-Accept"
+sudo eapol_test -c /tmp/eapol-ttls-pap.conf -a nodns.shop -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
+# Success: "Access-Accept"
 ```
 
-### PEAP+MSCHAPv2 (legacy)
+> **Note**: `key_mgmt=IEEE8021X` (not `WPA-EAP`) for direct RADIUS testing. No `ca_cert` needed — the server uses a self-signed cert and verification is skipped. The `-M` flag sets the MAC address for session tracking.
 
-Token goes in the **username** field. Limited to <253 bytes.
+### PEAP+MSCHAPv2 (legacy — Cashu tokens do NOT work here)
+
+Token goes in the **username** field. RADIUS User-Name is limited to 253 bytes — **Cashu tokens (378 bytes) cannot be sent this way.** Only LNURLw codes or other short credentials work with PEAP.
 
 ```bash
 cat > /tmp/eapol-peap.conf << 'EOF'
 network={
     ssid="Cashu-WiFi"
-    key_mgmt=WPA-EAP
+    key_mgmt=IEEE8021X
     eap=PEAP
-    identity="cashuB...short-token..."
+    identity="lnurlw...short-code..."
     password="anything"
     phase2="autheap=MSCHAPV2"
-    ca_cert=""
+    anonymous_identity="anonymous"
 }
 EOF
 
-sudo eapol_test -c /tmp/eapol-peap.conf -a nodns.shop -p 1812 -s tollgate
+sudo eapol_test -c /tmp/eapol-peap.conf -a nodns.shop -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
 ```
 
 ---
@@ -241,6 +300,216 @@ Pass-through accept for proof of concept. TODO:
 4. Wait for settlement → determine amount → set session duration
 
 Currently: any `lnurlw...` string gets 1 hour access, replay-protected by hash.
+
+---
+
+## Beyond WiFi: RADIUS Use Cases
+
+RADIUS isn't just for WiFi. Any device that speaks RADIUS can use tollgate-auth to accept ecash payments for access. The same FreeRADIUS + tollgate-auth-radius setup works for all of these simultaneously.
+
+### VPN authentication (OpenVPN)
+
+OpenVPN can authenticate users against RADIUS via the `openvpn-plugin-auth-pam` + PAM RADIUS module, or natively with the `plugin /usr/lib/openvpn/radiusplugin.so` plugin.
+
+**User experience:** User pastes a Cashu token as their VPN password in the OpenVPN client. If valid, they get VPN access for N minutes.
+
+```bash
+# OpenVPN server config — add to /etc/openvpn/server.conf
+plugin /usr/lib/openvpn/radiusplugin.so /etc/openvpn/radiusplugin.cnf
+
+# /etc/openvpn/radiusplugin.cnf
+Service-Type=5
+NAS-IP-Address=10.0.0.1
+OpenVPNConfig=/etc/openvpn/server.conf
+override.1=true
+nonstrictaccounting.1=true
+server.1=127.0.0.1          # FreeRADIUS on localhost (same machine)
+acctport.1=1813
+authport.1=1812
+secret.1=tollgate           # shared secret from clients.conf
+```
+
+Or via PAM (simpler, works everywhere):
+
+```bash
+# Install PAM RADIUS module
+apt install libpam-radius-auth
+
+# /etc/pam.d/openvpn
+auth    sufficient  pam_radius_auth.so
+account sufficient  pam_permit.so
+
+# /etc/pam_radius_auth.conf (or /etc/security/pam_radius_auth.conf)
+127.0.0.1 tollgate 3
+```
+
+### VPN authentication (WireGuard)
+
+WireGuard doesn't natively speak RADIUS, but there are two approaches:
+
+1. **wg-easy + RADIUS** — Use [wg-easy](https://github.com/wg-easy/wg-easy) or a WireGuard management platform that supports RADIUS auth
+2. **Script-based** — WireGuard `PostUp` script calls radclient to validate a token before adding the peer
+
+**Proof of concept — script-based:**
+
+```bash
+#!/bin/bash
+# /usr/local/bin/wg-tollgate-auth.sh
+# Called by WireGuard PostUp with peer public key
+# User sends token out-of-band (e.g., via HTTP API)
+
+TOKEN="$1"
+RESULT=$(echo "User-Name = \"$TOKEN\"
+User-Password = \"anything\"
+NAS-IP-Address = 10.0.0.1
+Calling-Station-Id = \"wg-${PEER_PUBLIC_KEY:0:12}\"
+NAS-Port = 0" | radclient -r 1 -t 2 127.0.0.1 auth tollgate 2>&1)
+
+if echo "$RESULT" | grep -q "Access-Accept"; then
+    # Add peer to WireGuard
+    wg set wg0 peer "$PEER_PUBLIC_KEY" allowed-ips 10.0.0.x/32
+    echo "Accepted"
+else
+    echo "Rejected"
+fi
+```
+
+### VPN authentication (IPsec / StrongSwan)
+
+StrongSwan has native RADIUS support via the `eap-radius` plugin.
+
+```bash
+# /etc/strongswan.d/charon/eap-radius.conf
+eap-radius {
+    load = yes
+    servers {
+        tollgate {
+            address = 127.0.0.1
+            secret = tollgate
+            auth_port = 1812
+            acct_port = 1813
+        }
+    }
+}
+
+# /etc/swanctl/swanctl.conf — connection profile
+connections {
+    tollgate-vpn {
+        remote {
+            auth = eap-md5   # or eap-ttls
+            eap_id = %any
+        }
+    }
+}
+```
+
+### Wired 802.1X (switch port authentication)
+
+Enterprise switches enforce authentication before enabling a port. Any device plugging in must authenticate via RADIUS. The switch sends an Access-Request when it detects link-up.
+
+**User experience:** Plug in Ethernet → OS prompts for credentials → paste Cashu token as password → port enables for N minutes.
+
+**Cisco (IOS):**
+
+```
+! Global RADIUS config
+radius server tollgate
+ address ipv4 10.0.0.1 auth-port 1812 acct-port 1813
+ key tollgate
+
+! AAA config
+aaa new-model
+aaa authentication dot1x default group radius
+aaa authorization network default group radius
+
+! Switch port config
+interface GigabitEthernet1/0/1
+ switchport mode access
+ authentication port-control auto
+ dot1x pae authenticator
+```
+
+**HP/Aruba (AOS-CX):**
+
+```
+radius-server host 10.0.0.1 key tollgate
+aaa authentication dot1x default group radius
+interface 1/1/1
+ dot1x-port-control auto
+```
+
+**MikroTik (RouterOS):**
+
+```
+/radius add address=10.0.0.1 secret=tollgate service=login
+/interface ethernet set ether3 poe-out=enabled
+# Or use dot1x server (RouterOS 7.x+)
+/interface dot1x server add name=tollgate interface=ether3 auth-types=mac-based
+```
+
+### Captive portal (hotspot / café / hotel)
+
+Captive portals intercept HTTP traffic and show a login page. The form submits credentials to a RADIUS backend. This is the most user-friendly option — no WPA2-Enterprise, no EAP, just a web page.
+
+**User experience:** Connect to open WiFi → browser redirects to portal → paste Cashu token in the form → get internet access.
+
+**MikroTik hotspot + RADIUS:**
+
+```
+/radius add address=10.0.0.1 secret=tollgate service=hotspot
+/ip hotspot profile set default use-radius=yes
+/ip hotspot setup
+  hotspot interface: wlan1
+  local address: 192.168.1.1
+  address pool: 192.168.1.2-192.168.1.254
+  DNS servers: 8.8.8.8
+  DNS name: wifi.example.com
+```
+
+The user sees a login page and enters the Cashu token as their password. MikroTik sends a RADIUS Access-Request with the form fields.
+
+**OpenWRT (with nodogsplash or CoovaChilli):**
+
+```bash
+# Install CoovaChilli
+opkg install coova-chilli
+
+# /etc/chilli/config
+HS_RAD_PROTO=radius
+HS_RADIUS=10.0.0.1
+HS_RADIUS2=10.0.0.1
+HS_RADSECRET=tollgate
+HS_UAMFORMAT=http://wifi.example.com/login
+```
+
+**pfSense captive portal:**
+
+1. Services → Captive Portal → Enable
+2. Authentication → RADIUS server: `127.0.0.1:1812`, secret `tollgate`
+3. Users paste Cashu token in the portal login form
+
+### eduroam (academic / research networks)
+
+[eduroam](https://eduroam.org/) is a federated RADIUS infrastructure used by universities worldwide (100M+ users). It uses WPA2-Enterprise with RADIUS proxying between institutions.
+
+**How tollgate-auth fits:** An institution configures FreeRADIUS to route `@cashu` realm users to tollgate-auth-radius instead of their normal identity store. Students from other universities get normal eduroam auth; Cashu users get token-based access.
+
+```
+# FreeRADIUS proxy.conf — add a realm for cashu users
+realm cashu {
+    authpool = local_auth    # route to local server
+}
+```
+
+This allows guests at conferences, visiting researchers, or public campus WiFi to pay for access with ecash instead of requiring institutional credentials.
+
+### PPPoE / ISP
+
+PPPoE concentrators (BRAS/NAS) authenticate subscribers via RADIUS. An ISP could accept Cashu tokens instead of (or in addition to) traditional username/password.
+
+**User experience:** PPPoE client (router or OS) sends the Cashu token as the password. Valid token → IP address assigned → internet access.
+
+This is primarily relevant for prepaid ISP models common in developing markets.
 
 ---
 

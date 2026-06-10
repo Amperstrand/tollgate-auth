@@ -84,16 +84,97 @@ systemctl restart freeradius
 sleep 2
 systemctl status freeradius --no-pager | tail -5
 
+# --- RadSec (RADIUS over TLS on TCP 2083) ---
+echo ""
+echo ">>> Setting up RadSec (RADIUS over TLS)..."
+
+RADSEC_CERT_DIR="$CONF_DIR/certs/radsec"
+mkdir -p "$RADSEC_CERT_DIR"
+
+# Check for existing Let's Encrypt cert (from Caddy or certbot)
+CADDY_LE="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/nodns.shop"
+CERTBOT_LE="/etc/letsencrypt/live/nodns.shop"
+LE_SRC=""
+
+if [ -f "$CADDY_LE/nodns.shop.crt" ] && [ -f "$CADDY_LE/nodns.shop.key" ]; then
+    LE_SRC="$CADDY_LE"
+    echo ">>> Found Caddy Let's Encrypt cert for nodns.shop"
+elif [ -f "$CERTBOT_LE/fullchain.pem" ] && [ -f "$CERTBOT_LE/privkey.pem" ]; then
+    LE_SRC="$CERTBOT_LE"
+    echo ">>> Found certbot Let's Encrypt cert for nodns.shop"
+fi
+
+if [ -n "$LE_SRC" ]; then
+    cp "$LE_SRC/nodns.shop.crt" "$RADSEC_CERT_DIR/server.crt" 2>/dev/null || \
+    cp "$LE_SRC/fullchain.pem" "$RADSEC_CERT_DIR/server.crt" 2>/dev/null
+
+    cp "$LE_SRC/nodns.shop.key" "$RADSEC_CERT_DIR/server.key" 2>/dev/null || \
+    cp "$LE_SRC/privkey.pem" "$RADSEC_CERT_DIR/server.key" 2>/dev/null
+
+    chown -R root:freerad "$RADSEC_CERT_DIR"
+    chmod 640 "$RADSEC_CERT_DIR/server.key"
+    chmod 644 "$RADSEC_CERT_DIR/server.crt"
+
+    # Install RadSec site config
+    if [ -f "$SCRIPT_DIR/../config/freeradius/sites-available/radsec" ]; then
+        cp "$SCRIPT_DIR/../config/freeradius/sites-available/radsec" "$CONF_DIR/sites-available/radsec"
+        ln -sf ../sites-available/radsec "$CONF_DIR/sites-enabled/radsec"
+    fi
+
+    # Install RadSec clients.conf
+    if [ -f "$SCRIPT_DIR/../config/freeradius/clients.conf" ]; then
+        cp "$SCRIPT_DIR/../config/freeradius/clients.conf" "$CONF_DIR/clients.conf"
+    fi
+
+    # Cert renewal hook — copy fresh cert from Caddy and reload FreeRADIUS
+    mkdir -p /etc/caddy/cert-hooks
+    cat > /etc/caddy/cert-hooks/reload-freeradius.sh << 'HOOK'
+#!/bin/bash
+# Copy fresh Let's Encrypt cert to FreeRADIUS RadSec and reload
+RADSEC_DIR="/etc/freeradius/3.0/certs/radsec"
+CADDY_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/nodns.shop"
+
+if [ -d "$CADDY_DIR" ]; then
+    cp "$CADDY_DIR/nodns.shop.crt" "$RADSEC_DIR/server.crt"
+    cp "$CADDY_DIR/nodns.shop.key" "$RADSEC_DIR/server.key"
+    chown root:freerad "$RADSEC_DIR/server.key" "$RADSEC_DIR/server.crt"
+    chmod 640 "$RADSEC_DIR/server.key"
+    chmod 644 "$RADSEC_DIR/server.crt"
+    systemctl reload freeradius
+fi
+HOOK
+    chmod +x /etc/caddy/cert-hooks/reload-freeradius.sh
+
+    # Test config and restart
+    if freeradius -XC 2>/dev/null; then
+        systemctl restart freeradius
+        sleep 2
+        echo ">>> RadSec enabled on TCP port 2083 (TLS)"
+    else
+        echo "WARN: RadSec config validation failed, skipping"
+        rm -f "$CONF_DIR/sites-enabled/radsec"
+        systemctl restart freeradius
+    fi
+else
+    echo ">>> No Let's Encrypt cert found — RadSec not configured"
+    echo ">>> To enable RadSec later:"
+    echo ">>>   1. Get a cert: certbot certonly --standalone -d nodns.shop"
+    echo ">>>   2. Re-run this script"
+fi
+
 echo ""
 echo ">>> FreeRADIUS configured for radius.nodns.shop"
-echo ">>> Listen ports: 1812 (auth), 1813 (accounting)"
+echo ">>> Listen ports: 1812 (auth UDP), 1813 (acct UDP), 2083 (RadSec TCP/TLS)"
 echo ">>> EAP methods:"
 echo ">>>   EAP-TTLS+PAP    (recommended — token in password field, no length limit)"
 echo ">>>   PEAP+MSCHAPv2   (legacy — token in username field, <253 bytes)"
+echo ">>> RadSec: TCP 2083 with Let's Encrypt cert (encrypts entire RADIUS conversation)"
 echo ">>> Validation: /usr/local/bin/tollgate-auth-radius"
 echo ""
 echo ">>> Test with radtest:"
 echo ">>>   radtest cashuB... <any-password> localhost 0 tollgate"
 echo ">>>   radtest <any-user> cashuB... localhost 0 tollgate"
+echo ">>> Test RadSec:"
+echo ">>>   radtest -t tls cashuB... <any-password> nodns.shop 2083 radsec"
 echo ">>> Test with eapol_test:"
 echo ">>>   eapol_test -c /etc/tollgate/eapol-ttls-pap.conf -a 127.0.0.1 -s tollgate"

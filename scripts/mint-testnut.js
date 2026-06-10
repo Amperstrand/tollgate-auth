@@ -4,7 +4,7 @@
 // Outputs: a single line with the encoded token (cashuA... or cashuB...)
 
 const MINT_URL = 'https://testnut.cashu.exchange';
-const AMOUNT = 8;
+const AMOUNT = parseInt(process.argv[2] || '8', 10);
 
 async function main() {
   // Dynamic import for ESM

@@ -40,8 +40,17 @@ deploy-radius-config:
 	scp -P $(REMOTE_PORT) config/freeradius/users $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-config/files/authorize
 	scp -P $(REMOTE_PORT) config/freeradius/clients.conf $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/clients.conf
 	scp -P $(REMOTE_PORT) config/freeradius/sites-available/inner-tunnel $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/inner-tunnel
+	scp -P $(REMOTE_PORT) config/freeradius/sites-available/radsec $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/radsec
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
-		'freeradius -XC && systemctl restart freeradius'
+		'ln -sf ../sites-available/radsec /etc/freeradius/3.0/sites-enabled/radsec 2>/dev/null; \
+		 mkdir -p /etc/freeradius/3.0/certs/radsec && \
+		 CADDY_LE="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/nodns.shop" && \
+		 cp $$CADDY_LE/nodns.shop.crt /etc/freeradius/3.0/certs/radsec/server.crt && \
+		 cp $$CADDY_LE/nodns.shop.key /etc/freeradius/3.0/certs/radsec/server.key && \
+		 chown -R root:freerad /etc/freeradius/3.0/certs/radsec && \
+		 chmod 640 /etc/freeradius/3.0/certs/radsec/server.key && \
+		 chmod 644 /etc/freeradius/3.0/certs/radsec/server.crt && \
+		 freeradius -XC && systemctl restart freeradius'
 
 deploy-jail:
 	scp -P $(REMOTE_PORT) scripts/setup-jail.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/setup-jail.sh

@@ -13,6 +13,10 @@ Two components, one repo:
 
 Both accept Cashu ecash tokens (`cashuA...`/`cashuB...`) and LNURL-withdraw codes (`lnurlw...`) as payment. Tokens from [testnut.cashu.space](https://testnut.cashu.space) only (test mint, zero monetary value).
 
+**Two transport modes:**
+- **UDP 1812** — plain RADIUS with shared secret `tollgate` (standard, all devices)
+- **TCP 2083** — RadSec (RADIUS over TLS) with valid Let's Encrypt cert (encrypted, enterprise-grade)
+
 > **Status:** Not currently running a public instance. The code works — you can spin it up on a fresh VPS in about 10 minutes using the install guide below. See [Deploy to your own server](#deploy-to-your-own-server).
 
 ## tollgate-auth-ssh — Ecash for SSH
@@ -70,14 +74,15 @@ Received Access-Accept
 
 ### RADIUS features
 
+- **Dual transport**: UDP 1812 (shared secret `tollgate`) + TCP 2083/RadSec (TLS with Let's Encrypt cert)
 - **Dual EAP**: EAP-TTLS+PAP (token in password, no length limit) + PEAP+MSCHAPv2 (token in username, <253 bytes)
 - **Payment from either field**: username or password — whichever has the `cashu`/`lnurlw` prefix
 - **Reply-Message**: Decoded payment info in Access-Accept (amount, duration, mint)
 - **Session tracking**: MAC-based reconnection — active sessions skip payment check
 - **Replay protection**: SHA256 hash of used tokens/codes
-- **Mint allowlist**: Only test mints accepted (regex `(?i)test`)
+- **Mint allowlist**: Only test mints accepted (regex `(?i)test` in hostname). Test tokens are validated and redeemed (NUT-03 swap). Non-test mints are rejected before any network call.
 
-See [docs/radius-testing.md](docs/radius-testing.md) for the full testing guide with real AP, phone, and CI examples.
+See [docs/radius-testing.md](docs/radius-testing.md) for the full testing guide with real AP, phone, and CI examples, plus config examples for VPN, wired 802.1X, and captive portals.
 
 ## Quick Start
 
@@ -104,24 +109,68 @@ See [Install](#install) for the full setup guide.
 ## Architecture
 
 ```
-                    tollgate-auth
+                              tollgate-auth
                     ┌─────────────────────────────────────────┐
                     │                                         │
   SSH client ──────► tollgate-auth-ssh (Go, port 2222)       │
   (cashu token      │  Decode → Verify → Redeem → Chroot     │
    as username)     │  Jail → Timer → Cleanup                 │
                     │                                         │
-  WiFi client ─────► AP ──► FreeRADIUS (port 1812)            │
+                    │         FreeRADIUS (port 1812)          │
+  WiFi client ─────► AP ─┐          │                        │
+  VPN user ────────► VPN concentrator │                       │
+  Laptop plug-in ──► Network switch  │                        │
+  Café guest ──────► Captive portal ─┘                        │
   (cashu token              │                                 │
    as password)             ▼                                 │
                     │  tollgate-auth-radius (Go binary)       │
-                    │  Decode → Verify → Redeem → Session     │
+                    │  Decode → Verify → Redeem → Accept      │
                     │                                         │
                     │  Shared: internal/cashu/                │
                     │  Token decode, mint verify, replay      │
                     │  guard, wallet redemption (cdk-cli)     │
                     └─────────────────────────────────────────┘
 ```
+
+## The Bigger Picture: Bitcoin for Any RADIUS Infrastructure
+
+RADIUS is the backbone of network authentication worldwide. Every time you connect to corporate WiFi, log into a VPN, or plug into an enterprise network — RADIUS is what checks your credentials. FreeRADIUS alone authenticates [~100 million people daily](https://freeradius.org/).
+
+tollgate-auth replaces "username + password" with "ecash token." Any device that speaks RADIUS can accept Bitcoin payments for access:
+
+| Use Case | What speaks RADIUS | User experience | Token goes in |
+|---|---|---|---|
+| **WiFi (WPA2-Enterprise)** | Access point (UniFi, OpenWRT, MikroTik, Cisco, Aruba) | Phone prompts for credentials on connect | Password field (EAP-TTLS+PAP) |
+| **VPN** | OpenVPN, WireGuard+plugin, IPsec/StrongSwan, pfSense | User pastes token in VPN client | Username or password field |
+| **Wired networks (802.1X)** | Network switch (Cisco, HP/Aruba, Huawei) | OS prompts when plugging in Ethernet | Username or password field |
+| **Captive portals** | Hotspot controller (MikroTik, OpenWRT, CoovaChilli) | Web page asks for credentials | Web form → RADIUS backend |
+| **eduroam / academic** | Federated RADIUS (100M+ users globally) | Student pastes token at any participating institution | Password field |
+| **PPPoE / ISP** | NAS / broadband concentrator | User pastes token in PPPoE client | Username or password field |
+
+### Why this matters
+
+Any operator of a RADIUS infrastructure — ISP, hotel, café, university, co-working space, conference venue — can drop in tollgate-auth and start accepting Bitcoin payments for network access. No payment processor, no merchant account, no KYC. Just ecash tokens.
+
+The Cashu token does triple duty:
+
+- **Authentication** — valid ecash proves the user paid
+- **Authorization** — token amount determines access duration (1 sat = 1 minute)
+- **Accounting** — the token itself is the payment, redeemed to the operator's wallet
+
+### Payment model
+
+| Mint hostname contains "test" | Full pipeline: verify + redeem to wallet |
+|---|---|
+| **Validate only** | Mint `checkstate` confirms unspent, but token is NOT redeemed — user keeps their ecash |
+| **Validate + redeem** | Full NUT-03 swap: operator gets new tokens, user's originals are invalidated |
+
+Currently configured for test mints only (`(?i)test` in hostname). To accept real-value tokens, change the mint allowlist regex and remove the test-only constraint.
+
+> **Demo mode:** LNURL-withdraw codes (`lnurlw...`) are accepted without claiming the underlying Lightning payment. They grant 1 hour of access, replay-protected by hash. This keeps the demo frictionless.
+
+### Configuration examples for non-WiFi use cases
+
+See [docs/radius-testing.md](docs/radius-testing.md) for practical config examples covering VPN (OpenVPN, WireGuard), wired 802.1X switch authentication, and captive portal setup.
 
 ## Components
 
@@ -130,7 +179,7 @@ See [Install](#install) for the full setup guide.
 | `cmd/tollgate-auth-ssh/main.go` | SSH server — token decode, guest management, chroot jail, PTY shell |
 | `cmd/tollgate-auth-radius/main.go` | RADIUS validator — called by FreeRADIUS exec module |
 | `internal/cashu/` | Shared Cashu library — V3/V4 decode, mint verify, replay guard, wallet |
-| `config/freeradius/` | FreeRADIUS configs — exec module, EAP, inner-tunnel, clients |
+| `config/freeradius/` | FreeRADIUS configs — exec module, EAP, inner-tunnel, clients, RadSec (TLS) |
 | `scripts/` | Setup scripts — FreeRADIUS, jail, e2e tests |
 | `docs/index.html` | Faucet — static page that mints free test tokens |
 | `docs/radius-testing.md` | Live demo guide with copy-paste examples |
@@ -274,15 +323,22 @@ sudo cat /var/lib/cashu-wallet/seed > ~/cashu-wallet-seed-backup.txt
 
 ## CI
 
-The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `main`. It:
+The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `main`. All tests are strict — a single failure stops the pipeline.
 
 1. Compiles both binaries (`go vet` + cross-compile)
-2. Tests RADIUS against the live server using `radclient` with fake MAC addresses:
+2. Tests against the live server:
    - Fresh `lnurlw` → Accept + Reply-Message
    - Same code again → Reject (replay protection)
    - Same MAC, different code → Accept (session reconnection)
+   - `lnurlw` in password field → Accept
+   - Uppercase `LNURLW` → Accept
    - Invalid credentials → Reject
+   - **Cashu token via EAP-TTLS+PAP** (8 sats, minted fresh in CI, sent through TLS tunnel) → Access-Accept
+   - **Cashu token replay** (same token, different MAC) → Access-Reject
+   - **RadSec** (TLS on port 2083) → Accept via encrypted transport
 3. Checks SSH tollgate responds with SSH banner on port 2222
+
+Cashu tokens are 378 bytes (fixed) and exceed RADIUS's 253-byte attribute limit, so Cashu tests use `eapol_test` which sends the token inside an EAP-TTLS+PAP TLS tunnel — the same path a real WiFi client would use. See [docs/radius-token-size.md](docs/radius-token-size.md) for details.
 
 ## Security Disclaimer
 
