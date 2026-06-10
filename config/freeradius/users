@@ -2,8 +2,9 @@
 # Route Cashu token usernames to exec validation.
 # All other users are rejected.
 
-# Match any username starting with "cashuA" or "cashuB" (Cashu token prefix)
-DEFAULT User-Name =~ "^cashu[AB]"
+# Match Cashu token usernames (cashuA or cashuB prefix)
+# FreeRADIUS 3 uses /regex/ syntax (not "regex")
+DEFAULT User-Name =~ /^cashu[AB]/
     Auth-Type := Accept,
     Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius %{User-Name} %{Calling-Station-Id}"
 
