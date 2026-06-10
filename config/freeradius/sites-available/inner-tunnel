@@ -10,9 +10,6 @@
 
 server inner-tunnel {
     authorize {
-        # Check if username OR password contains a payment credential
-        # Cashu: cashuA or cashuB prefix
-        # LNURLw: lnurlw or LNURLW prefix (bech32 is all same case)
         if ((User-Name =~ /^cashu[AB]/) || \
             (User-Password =~ /^cashu[AB]/) || \
             (User-Name =~ /^lnurlw/) || \
@@ -24,14 +21,17 @@ server inner-tunnel {
                 update reply {
                     Session-Timeout := 3600
                 }
+                update control {
+                    Auth-Type := Accept
+                }
+            }
+            else {
+                reject
             }
         }
         else {
             reject
         }
-
-        # Fall through to PAP for TTLS inner auth
-        pap
     }
 
     authenticate {
