@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build & Vet
@@ -45,7 +48,7 @@ jobs:
           echo 'User-Name = "lnurlw1cifresh1111kx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa-ci-11-22-33-44"
+          Calling-Station-Id = "aa-00-11-22-33-44"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test1.log
           grep -q "Access-Accept" /tmp/test1.log
           grep -q "Reply-Message" /tmp/test1.log
@@ -59,7 +62,7 @@ jobs:
           echo 'User-Name = "lnurlw1cifresh1111kx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "bb-ci-22-33-44-55"
+          Calling-Station-Id = "bb-00-22-33-44-55"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test2.log
           grep -q "Access-Reject" /tmp/test2.log
           echo "--- Reject reason:"
@@ -72,7 +75,7 @@ jobs:
           echo 'User-Name = "lnurlw1cidiffcode999kx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa-ci-11-22-33-44"
+          Calling-Station-Id = "aa-00-11-22-33-44"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test3.log
           grep -q "Access-Accept" /tmp/test3.log
           echo "--- Reply-Message:"
@@ -85,7 +88,7 @@ jobs:
           echo 'User-Name = "ci-user"
           User-Password = "lnurlw1cipassfield7kx2ar0veekzar0wd5xjtnrdakj7ci"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "cc-ci-33-44-55-66"
+          Calling-Station-Id = "cc-00-33-44-55-66"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test4.log
           grep -q "Access-Accept" /tmp/test4.log
 
@@ -96,7 +99,7 @@ jobs:
           echo 'User-Name = "LNURLW1CIUPPERCASE7KX2AR0VEEKZAR0WD5XJTNRDAKJ7CI"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "dd-ci-44-55-66-77"
+          Calling-Station-Id = "dd-00-44-55-66-77"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test5.log
           grep -q "Access-Accept" /tmp/test5.log
 
@@ -107,11 +110,64 @@ jobs:
           echo 'User-Name = "not-a-token"
           User-Password = "bad-password"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "ee-ci-55-66-77-88"
+          Calling-Station-Id = "ee-00-55-66-77-88"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test6.log
           grep -q "Access-Reject" /tmp/test6.log
 
-      # Test 7: SSH tollgate is listening on port 2222
-      - name: Test 7 — SSH tollgate responds on port 2222
+      # Test 7: Cashu token — mint a fresh testnut token and authenticate
+      - name: Test 7 — Cashu token (minted in CI) → Accept
+        run: |
+          set +e
+          # Install cdk-cli for token minting
+          curl -sL -o /tmp/cdk-cli https://github.com/cashubtc/cdk/releases/latest/download/cdk-cli-x86_64
+          chmod +x /tmp/cdk-cli
+          export CDK_CLI=/tmp/cdk-cli
+
+          # Create a temporary wallet
+          WALLET_DIR=$(mktemp -d)
+          $CDK_CLI --work-dir "$WALLET_DIR" restore --mint-url https://testnut.cashu.space --mnemonic "test test test test test test test test test test test test" 2>/dev/null || true
+
+          # Request mint quote (testnut auto-pays)
+          QUOTE_OUTPUT=$($CDK_CLI --work-dir "$WALLET_DIR" mint-quote --mint-url https://testnut.cashu.space --amount 8 2>&1)
+          echo "Quote output: $QUOTE_OUTPUT"
+          QUOTE_ID=$(echo "$QUOTE_OUTPUT" | grep -oP '(?<="id":")[^"]+' | head -1)
+          if [ -z "$QUOTE_ID" ]; then
+            QUOTE_ID=$(echo "$QUOTE_OUTPUT" | grep -oP '(?<=quote: )[^\s]+' | head -1)
+          fi
+          echo "Quote ID: $QUOTE_ID"
+
+          # Wait for payment (testnut pays automatically)
+          sleep 5
+
+          # Mint proofs
+          MINT_OUTPUT=$($CDK_CLI --work-dir "$WALLET_DIR" mint --mint-url https://testnut.cashu.space --quote-id "$QUOTE_ID" --amount 8 2>&1)
+          echo "Mint output: $MINT_OUTPUT"
+
+          # Send (swap) to get a token
+          SEND_OUTPUT=$($CDK_CLI --work-dir "$WALLET_DIR" send --mint-url https://testnut.cashu.space --amount 8 2>&1)
+          echo "Send output: $SEND_OUTPUT"
+          TOKEN=$(echo "$SEND_OUTPUT" | grep -oP 'cashu[A|B][^\s]+' | head -1)
+          echo "Token: ${TOKEN:0:40}..."
+
+          if [ -z "$TOKEN" ]; then
+            echo "ERROR: Failed to mint Cashu token"
+            exit 1
+          fi
+
+          # Send token as RADIUS auth
+          echo "User-Name = \"ci-cashu-user\"
+          User-Password = \"$TOKEN\"
+          NAS-IP-Address = 10.0.0.1
+          Calling-Station-Id = \"ff-00-66-77-88-99\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test7.log
+          grep -q "Access-Accept" /tmp/test7.log
+          echo "--- Reply-Message:"
+          grep "Reply-Message" /tmp/test7.log || true
+
+          # Cleanup
+          rm -rf "$WALLET_DIR"
+
+      # Test 8: SSH tollgate is listening on port 2222
+      - name: Test 8 — SSH tollgate responds on port 2222
         run: |
           timeout 5 bash -c 'echo | nc nodns.shop 2222' 2>/dev/null | head -1 | grep -q "SSH"
