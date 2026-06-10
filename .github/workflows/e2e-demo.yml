@@ -279,7 +279,7 @@ jobs:
           echo 'User-Name = "lnurlw1citimeouttest7kx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "tt-00-timeout-01"
+          Calling-Station-Id = "aa:bb:cc:dd:ee:13"
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test13.log
           grep -q "Access-Accept" /tmp/test13.log || { echo "FAIL: Expected Access-Accept"; exit 1; }
           # Extract Session-Timeout value
@@ -335,7 +335,7 @@ jobs:
           echo 'Acct-Status-Type = Start
           User-Name = "ci-acct-user"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "cc-acct-test-01"
+          Calling-Station-Id = "aa:bb:cc:dd:ee:15"
           Acct-Session-Id = "ci-session-001"
           NAS-Port = 0' | radclient -x nodns.shop acct tollgate 2>&1 | tee /tmp/acct-start.log
           grep -q "Accounting-Response" /tmp/acct-start.log || { echo "FAIL: No Accounting-Response for Start"; exit 1; }
@@ -345,7 +345,7 @@ jobs:
           echo 'Acct-Status-Type = Stop
           User-Name = "ci-acct-user"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "cc-acct-test-01"
+          Calling-Station-Id = "aa:bb:cc:dd:ee:15"
           Acct-Session-Id = "ci-session-001"
           Acct-Session-Time = 300
           Acct-Input-Octets = 1024
@@ -363,13 +363,13 @@ jobs:
           echo 'User-Name = "lnurlw1ciconcurrent1akx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "px-00-conc-01"
+          Calling-Station-Id = "aa:bb:cc:dd:ee:16"
           NAS-Port = 0' | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc1.log 2>&1 &
 
           echo 'User-Name = "lnurlw1ciconcurrent2bkx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "px-00-conc-02"
+          Calling-Station-Id = "aa:bb:cc:dd:ee:17"
           NAS-Port = 0' | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc2.log 2>&1 &
 
           wait
