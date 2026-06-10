@@ -293,22 +293,31 @@ SSH Client ──login──► Linux Server ──PAM──► pam_radius ─�
 apt install libpam-radius-auth
 
 # Configure RADIUS server
-echo "tollgate-server secret 3" >> /etc/pam_radius_auth.conf
+echo "127.0.0.1 tollgate 3" >> /etc/pam_radius_auth.conf
 
-# Enable for SSH
-echo "auth sufficient pam_radius_auth.so" >> /etc/pam.d/sshd
+# Enable for SSH (add before @include common-auth)
+sed -i '1i auth sufficient pam_radius_auth.so' /etc/pam.d/sshd
 ```
 
-**How it works with ecash**:
-1. User pastes Cashu token as SSH username (same as tollgate-auth-ssh)
-2. SSH server sends PAM auth request
-3. PAM sends RADIUS Access-Request with token as username
-4. tollgate-auth validates and redeems token
-5. Access-Accept with `Session-Timeout` → PAM grants access
+**Critical limitation — 128-byte PAP password limit**: RADIUS `User-Password` is limited to 128 bytes by the protocol. Cashu tokens are 230 bytes (no-DLEQ) and cannot fit through plain PAP. Only `lnurlw` codes (~60 bytes) work. Cashu tokens require EAP-TTLS+PAP (tunneled inside TLS), which WiFi clients use but PAM/OpenVPN do not.
 
-**Advantage over current tollgate-auth-ssh**: No need for a custom SSH server. Any Linux system with PAM can accept ecash tokens. The session management (timeout, cleanup) stays in the RADIUS backend.
+| Credential | Size | PAM-RADIUS | WiFi (EAP-TTLS) |
+|---|---|---|---|
+| `lnurlw` code | ~60 bytes | ✅ Fits | ✅ Fits |
+| Cashu no-DLEQ | 230 bytes | ❌ Truncated at 128 | ✅ Fits (no 253-byte limit inside TLS) |
+| Cashu with DLEQ | 378 bytes | ❌ Truncated at 128 | ✅ Split across two fields |
 
-**Limitation**: PAM-RADIUS doesn't handle per-session resource management (chroot, CPU limits). The current tollgate-auth-ssh does more than just auth — it creates ephemeral users with restricted environments.
+**PAM-RADIUS vs tollgate-auth-ssh comparison**:
+
+| Feature | tollgate-auth-ssh | PAM-RADIUS |
+|---|---|---|
+| Cashu token auth | ✅ Full 230-byte tokens | ❌ Only lnurlw (128-byte limit) |
+| User creation | ✅ Ephemeral guest accounts | ❌ User must exist in /etc/passwd |
+| Chroot jail | ✅ Busybox chroot | ❌ Needs separate PAM modules |
+| Session timeout | ✅ Goroutine timer | ❌ PAM doesn't enforce Session-Timeout |
+| Cleanup on disconnect | ✅ Account deleted | ❌ Manual cleanup needed |
+
+**Verdict**: PAM-RADIUS is not a viable replacement for tollgate-auth-ssh. It can only authenticate `lnurlw` codes, cannot create restricted users, and cannot enforce timeouts. The custom SSH server approach is strictly superior for ecash-based SSH access.
 
 ### 5G / Cellular Core (Diameter Credit Control)
 

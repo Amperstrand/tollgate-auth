@@ -330,38 +330,111 @@ RADIUS isn't just for WiFi. Any device that speaks RADIUS can use tollgate-auth 
 
 ### VPN authentication (OpenVPN)
 
-OpenVPN can authenticate users against RADIUS via the `openvpn-plugin-auth-pam` + PAM RADIUS module, or natively with the `plugin /usr/lib/openvpn/radiusplugin.so` plugin.
+OpenVPN can authenticate users against RADIUS via `openvpn-plugin-auth-pam` + PAM RADIUS module.
 
-**User experience:** User pastes a Cashu token as their VPN password in the OpenVPN client. If valid, they get VPN access for N minutes.
+**User experience:** User pastes a `lnurlw` code as their VPN username (any password) in the OpenVPN client. If valid, they get VPN access for 1 hour.
 
-```bash
-# OpenVPN server config — add to /etc/openvpn/server.conf
-plugin /usr/lib/openvpn/radiusplugin.so /etc/openvpn/radiusplugin.cnf
+> **Important:** Cashu tokens (230 bytes) exceed the RADIUS PAP `User-Password` limit of 128 bytes. Only `lnurlw` codes (~60 bytes) work through the direct PAM path. For Cashu tokens, use EAP-TTLS+PAP (WiFi) which tunnels inside TLS and bypasses this limit.
 
-# /etc/openvpn/radiusplugin.cnf
-Service-Type=5
-NAS-IP-Address=10.0.0.1
-OpenVPNConfig=/etc/openvpn/server.conf
-override.1=true
-nonstrictaccounting.1=true
-server.1=127.0.0.1          # FreeRADIUS on localhost (same machine)
-acctport.1=1813
-authport.1=1812
-secret.1=tollgate           # shared secret from clients.conf
-```
+**Tested and working** on `nodns.shop` (Debian 12, OpenVPN 2.6.19, FreeRADIUS 3.2.5).
 
-Or via PAM (simpler, works everywhere):
+**Setup:**
 
 ```bash
-# Install PAM RADIUS module
-apt install libpam-radius-auth
+# 1. Install packages
+apt install -y openvpn easy-rsa libpam-radius-auth
 
-# /etc/pam.d/openvpn
+# 2. Generate PKI
+mkdir -p /etc/openvpn/easy-rsa && cd /etc/openvpn/easy-rsa
+cp -r /usr/share/easy-rsa/* .
+./easyrsa init-pki
+EASYRSA_BATCH=1 ./easyrsa build-ca nopass
+EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass
+EASYRSA_BATCH=1 ./easyrsa gen-dh
+openvpn --genkey secret /etc/openvpn/ta.key
+
+# 3. Configure PAM RADIUS
+cat > /etc/pam_radius_auth.conf << 'EOF'
+127.0.0.1 tollgate 3
+EOF
+chmod 600 /etc/pam_radius_auth.conf
+
+cat > /etc/pam.d/openvpn << 'EOF'
 auth    sufficient  pam_radius_auth.so
 account sufficient  pam_permit.so
+EOF
 
-# /etc/pam_radius_auth.conf (or /etc/security/pam_radius_auth.conf)
-127.0.0.1 tollgate 3
+# 4. OpenVPN server config
+cat > /etc/openvpn/server.conf << 'EOF'
+port 1194
+proto udp
+dev tun
+ca /etc/openvpn/easy-rsa/pki/ca.crt
+cert /etc/openvpn/easy-rsa/pki/issued/server.crt
+key /etc/openvpn/easy-rsa/pki/private/server.key
+dh /etc/openvpn/easy-rsa/pki/dh.pem
+tls-auth /etc/openvpn/ta.key 0
+server 10.9.0.0 255.255.255.0
+keepalive 10 120
+cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+persist-key
+persist-tun
+status /etc/openvpn/openvpn-status.log
+verb 3
+explicit-exit-notify 1
+
+# PAM auth → RADIUS → tollgate-auth-radius
+plugin /usr/lib/openvpn/openvpn-plugin-auth-pam.so openvpn
+
+verify-client-cert none
+username-as-common-name
+EOF
+
+# 5. NAT for VPN clients
+iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o eth0 -j MASQUERADE
+
+# 6. Start
+openvpn --config /etc/openvpn/server.conf --daemon
+```
+
+**Client config** (download from server at `/etc/openvpn/client-tollgate.ovpn`):
+
+```
+client
+dev tun
+proto udp
+remote YOUR_SERVER_IP 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+auth-user-pass
+verb 3
+
+<ca>
+(paste CA cert from /etc/openvpn/easy-rsa/pki/ca.crt)
+</ca>
+
+<tls-crypt>
+(paste TA key from /etc/openvpn/ta.key)
+</tls-crypt>
+```
+
+**Connect:** Paste `lnurlw` code as username, anything as password.
+
+**FreeRADIUS client config** — must disable BlastRADIUS checks for PAM clients:
+
+```
+client all_clients {
+    ipaddr = 0.0.0.0/0
+    secret = tollgate
+    require_message_authenticator = no
+    limit_proxy_state = no
+}
 ```
 
 ### VPN authentication (WireGuard)

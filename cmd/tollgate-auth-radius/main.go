@@ -25,7 +25,7 @@ const (
 )
 
 // macPattern validates Calling-Station-Id: hex digits, colons, dashes, or empty.
-var macPattern = regexp.MustCompile(`^[0-9a-fA-F:\-]*$`)
+var macPattern = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 
 // testMintPattern matches mint URLs that are allowed for token redemption.
 // Only mints with "test" in the URL (case-insensitive) are accepted.
@@ -276,6 +276,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Fall back to username as session identifier when no MAC is provided
+	// (e.g. OpenVPN/PAM-RADIUS clients don't send Calling-Station-Id)
+	sessionID := mac
+	if sessionID == "" {
+		sessionID = "user:" + username
+		log.Printf("Info: no Calling-Station-Id, using username-based session: %q", safeLog(truncate(sessionID, 64)))
+	}
+
 	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
 	os.MkdirAll(sessions.Dir, 0700)
 
@@ -283,18 +291,18 @@ func main() {
 	os.MkdirAll(BaseDir, 0755)
 
 	// --- Check for existing active session (reconnection) ---
-	if rec, found := sessions.Get(mac); found {
+	if rec, found := sessions.Get(sessionID); found {
 		if sessions.IsActive(rec) {
 			remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
-			log.Printf("Reconnection: MAC=%s session active (%dm remaining), accepting", mac, int(remaining.Minutes()))
+			log.Printf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes()))
 			replyMessage("Session resumed: %dm remaining (type=%s, amount=%d sat)",
 				int(remaining.Minutes()), rec.PayType, rec.Amount)
 			radiusAttr("Session-Timeout", max(1, int(remaining.Seconds())))
 			radiusAttr("Acct-Interim-Interval", 60)
 			os.Exit(0)
 		}
-		log.Printf("Reconnection: MAC=%s session expired, removing", mac)
-		sessions.Remove(mac)
+		log.Printf("Reconnection: session=%s expired, removing", sessionID)
+		sessions.Remove(sessionID)
 	}
 
 	// --- Extract payment credential from username or password ---
@@ -308,20 +316,18 @@ func main() {
 	// --- Route by payment type ---
 	switch cred.Type {
 	case PaymentCashu:
-		handleCashu(cred, mac, sessions, replay)
+		handleCashu(cred, sessionID, sessions, replay)
 	case PaymentLNURLW:
-		handleLNURLw(cred, mac, sessions, replay)
+		handleLNURLw(cred, sessionID, sessions, replay)
 	}
 }
 
-// handleCashu validates a Cashu token: decode → verify → redeem → session.
-// Only redeems tokens from test mints (matching testMintPattern regex).
-func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, replay *cashu.ReplayGuard) {
+func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard) {
 	tokenData, err := cashu.DecodeToken(cred.Value)
 	if err != nil {
 		log.Printf("Reject: cashu decode failed (%s): %v", cred.Source, err)
 		replyMessage("Rejected: invalid Cashu token format")
-		cashu.LogToken(cred.Value, &cashu.TokenData{}, "radius-"+mac, false, TokensLogFile)
+		cashu.LogToken(cred.Value, &cashu.TokenData{}, "radius-"+sessionID, false, TokensLogFile)
 		os.Exit(1)
 	}
 
@@ -346,7 +352,7 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 	if !isTestMint(tokenData.Mint) {
 		log.Printf("Reject: non-test mint (%s) — only test mints are accepted", tokenData.Mint)
 		replyMessage("Rejected: mint '%s' is not a testnet mint — only test mints accepted", tokenData.Mint)
-		cashu.LogToken(cred.Value, tokenData, "radius-"+mac, false, TokensLogFile)
+		cashu.LogToken(cred.Value, tokenData, "radius-"+sessionID, false, TokensLogFile)
 		os.Exit(1)
 	}
 
@@ -354,24 +360,24 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 	if !ok {
 		log.Printf("Reject: cashu mint verification failed (%s): %s", cred.Source, msg)
 		replyMessage("Rejected: mint verification failed — %s", msg)
-		cashu.LogTokenWithError(cred.Value, tokenData, "radius-"+mac, false, "verify: "+msg, TokensLogFile)
+		cashu.LogTokenWithError(cred.Value, tokenData, "radius-"+sessionID, false, "verify: "+msg, TokensLogFile)
 		os.Exit(1)
 	}
 
 	if err := cashu.RedeemToken(cred.Value, WalletDir); err != nil {
 		log.Printf("Reject: cashu redemption failed (%s): %v", cred.Source, err)
 		replyMessage("Rejected: token redemption failed")
-		cashu.LogTokenWithError(cred.Value, tokenData, "radius-"+mac, false, "redeem: "+err.Error(), TokensLogFile)
+		cashu.LogTokenWithError(cred.Value, tokenData, "radius-"+sessionID, false, "redeem: "+err.Error(), TokensLogFile)
 		os.Exit(1)
 	}
 
 	// Mark spent & log
 	replay.MarkSpent(thash)
-	cashu.LogToken(cred.Value, tokenData, "radius-"+mac, true, TokensLogFile)
+	cashu.LogToken(cred.Value, tokenData, "radius-"+sessionID, true, TokensLogFile)
 
 	// Save session
 	rec := &SessionRecord{
-		MAC:      mac,
+		MAC:      sessionID,
 		Token:    thash,
 		Guest:    "radius-" + thash[:8],
 		Mint:     tokenData.Mint,
@@ -385,8 +391,8 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 		log.Printf("Warning: failed to save session record: %v", err)
 	}
 
-	log.Printf("Accept: MAC=%s type=cashu amount=%d sat duration=%ds mint=%s source=%s",
-		mac, tokenData.Amount, seconds, tokenData.Mint, cred.Source)
+	log.Printf("Accept: session=%s type=cashu amount=%d sat duration=%ds mint=%s source=%s",
+		sessionID, tokenData.Amount, seconds, tokenData.Mint, cred.Source)
 
 	replyMessage("Valid Cashu token: %d sat = %dm access from %s",
 		tokenData.Amount, minutes, tokenData.Mint)
@@ -396,17 +402,7 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 }
 
 // handleLNURLw processes an LNURL-withdraw code.
-//
-// TODO: Implement actual LNURL-w claiming:
-//   1. Decode bech32 (HRP=lnurlw) → get callback URL
-//   2. GET callback URL → receive {callback, k1, maxWithdrawable, ...}
-//   3. Generate a Lightning invoice for maxWithdrawable (or a fixed amount)
-//   4. GET callback?k1=...&pr=<bolt11_invoice> → claim the payment
-//   5. Wait for invoice settlement → determine amount → set session duration
-//
-// For now: pass-through accept with default duration (technology demo / PoC).
-func handleLNURLw(cred PaymentCredential, mac string, sessions *SessionStore, replay *cashu.ReplayGuard) {
-	// Basic replay protection using hash of the lnurlw string
+func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard) {
 	thash := cashu.TokenHash(cred.Value)
 
 	if replay.IsSpent(thash) {
@@ -420,16 +416,15 @@ func handleLNURLw(cred PaymentCredential, mac string, sessions *SessionStore, re
 	// This is a technology demonstration — not production.
 
 	replay.MarkSpent(thash)
-	log.Printf("Accept (TODO): MAC=%s type=lnurlw hash=%s source=%s lnurlw=%s — pass-through accept, no payment claimed",
-		mac, thash[:16], cred.Source, safeLog(truncate(cred.Value, 80)))
+	log.Printf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s lnurlw=%s — pass-through accept, no payment claimed",
+		sessionID, thash[:16], cred.Source, safeLog(truncate(cred.Value, 80)))
 
-	// Save session with default duration
 	rec := &SessionRecord{
-		MAC:      mac,
+		MAC:      sessionID,
 		Token:    thash,
 		Guest:    "radius-lnurlw-" + thash[:8],
 		Mint:     "lnurlw-pending",
-		Amount:   LNURLWDefaultSec / RateSecPerSat, // implied sats
+		Amount:   LNURLWDefaultSec / RateSecPerSat,
 		Started:  time.Now(),
 		Duration: LNURLWDefaultSec,
 		Source:   cred.Source,
