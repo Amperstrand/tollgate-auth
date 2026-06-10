@@ -40,6 +40,7 @@ func (r *ReplayGuard) MarkSpent(thash string) {
 	}
 	defer f.Close()
 	f.WriteString(thash + "\n")
+	f.Sync()
 }
 
 // LogToken appends a token attempt to the JSONL log file.
