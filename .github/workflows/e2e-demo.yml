@@ -319,15 +319,14 @@ jobs:
           fi
           echo "Minted 4-sat token (${#TOKEN} bytes)"
 
-          node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol14.conf
+          echo "User-Name = \"ci-cashu-user\"
+          User-Password = \"$TOKEN\"
+          NAS-IP-Address = 10.0.0.1
+          Calling-Station-Id = \"aa:bb:14:$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test14.log
 
-          MAC14=$(printf 'aa:%02x:%02x:%02x:%02x:%02x' $((RUNID % 256)) $((RUNID / 256 % 256)) $((RUNID / 65536 % 256)) $((RUNID / 16777216 % 256)) $((RUNID / 4294967296 % 256)))
-          echo "Using MAC: $MAC14"
-          eapol_test -c /tmp/eapol14.conf -a "$RADIUS_IP" -s tollgate \
-            -M "$MAC14" -r 1 -t 30 2>&1 | tee /tmp/eapol14.log
-
-          grep -q "Access-Accept" /tmp/eapol14.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/eapol14.log; exit 1; }
-          ST=$(grep "Session-Timeout" /tmp/eapol14.log | grep -oE '[0-9]+' | head -1)
+          grep -q "Access-Accept" /tmp/test14.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/test14.log; exit 1; }
+          ST=$(grep "Session-Timeout" /tmp/test14.log | grep -oE '[0-9]+' | head -1)
           if [ -z "$ST" ]; then
             echo "FAIL: No Session-Timeout in response"
             exit 1
