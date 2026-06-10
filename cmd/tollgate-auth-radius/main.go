@@ -186,7 +186,9 @@ func extractPayment(username, password, clearTextPw string) (PaymentCredential, 
 	// Split token: password is the first tokenSplitLen bytes of a 378-byte DLEQ token.
 	// Only triggers when password starts with cashuB AND is exactly tokenSplitLen bytes
 	// (the length our mint script produces) AND username is base64url-only.
-	if isCashuToken(password) && len(password) <= tokenSplitLen &&
+	// MUST use == not <= to prevent false splits on shorter no-DLEQ tokens
+	// whose password happens to be <= tokenSplitLen with a base64url-looking username.
+	if isCashuToken(password) && len(password) == tokenSplitLen &&
 		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) &&
 		sanitizeInput(password) && sanitizeInput(username) {
 		fullToken := password + username
@@ -194,7 +196,7 @@ func extractPayment(username, password, clearTextPw string) (PaymentCredential, 
 			return PaymentCredential{Value: fullToken, Source: "split-password+username", Type: PaymentCashu}, true
 		}
 	}
-	if isCashuToken(clearTextPw) && len(clearTextPw) <= tokenSplitLen &&
+	if isCashuToken(clearTextPw) && len(clearTextPw) == tokenSplitLen &&
 		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) &&
 		sanitizeInput(clearTextPw) && sanitizeInput(username) {
 		fullToken := clearTextPw + username
