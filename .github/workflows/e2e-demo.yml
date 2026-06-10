@@ -47,14 +47,21 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq freeradius-utils socat
 
+      - name: Generate unique test suffix
+        run: |
+          echo "RUNID=${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo "Test suffix: $GITHUB_RUN_ID"
+
       # ─── Test 1: Fresh lnurlw → Accept + Reply-Message ───
       - name: Test 1 — Fresh lnurlw → Accept with Reply-Message
         run: |
-          echo 'User-Name = "lnurlw1cifresh1111kx2ar0veekzar0wd5xjtnrdakj7ci"
-          User-Password = "anything"
+          CODE="lnurlw1cifresh${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo "Using code: ${CODE:0:30}..."
+          echo "User-Name = \"$CODE\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa-00-11-22-33-44"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test1.log
+          Calling-Station-Id = \"aa-00-11-22-$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test1.log
           grep -q "Access-Accept" /tmp/test1.log || { echo "FAIL: Expected Access-Accept"; exit 1; }
           grep -q "Reply-Message" /tmp/test1.log || { echo "FAIL: Expected Reply-Message"; exit 1; }
           echo "Reply-Message: $(grep Reply-Message /tmp/test1.log)"
@@ -62,51 +69,55 @@ jobs:
       # ─── Test 2: Replay same code with different MAC → Reject ───
       - name: Test 2 — Replay same code (different MAC) → Reject
         run: |
-          echo 'User-Name = "lnurlw1cifresh1111kx2ar0veekzar0wd5xjtnrdakj7ci"
-          User-Password = "anything"
+          CODE="lnurlw1cifresh${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo "User-Name = \"$CODE\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "bb-00-22-33-44-55"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test2.log
+          Calling-Station-Id = \"bb-00-22-33-$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test2.log
           grep -q "Access-Reject" /tmp/test2.log || { echo "FAIL: Expected Access-Reject for replay"; exit 1; }
 
       # ─── Test 3: Same MAC, different code → Accept (session reconnection) ───
       - name: Test 3 — Same MAC, different code → Accept (reconnection)
         run: |
-          echo 'User-Name = "lnurlw1cidiffcode999kx2ar0veekzar0wd5xjtnrdakj7ci"
-          User-Password = "anything"
+          CODE="lnurlw1cidiffcode${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo "User-Name = \"$CODE\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa-00-11-22-33-44"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test3.log
+          Calling-Station-Id = \"aa-00-11-22-$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test3.log
           grep -q "Access-Accept" /tmp/test3.log || { echo "FAIL: Expected Access-Accept for reconnection"; exit 1; }
 
       # ─── Test 4: lnurlw in password field → Accept ───
       - name: Test 4 — lnurlw in password field → Accept
         run: |
-          echo 'User-Name = "ci-user"
-          User-Password = "lnurlw1cipassfield7kx2ar0veekzar0wd5xjtnrdakj7ci"
+          CODE="lnurlw1cipassfield${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo "User-Name = \"ci-user\"
+          User-Password = \"$CODE\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "cc-00-33-44-55-66"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test4.log
+          Calling-Station-Id = \"cc-00-33-44-$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test4.log
           grep -q "Access-Accept" /tmp/test4.log || { echo "FAIL: Expected Access-Accept for lnurlw in password"; exit 1; }
 
       # ─── Test 5: Uppercase LNURLW → Accept ───
       - name: Test 5 — Uppercase LNURLW → Accept
         run: |
-          echo 'User-Name = "LNURLW1CIUPPERCASE7KX2AR0VEEKZAR0WD5XJTNRDAKJ7CI"
-          User-Password = "anything"
+          CODE="LNURLW1CIUPPERCASE${RUNID}KX2AR0VEEKZAR0WD5XJTNRDAKJ7CI"
+          echo "User-Name = \"$CODE\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "dd-00-44-55-66-77"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test5.log
+          Calling-Station-Id = \"dd-00-44-55-$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test5.log
           grep -q "Access-Accept" /tmp/test5.log || { echo "FAIL: Expected Access-Accept for uppercase LNURLW"; exit 1; }
 
       # ─── Test 6: Invalid credentials → Reject ───
       - name: Test 6 — Invalid credentials → Reject
         run: |
-          echo 'User-Name = "not-a-token"
-          User-Password = "bad-password"
+          echo "User-Name = \"not-a-token\"
+          User-Password = \"bad-password\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "ee-00-55-66-77-88"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test6.log
+          Calling-Station-Id = \"ee-00-55-66-$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test6.log
           grep -q "Access-Reject" /tmp/test6.log || { echo "FAIL: Expected Access-Reject for invalid creds"; exit 1; }
 
       - name: Cache eapol_test binary
@@ -254,10 +265,10 @@ jobs:
           SOCAT_PID=$!
           sleep 1
 
-          echo 'User-Name = "lnurlw1ciradsectest7kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo 'User-Name = "lnurlw1ciradsectest'"$RUNID"'kx2ar0veekzar0wd5xjtnrdakj7ci"
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "ff-44-66-77-88-99"
+          Calling-Station-Id = "ff-44-66-77-'"$RUNID"'"
           NAS-Port = 0' | radclient -x -P tcp -r 1 -t 5 127.0.0.1:11812 auth radsec 2>&1 | tee /tmp/test11.log
 
           kill $SOCAT_PID 2>/dev/null
@@ -276,42 +287,42 @@ jobs:
       # Uses a fresh lnurlw (3600s default) and checks the returned value.
       - name: Test 13 — Session-Timeout accuracy
         run: |
-          echo 'User-Name = "lnurlw1citimeouttest7kx2ar0veekzar0wd5xjtnrdakj7ci"
-          User-Password = "anything"
+          CODE="lnurlw1citimeouttest${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo "User-Name = \"$CODE\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:cc:dd:ee:13"
-          NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test13.log
+          Calling-Station-Id = \"aa:bb:13:$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test13.log
           grep -q "Access-Accept" /tmp/test13.log || { echo "FAIL: Expected Access-Accept"; exit 1; }
-          # Extract Session-Timeout value
           ST=$(grep "Session-Timeout" /tmp/test13.log | grep -oE '[0-9]+' | head -1)
           if [ -z "$ST" ]; then
             echo "FAIL: No Session-Timeout in response"
             exit 1
           fi
           echo "Session-Timeout = $ST"
-          # LNURLW default is 3600s
           if [ "$ST" -ne 3600 ]; then
             echo "FAIL: Expected Session-Timeout=3600 (LNURLW default), got $ST"
             exit 1
           fi
           echo "SUCCESS: Session-Timeout is correct ($ST)"
 
-      # ─── Test 14: Session-Timeout for Cashu token scales with amount ───
-      # Mints a 5-sat token → expects Session-Timeout = 5 × 60 = 300.
+      # ─── Test 14: Cashu token Session-Timeout scales with amount ───
+      # Uses 4 sat (power of 2 = single proof = clean bootstrap token).
+      # Expects Session-Timeout = 4 × 60 = 240.
       - name: Test 14 — Cashu token Session-Timeout scales with amount
         run: |
-          TOKEN=$(node scripts/mint-testnut.js --no-dleq 5 2>/tmp/mint14.log)
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq 4 2>/tmp/mint14.log)
           if [ -z "$TOKEN" ]; then
             echo "FAIL: Could not mint Cashu token"
             cat /tmp/mint14.log
             exit 1
           fi
-          echo "Minted 5-sat token (${#TOKEN} bytes)"
+          echo "Minted 4-sat token (${#TOKEN} bytes)"
 
           node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol14.conf
 
           eapol_test -c /tmp/eapol14.conf -a "$RADIUS_IP" -s tollgate \
-            -M ff:14:aa:bb:cc:dd -r 1 -t 30 2>&1 | tee /tmp/eapol14.log
+            -M "ff:14:$RUNID" -r 1 -t 30 2>&1 | tee /tmp/eapol14.log
 
           grep -q "Access-Accept" /tmp/eapol14.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/eapol14.log; exit 1; }
           ST=$(grep "Session-Timeout" /tmp/eapol14.log | grep -oE '[0-9]+' | head -1)
@@ -319,34 +330,30 @@ jobs:
             echo "FAIL: No Session-Timeout in response"
             exit 1
           fi
-          echo "Session-Timeout = $ST (expected 300 for 5 sat)"
-          if [ "$ST" -ne 300 ]; then
-            echo "FAIL: Expected Session-Timeout=300 (5×60), got $ST"
+          echo "Session-Timeout = $ST (expected 240 for 4 sat)"
+          if [ "$ST" -ne 240 ]; then
+            echo "FAIL: Expected Session-Timeout=240 (4×60), got $ST"
             exit 1
           fi
-          echo "SUCCESS: Session-Timeout scales correctly (5 sat → $ST)"
+          echo "SUCCESS: Session-Timeout scales correctly (4 sat → $ST)"
 
       # ─── Test 15: RADIUS accounting (Acct-Start + Acct-Stop) ───
-      # Sends accounting start and stop packets to port 1813.
-      # FreeRADIUS should acknowledge both without error.
       - name: Test 15 — RADIUS accounting (Start + Stop)
         run: |
-          # Acct-Status-Type 1 = Start
           echo 'Acct-Status-Type = Start
           User-Name = "ci-acct-user"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:cc:dd:ee:15"
-          Acct-Session-Id = "ci-session-001"
+          Calling-Station-Id = "aa:bb:15:'"$RUNID"'"
+          Acct-Session-Id = "ci-session-'"$RUNID"'"
           NAS-Port = 0' | radclient -x nodns.shop acct tollgate 2>&1 | tee /tmp/acct-start.log
           grep -q "Accounting-Response" /tmp/acct-start.log || { echo "FAIL: No Accounting-Response for Start"; exit 1; }
           echo "Acct-Start: OK"
 
-          # Acct-Status-Type 2 = Stop
           echo 'Acct-Status-Type = Stop
           User-Name = "ci-acct-user"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:cc:dd:ee:15"
-          Acct-Session-Id = "ci-session-001"
+          Calling-Station-Id = "aa:bb:15:'"$RUNID"'"
+          Acct-Session-Id = "ci-session-'"$RUNID"'"
           Acct-Session-Time = 300
           Acct-Input-Octets = 1024
           Acct-Output-Octets = 2048
@@ -356,21 +363,21 @@ jobs:
           echo "SUCCESS: Accounting Start + Stop both acknowledged"
 
       # ─── Test 16: Concurrent sessions (parallel auth with different MACs) ───
-      # Two independent auth requests in parallel — both must succeed.
       - name: Test 16 — Concurrent sessions (parallel auth)
         run: |
-          # Fire two lnurlw auth requests in parallel with different MACs
-          echo 'User-Name = "lnurlw1ciconcurrent1akx2ar0veekzar0wd5xjtnrdakj7ci"
-          User-Password = "anything"
+          CODE1="lnurlw1ciconc1${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          CODE2="lnurlw1ciconc2${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
+          echo "User-Name = \"$CODE1\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:cc:dd:ee:16"
-          NAS-Port = 0' | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc1.log 2>&1 &
+          Calling-Station-Id = \"aa:bb:16:$RUNID\"
+          NAS-Port = 0" | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc1.log 2>&1 &
 
-          echo 'User-Name = "lnurlw1ciconcurrent2bkx2ar0veekzar0wd5xjtnrdakj7ci"
-          User-Password = "anything"
+          echo "User-Name = \"$CODE2\"
+          User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:cc:dd:ee:17"
-          NAS-Port = 0' | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc2.log 2>&1 &
+          Calling-Station-Id = \"aa:bb:17:$RUNID\"
+          NAS-Port = 0" | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc2.log 2>&1 &
 
           wait
           echo "--- Concurrent session 1 ---"
