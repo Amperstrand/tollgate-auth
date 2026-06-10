@@ -131,9 +131,10 @@ jobs:
           # Create a temporary wallet
           WALLET_DIR=$(mktemp -d)
 
-          # Request mint quote (testnut auto-pays)
-          echo "--- Requesting mint quote from testnut.cashu.space ---"
-          QUOTE_OUTPUT=$(/tmp/cdk-cli --work-dir "$WALLET_DIR" mint-quote --mint-url https://testnut.cashu.space --amount 8 2>&1)
+          # Request mint quote from testnut.cashu.exchange (fake mint, auto-pays)
+          MINT_URL=https://testnut.cashu.exchange
+          echo "--- Requesting mint quote from $MINT_URL ---"
+          QUOTE_OUTPUT=$(/tmp/cdk-cli --work-dir "$WALLET_DIR" mint-quote --mint-url "$MINT_URL" --amount 8 2>&1)
           echo "Quote output: $QUOTE_OUTPUT"
 
           QUOTE_ID=$(echo "$QUOTE_OUTPUT" | grep -oP '(?<="id":")[^"]+' | head -1)
@@ -143,26 +144,26 @@ jobs:
           echo "Quote ID: $QUOTE_ID"
 
           if [ -z "$QUOTE_ID" ]; then
-            echo "WARN: Could not get mint quote from testnut (API may be down), skipping Cashu test"
+            echo "WARN: Could not get mint quote, skipping Cashu test"
             rm -rf "$WALLET_DIR"
             exit 0
           fi
 
-          # Wait for payment (testnut pays automatically)
-          sleep 8
+          # Wait for payment (testnut auto-pays instantly — it's a fake mint)
+          sleep 5
 
           # Mint proofs
-          MINT_OUTPUT=$(/tmp/cdk-cli --work-dir "$WALLET_DIR" mint --mint-url https://testnut.cashu.space --quote-id "$QUOTE_ID" --amount 8 2>&1)
+          MINT_OUTPUT=$(/tmp/cdk-cli --work-dir "$WALLET_DIR" mint --mint-url "$MINT_URL" --quote-id "$QUOTE_ID" --amount 8 2>&1)
           echo "Mint output: $MINT_OUTPUT"
 
           # Send (swap) to get a token
-          SEND_OUTPUT=$(/tmp/cdk-cli --work-dir "$WALLET_DIR" send --mint-url https://testnut.cashu.space --amount 8 2>&1)
+          SEND_OUTPUT=$(/tmp/cdk-cli --work-dir "$WALLET_DIR" send --mint-url "$MINT_URL" --amount 8 2>&1)
           echo "Send output: $SEND_OUTPUT"
           TOKEN=$(echo "$SEND_OUTPUT" | grep -oP 'cashu[A|B][^\s]+' | head -1)
           echo "Token: ${TOKEN:0:40}..."
 
           if [ -z "$TOKEN" ]; then
-            echo "WARN: Failed to mint Cashu token (testnut may be flaky), skipping test"
+            echo "WARN: Failed to mint Cashu token, skipping test"
             rm -rf "$WALLET_DIR"
             exit 0
           fi
