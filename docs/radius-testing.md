@@ -1,90 +1,138 @@
-# tollgate-auth-radius — E2E Testing Guide
+# tollgate-auth — Live Demo & Testing Guide
 
-**Live instance**: `radius.nodns.shop:1812`
+**Live instance**: `radius.nodns.shop:1812` (RADIUS) + `nodns.shop:2222` (SSH)
 **Shared secret**: `tollgate`
-**Tokens**: Testnut only (worthless test tokens from [testnut.cashu.exchange](https://testnut.cashu.exchange))
+**CI status**: [![E2E Demo](https://github.com/Amperstrand/tollgate-ssh/actions/workflows/e2e-demo.yml/badge.svg)](https://github.com/Amperstrand/tollgate-ssh/actions/workflows/e2e-demo.yml)
 
-## What's deployed
+## What's live
 
-- FreeRADIUS 3 on `radius.nodns.shop:1812/1813`
-- PEAP (EAP-TLS tunnel with self-signed cert for `radius.nodns.shop`)
-- Inner auth: Cashu token in `User-Name` field, validated by `tollgate-auth-radius` binary
-- Token validation: decode → verify unspent with mint → redeem to wallet → accept
-- Session tracking: MAC-based reconnection (skip token check for active sessions)
-- Token in `User-Password` (PAP): **not yet supported** — would require plain-text password mode instead of MSCHAPv2 challenge/response (see below)
+- **RADIUS** (WiFi auth): FreeRADIUS 3 on `radius.nodns.shop:1812/1813`
+- **SSH** (shell access): tollgate-auth-ssh on `nodns.shop:2222`
+- **Accepted payment methods**:
+  - **Cashu tokens** (`cashuA...` / `cashuB...`) — full decode → verify → redeem
+  - **LNURL-withdraw** (`lnurlw...` / `LNURLW...`) — pass-through accept (TODO: claim payment)
+- **EAP methods**:
+  - **EAP-TTLS+PAP** (recommended) — payment in password field, no length limit
+  - **PEAP+MSCHAPv2** (legacy) — payment in username field, <253 byte limit
+- Payment accepted from **username OR password** — whichever starts with `cashu` or `lnurlw`
+- Session tracking: MAC-based reconnection (skip payment check for active sessions)
+- Token source: [testnut.cashu.exchange](https://testnut.cashu.exchange) (worthless test tokens)
+
+## Architecture: Bootstrap Token → Sustained Access
+
+The system uses a **bootstrap token** model:
+
+1. **Bootstrap**: Device connects to WiFi with a payment credential (Cashu token or lnurlw) → gets N minutes of network access
+2. **Sustain**: While connected, the device submits further payments to extend the session
+3. **Channel**: Future — Cashu payment channel for continuous micropayment
+
+A small bootstrap token (e.g. 8 sat = 8 minutes) buys enough time to get on the network and set up ongoing payments. LNURL-withdraw codes give 1 hour (default, until actual claiming is implemented).
 
 ---
 
-## Test 1: radtest (basic RADIUS, no EAP)
+## Try it now — copy/paste
 
-The simplest test. Sends a plain Access-Request without the EAP/PEAP tunnel.
-This bypasses the full WiFi auth flow but validates the token validation pipeline.
+These commands work against the live server. Install `freeradius-utils` first:
 
 ```bash
-# Install radtest (part of freeradius-utils)
-sudo apt install freeradius-utils
-
-# Get a test token from the faucet:
-#   https://amperstrand.github.io/tollgate-ssh/
-# Or mint one from testnut.cashu.exchange
-
-# Test with a Cashu token as the username
-radtest "cashuB..." "" radius.nodns.shop 0 tollgate
-#                                    ^port  ^shared-secret
-
-# Expected: Access-Accept if token is valid
-#           Access-Reject if token is invalid/spent
+sudo apt install freeradius-utils   # Debian/Ubuntu
+# or: brew install freeradius       # macOS (Homebrew)
 ```
 
-**What this tests**: Token decode, mint verification, redemption, replay protection.
-**What this does NOT test**: EAP/PEAP, TLS tunnel, WiFi supplicant behavior.
+### lnurlw in username → Accept
+
+```bash
+$ radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7" "anything" radius.nodns.shop 0 tollgate
+
+Sent Access-Request Id 125 from 0.0.0.0:51698 to 127.0.0.1:1812 length 122
+        User-Name = "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7"
+        User-Password = "anything"
+        NAS-IP-Address = 127.0.0.1
+        NAS-Port = 0
+Received Access-Accept Id 125 from 127.0.0.1:1812 to 127.0.0.1:51698 length 44
+        Session-Timeout = 3600
+```
+
+### lnurlw in password → Accept
+
+```bash
+$ radtest "wifi-user" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7" radius.nodns.shop 0 tollgate
+
+Received Access-Accept
+        Session-Timeout = 3600
+```
+
+### Uppercase LNURLW → Accept
+
+```bash
+$ radtest "LNURLW1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7" "anything" radius.nodns.shop 0 tollgate
+
+Received Access-Accept
+        Session-Timeout = 3600
+```
+
+### Invalid credentials → Reject
+
+```bash
+$ radtest "not-a-token" "bad-password" radius.nodns.shop 0 tollgate
+
+Received Access-Reject
+```
 
 ---
 
-## Test 2: eapol_test (full PEAP flow)
+## Full E2E test with eapol_test
 
-`eapol_test` simulates a real WiFi supplicant performing WPA2-Enterprise auth
-with the full EAP-PEAP handshake. This is the closest you can get to testing
-with a real phone without having a real access point.
+`eapol_test` simulates a real WiFi supplicant performing WPA2-Enterprise auth.
+This is the closest you can get to testing with a real phone.
+
+### EAP-TTLS+PAP (recommended)
+
+Token goes in the **password** field. No length limit.
 
 ```bash
-# Install wpa_supplicant (includes eapol_test)
 sudo apt install wpasupplicant
 
-# Create a test config file
-cat > /tmp/eapol-test.conf << 'EOF'
+cat > /tmp/eapol-ttls-pap.conf << 'EOF'
 network={
-    ssid="test-radius"
+    ssid="Cashu-WiFi"
+    key_mgmt=WPA-EAP
+    eap=TTLS
+    identity="tollgate"
+    password="cashuB...paste-your-token-here..."
+    phase2="auth=PAP"
+    ca_cert=""
+    altsubject_match="DNS:radius.nodns.shop"
+}
+EOF
+
+sudo eapol_test -c /tmp/eapol-ttls-pap.conf -a radius.nodns.shop -p 1812 -s tollgate
+# Success: "RADIUS: Received RADIUS message: Access-Accept"
+```
+
+### PEAP+MSCHAPv2 (legacy)
+
+Token goes in the **username** field. Limited to <253 bytes.
+
+```bash
+cat > /tmp/eapol-peap.conf << 'EOF'
+network={
+    ssid="Cashu-WiFi"
     key_mgmt=WPA-EAP
     eap=PEAP
-    identity="cashuB...your-token-here..."
-    password=""
+    identity="cashuB...short-token..."
+    password="anything"
     phase2="autheap=MSCHAPV2"
-    # Accept self-signed cert
     ca_cert=""
 }
 EOF
 
-# Run the test
-sudo eapol_test -c /tmp/eapol-test.conf -a radius.nodns.shop -p 1812 -s tollgate
-
-# Expected output on success:
-#   EAP: EAP entering state RECEIVED
-#   EAP: EAP entering state IDENTITY
-#   ...
-#   RADIUS: Received RADIUS message: Access-Accept
+sudo eapol_test -c /tmp/eapol-peap.conf -a radius.nodns.shop -p 1812 -s tollgate
 ```
-
-**What this tests**: Full EAP-PEAP handshake, TLS tunnel establishment, inner auth
-with Cashu token as username, Access-Accept/Reject flow.
-**What this does NOT test**: Actual WiFi association, 802.1X port control, real device behavior.
 
 ---
 
-## Test 3: Real access point + real phone
-
-Connect a WiFi access point configured for WPA2-Enterprise to use `radius.nodns.shop`
-as its RADIUS server, then connect a phone.
+## Real access point + phone
 
 ### OpenWRT
 
@@ -105,59 +153,69 @@ config wifi-iface 'default_radio0'
 
 1. Settings → WiFi → Create new network
 2. Security: WPA Enterprise
-3. RADIUS server: `radius.nodns.shop`
-4. RADIUS port: 1812
-5. Shared secret: `tollgate`
+3. RADIUS server: `radius.nodns.shop`, port 1812, secret `tollgate`
 
-### Phone configuration
+### Phone: EAP-TTLS+PAP (recommended)
 
-1. Connect to the WiFi network
-2. When prompted for credentials:
-   - **Username**: paste a Cashu ecash token (`cashuB...`)
-   - **Password**: anything (not validated for cashu usernames)
-3. Accept the self-signed certificate warning (CN=radius.nodns.shop)
-4. If token is valid → Access-Accept → device gets network access
+1. Connect to WiFi → credential prompt appears
+2. **Username**: anything (e.g. `tollgate`)
+3. **Password**: paste a Cashu token (`cashuB...`) or lnurlw code
+4. EAP method: **TTLS**, Phase 2: **PAP**
+5. Accept certificate warning (CN=radius.nodns.shop)
+6. Valid payment → Access-Accept → network access
 
-**What this tests**: Everything end-to-end with real devices.
+**Android**: Settings → WiFi → Advanced → EAP: TTLS → Phase 2: PAP → token as password
+**iOS**: Configure via Apple Configurator or mobileconfig profile
+
+---
+
+## What the CI checks
+
+The [E2E Demo workflow](../../actions/workflows/e2e-demo.yml) runs automatically on:
+- Every push to `main`
+- Every 6 hours (verifies deployment is alive)
+- Manual trigger from GitHub Actions tab
+
+It verifies:
+1. Go binaries compile (`go vet` + cross-compile)
+2. `lnurlw` in username → Access-Accept
+3. `lnurlw` in password → Access-Accept
+4. Uppercase `LNURLW` → Access-Accept
+5. Invalid credentials → Access-Reject
+6. SSH tollgate on port 2222 responds with SSH banner
+
+---
+
+## Payment method details
+
+### Cashu tokens
+
+Full validation pipeline:
+1. Decode token (V3 JSON `cashuA` / V4 CBOR `cashuB`)
+2. Replay check (SHA256 hash against spent list)
+3. Verify unspent with mint API (`POST /v1/checkstate`)
+4. Redeem to wallet (`cdk-cli receive`)
+5. Create session: 1 sat = 60 seconds
+
+### LNURL-withdraw (lnurlw)
+
+Pass-through accept for proof of concept. TODO:
+1. Decode bech32 (HRP=`lnurlw`) → extract callback URL
+2. GET callback → receive withdraw parameters
+3. Generate Lightning invoice → submit to callback
+4. Wait for settlement → determine amount → set session duration
+
+Currently: any `lnurlw...` string gets 1 hour access, replay-protected by hash.
 
 ---
 
 ## Known limitations
 
-### Token length in RADIUS
-
-RADIUS `User-Name` attribute is limited to **253 bytes** (per RFC 2865 §5.4).
-Cashu V4 tokens (`cashuB...`) are typically 150-400+ characters depending on amount
-and number of proofs. Small tokens (8-64 sat) should fit. Large tokens may exceed
-the limit and be silently truncated by the RADIUS client (AP/supplicant).
-
-**Mitigation options** (future work):
-- Accept token in `User-Password` instead (requires PAP, not MSCHAPv2)
-- Use a short lookup code: user pays on a web page, gets a 6-char code, uses that as RADIUS username
-- LNURL-withdraw URL as username (shorter than Cashu token)
-
-### Password field / PAP mode
-
-Currently the token goes in the **username** field because PEAP's default inner
-auth (MSCHAPv2) does challenge-response hashing that prevents dynamic password
-validation. To use the password field, we'd need:
-
-1. **EAP-TTLS with PAP inner auth** — FreeRADIUS can be configured for this.
-   The password arrives as plaintext inside the TLS tunnel and can be validated
-   dynamically. This is actually simpler than PEAP-MSCHAPv2 for our use case.
-
-2. **Future: challenge-response → payment proof** — If we could tie the
-   MSCHAPv2 challenge to a Cashu mint proof or Lightning HTLC proof, the
-   challenge-response protocol itself becomes a payment authorization. This is
-   a groundbreaking research direction but not yet implemented.
-
-**Status**: Username field works today. Password field / PAP support is future work.
-
-### Self-signed certificate
-
-The server uses a self-signed certificate. Phones will show a "trust this
-certificate?" dialog. For production, use a real CA-signed cert (Let's Encrypt
-or a proper PKI).
+- **Bootstrap token only** — no automated payment renewal yet
+- **Self-signed cert** — phones show certificate warning
+- **Session reconnection** — MAC-based; `radtest` sends no MAC so all requests share one anonymous session (works correctly with real APs)
+- **LNURL-w claiming not implemented** — lnurlw codes are accepted without claiming the payment
+- **No IP addresses in this project** — only domain names (`nodns.shop`, `radius.nodns.shop`)
 
 ---
 
@@ -167,17 +225,15 @@ or a proper PKI).
 # Check FreeRADIUS status
 systemctl status freeradius
 
-# View RADIUS logs
-journalctl -u freeradius -f
-
 # View token validation logs
 tail -f /opt/cashu-tollgate/radius-tokens.log
 
 # Check active sessions
 ls /opt/cashu-tollgate/radius-sessions/
 
-# Test the validation binary directly
-/usr/local/bin/tollgate-auth-radius "cashuB..." "aa:bb:cc:dd:ee:ff"
+# Test binary directly
+/usr/local/bin/tollgate-auth-radius "lnurlw1test..." "aa:bb:cc:dd:ee:ff"
+/usr/local/bin/tollgate-auth-radius "any-user" "aa:bb:cc:dd:ee:ff" "cashuB..."
 
 # Check wallet balance
 sudo -u cashu-wallet cdk-cli --work-dir /var/lib/cashu-wallet balance

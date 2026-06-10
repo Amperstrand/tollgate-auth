@@ -1,9 +1,10 @@
-.PHONY: build build-linux deploy deploy-jail deploy-faucet clean
+.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config test-e2e clean
 
 SSH_BINARY := tollgate-auth-ssh
-REMOTE_USER := debian
-REMOTE_HOST := npub1mv7l45exqsu5nr5tnefkr33ruhzjj4r8prg6qtcedv4lyf3rzguqptuwm4.nodns.shop
-REMOTE_PORT := 2222
+RADIUS_BINARY := tollgate-auth-radius
+REMOTE_USER := root
+REMOTE_HOST := nodns.shop
+REMOTE_PORT := 22
 REMOTE_DIR := /opt/cashu-tollgate
 
 build:
@@ -12,27 +13,51 @@ build:
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(SSH_BINARY) ./cmd/tollgate-auth-ssh
 
+build-radius:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(RADIUS_BINARY) ./cmd/tollgate-auth-radius/
+
 deploy: build-linux
 	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY)
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
-		'sudo systemctl stop cashu-tollgate && \
-		 sudo cp /tmp/$(SSH_BINARY) $(REMOTE_DIR)/$(SSH_BINARY) && \
-		 sudo chmod +x $(REMOTE_DIR)/$(SSH_BINARY) && \
-		 sudo mkdir -p $(REMOTE_DIR)/sessions && \
-		 sudo systemctl start cashu-tollgate && \
+		'systemctl stop tollgate-auth-ssh && \
+		 cp /tmp/$(SSH_BINARY) $(REMOTE_DIR)/$(SSH_BINARY) && \
+		 chmod +x $(REMOTE_DIR)/$(SSH_BINARY) && \
+		 mkdir -p $(REMOTE_DIR)/sessions && \
+		 systemctl start tollgate-auth-ssh && \
 		 sleep 2 && \
-		 sudo systemctl status cashu-tollgate --no-pager | tail -5'
+		 systemctl status tollgate-auth-ssh --no-pager | tail -5'
+
+deploy-radius: build-radius
+	scp -P $(REMOTE_PORT) $(RADIUS_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/$(RADIUS_BINARY)
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'systemctl restart freeradius && \
+		 sleep 2 && \
+		 systemctl status freeradius --no-pager | tail -5'
+
+deploy-radius-config:
+	scp -P $(REMOTE_PORT) config/freeradius/mods-available/cashu-exec $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/cashu-exec
+	scp -P $(REMOTE_PORT) config/freeradius/mods-available/eap $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/eap
+	scp -P $(REMOTE_PORT) config/freeradius/users $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-config/files/authorize
+	scp -P $(REMOTE_PORT) config/freeradius/clients.conf $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/clients.conf
+	scp -P $(REMOTE_PORT) config/freeradius/sites-available/inner-tunnel $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/inner-tunnel
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'freeradius -XC && systemctl restart freeradius'
 
 deploy-jail:
 	scp -P $(REMOTE_PORT) scripts/setup-jail.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/setup-jail.sh
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
-		'sudo bash /tmp/setup-jail.sh'
+		'bash /tmp/setup-jail.sh'
 
 deploy-faucet:
 	scp -P $(REMOTE_PORT) docs/index.html $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-faucet.html
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
-		'sudo mkdir -p /var/www/tollgate && \
-		 sudo cp /tmp/tollgate-faucet.html /var/www/tollgate/index.html'
+		'mkdir -p /var/www/tollgate && \
+		 cp /tmp/tollage-faucet.html /var/www/tollgate/index.html'
+
+test-e2e:
+	scp -P $(REMOTE_PORT) scripts/test-radius-e2e.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/test-radius-e2e.sh
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'bash /tmp/test-radius-e2e.sh'
 
 clean:
-	rm -f $(SSH_BINARY)
+	rm -f $(SSH_BINARY) $(RADIUS_BINARY)

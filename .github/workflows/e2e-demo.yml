@@ -1,0 +1,70 @@
+name: E2E Demo
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # Manual trigger from GitHub UI
+  schedule:
+    - cron: '0 */6 * * *' # Every 6 hours — verify deployment is alive
+
+jobs:
+  build:
+    name: Build & Vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build SSH binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/tollgate-auth-ssh ./cmd/tollgate-auth-ssh/
+
+      - name: Build RADIUS binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/tollgate-auth-radius ./cmd/tollgate-auth-radius/
+
+  e2e-radius:
+    name: Live RADIUS E2E
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install RADIUS tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq freeradius-utils
+
+      - name: Test — lnurlw in username (expect Accept)
+        run: |
+          RESULT=$(radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7ci" "anything" radius.nodns.shop 0 tollgate 2>&1)
+          echo "$RESULT"
+          echo "$RESULT" | grep -q "Access-Accept"
+
+      - name: Test — lnurlw in password (expect Accept)
+        run: |
+          RESULT=$(radtest "ci-test" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7ci" radius.nodns.shop 0 tollgate 2>&1)
+          echo "$RESULT"
+          echo "$RESULT" | grep -q "Access-Accept"
+
+      - name: Test — uppercase LNURLW (expect Accept)
+        run: |
+          RESULT=$(radtest "LNURLW1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7CI" "anything" radius.nodns.shop 0 tollgate 2>&1)
+          echo "$RESULT"
+          echo "$RESULT" | grep -q "Access-Accept"
+
+      - name: Test — invalid credentials (expect Reject)
+        run: |
+          RESULT=$(radtest "not-a-token" "bad-password" radius.nodns.shop 0 tollgate 2>&1)
+          echo "$RESULT"
+          echo "$RESULT" | grep -q "Access-Reject"
+
+      - name: Test — SSH tollgate is listening (port 2222)
+        run: |
+          # Just verify the port is open and responds with SSH banner
+          timeout 5 bash -c 'echo | nc radius.nodns.shop 2222' | head -1 | grep -q "SSH"

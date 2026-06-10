@@ -1,0 +1,54 @@
+# /etc/freeradius/3.0/sites-available/inner-tunnel
+# Dual-path payment validation inside EAP tunnel.
+#
+# Accepts payment credentials from EITHER username or password:
+#   - Cashu tokens:  cashuA... or cashuB...
+#   - LNURL-withdraw: lnurlw... or LNURLW... (bech32, case-insensitive)
+#
+# The exec module (cashu-auth) receives both fields and routes
+# to the appropriate validation path.
+
+server inner-tunnel {
+    authorize {
+        # Check if username OR password contains a payment credential
+        # Cashu: cashuA or cashuB prefix
+        # LNURLw: lnurlw or LNURLW prefix (bech32 is all same case)
+        if ((User-Name =~ /^cashu[AB]/) || \
+            (User-Password =~ /^cashu[AB]/) || \
+            (User-Name =~ /^lnurlw/) || \
+            (User-Name =~ /^LNURLW/) || \
+            (User-Password =~ /^lnurlw/) || \
+            (User-Password =~ /^LNURLW/)) {
+            cashu-auth
+            if (ok) {
+                update reply {
+                    Session-Timeout := 3600
+                }
+            }
+        }
+        else {
+            reject
+        }
+
+        # Fall through to PAP for TTLS inner auth
+        pap
+    }
+
+    authenticate {
+        Auth-Type PAP {
+            pap
+        }
+
+        Auth-Type MS-CHAP {
+            mschap
+        }
+
+        eap
+    }
+
+    session {
+    }
+
+    post-auth {
+    }
+}

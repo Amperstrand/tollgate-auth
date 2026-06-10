@@ -1,5 +1,6 @@
 #!/bin/bash
 # setup-freeradius.sh — Configure FreeRADIUS for Cashu ecash auth on radius.nodns.shop
+# Supports BOTH EAP-TTLS+PAP (token in password) and PEAP+MSCHAPv2 (token in username).
 # Run once on the target server as root.
 set -euo pipefail
 
@@ -21,96 +22,40 @@ echo ">>> Installing users file..."
 cp "$SCRIPT_DIR/../config/freeradius/users" "$CONF_DIR/users"
 
 # --- exec module ---
-echo ">>> Installing exec module..."
+echo ">>> Installing exec module (cashu-auth)..."
 cp "$SCRIPT_DIR/../config/freeradius/mods-available/cashu-exec" "$CONF_DIR/mods-available/cashu-exec"
 ln -sf ../mods-available/cashu-exec "$CONF_DIR/mods-enabled/cashu-exec"
 
-# --- EAP config (PEAP with self-signed cert) ---
+# --- EAP config (TTLS+PAP + PEAP+MSCHAPv2 with self-signed cert) ---
 echo ">>> Generating self-signed TLS certificate for radius.nodns.shop..."
 CERT_DIR="$CONF_DIR/certs"
 mkdir -p "$CERT_DIR"
 
 # Generate self-signed cert (phones will show "trust this certificate?" dialog)
-openssl req -x509 -newkey rsa:2048 \
-    -keyout "$CERT_DIR/server.key" \
-    -out "$CERT_DIR/server.crt" \
-    -days 365 -nodes \
-    -subj "/CN=radius.nodns.shop" 2>/dev/null
+if [ ! -f "$CERT_DIR/server.key" ]; then
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout "$CERT_DIR/server.key" \
+        -out "$CERT_DIR/server.crt" \
+        -days 365 -nodes \
+        -subj "/CN=radius.nodns.shop" 2>/dev/null
 
-chmod 640 "$CERT_DIR/server.key"
-chown root:freerad "$CERT_DIR/server.key"
+    chmod 640 "$CERT_DIR/server.key"
+    chown root:freerad "$CERT_DIR/server.key"
+fi
 
-echo ">>> Configuring EAP (PEAP)..."
-# Configure EAP to use PEAP with our certificate
-cat > "$CONF_DIR/mods-available/eap" << 'EAPCONF'
-eap {
-    default_eap_type = peap
-    timer_expire = 60
-    ignore_unknown_eap_types = no
+echo ">>> Configuring EAP (TTLS+PAP + PEAP+MSCHAPv2)..."
+cp "$SCRIPT_DIR/../config/freeradius/mods-available/eap" "$CONF_DIR/mods-available/eap"
 
-    tls-config tls-common {
-        private_key_file = ${certdir}/server.key
-        certificate_file = ${certdir}/server.crt
-        ca_file = ${certdir}/server.crt
-        dh_file = ${certdir}/dh
-        fragment_size = 1024
-    }
-
-    peap {
-        tls = tls-common
-        default_eap_type = mschapv2
-        copy_request_to_tunnel = yes
-        use_tunneled_reply = yes
-        virtual_server = "inner-tunnel"
-    }
-
-    mschapv2 {
-        # Inner auth method within PEAP tunnel
-    }
-}
-EAPCONF
-
-# Regenerate DH params (can take a minute)
-echo ">>> Generating DH parameters (this takes a moment)..."
-openssl dhparam -out "$CERT_DIR/dh" 2048 2>/dev/null || true
-chown root:freerad "$CERT_DIR/dh"
+# Regenerate DH params if missing
+if [ ! -f "$CERT_DIR/dh" ]; then
+    echo ">>> Generating DH parameters (this takes a moment)..."
+    openssl dhparam -out "$CERT_DIR/dh" 2048 2>/dev/null || true
+    chown root:freerad "$CERT_DIR/dh"
+fi
 
 # --- inner-tunnel virtual server ---
 echo ">>> Configuring inner-tunnel virtual server..."
-cat > "$CONF_DIR/sites-available/inner-tunnel" << 'INNERCONF'
-server inner-tunnel {
-    authorize {
-        # Check if username matches Cashu token pattern
-        if (User-Name =~ "^cashu[AB]") {
-            # Call our Go binary for token validation
-            cashu-auth
-            if (ok) {
-                update reply {
-                    Session-Timeout := 3600
-                }
-            }
-        }
-        else {
-            reject
-        }
-    }
-
-    authenticate {
-        # No traditional auth - the exec module IS the auth
-    }
-
-    session {
-    }
-
-    post-auth {
-        # Log accepted sessions
-        if (User-Name =~ "^cashu[AB]") {
-            ok
-        }
-    }
-}
-INNERCONF
-
+cp "$SCRIPT_DIR/../config/freeradius/sites-available/inner-tunnel" "$CONF_DIR/sites-available/inner-tunnel"
 ln -sf ../sites-available/inner-tunnel "$CONF_DIR/sites-enabled/inner-tunnel"
 
 # --- Enable the default server for outer EAP handling ---
@@ -132,8 +77,13 @@ systemctl status freeradius --no-pager | tail -5
 echo ""
 echo ">>> FreeRADIUS configured for radius.nodns.shop"
 echo ">>> Listen ports: 1812 (auth), 1813 (accounting)"
-echo ">>> EAP method: PEAP with self-signed cert"
+echo ">>> EAP methods:"
+echo ">>>   EAP-TTLS+PAP    (recommended — token in password field, no length limit)"
+echo ">>>   PEAP+MSCHAPv2   (legacy — token in username field, <253 bytes)"
 echo ">>> Validation: /usr/local/bin/tollgate-auth-radius"
 echo ""
-echo ">>> To test: radtest cashuB... <any-password> localhost 0 tollgate"
-echo ">>> Or with eapol_test for full PEAP flow"
+echo ">>> Test with radtest:"
+echo ">>>   radtest cashuB... <any-password> localhost 0 tollgate"
+echo ">>>   radtest <any-user> cashuB... localhost 0 tollgate"
+echo ">>> Test with eapol_test:"
+echo ">>>   eapol_test -c /etc/tollgate/eapol-ttls-pap.conf -a 127.0.0.1 -s tollgate"

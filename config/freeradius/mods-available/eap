@@ -1,0 +1,49 @@
+# /etc/freeradius/3.0/mods-available/eap
+# Dual EAP support: PEAP+MSCHAPv2 AND EAP-TTLS+PAP
+#
+# PEAP+MSCHAPv2:  Token in inner User-Name (username field)
+# EAP-TTLS+PAP:   Token in inner User-Password (password field)
+#
+# Both paths converge in the inner-tunnel virtual server,
+# which calls tollgate-auth-radius with both fields.
+
+eap {
+    default_eap_type = ttls
+    timer_expire = 60
+    ignore_unknown_eap_types = no
+
+    tls-config tls-common {
+        private_key_file = ${certdir}/server.key
+        certificate_file = ${certdir}/server.crt
+        ca_file = ${certdir}/server.crt
+        dh_file = ${certdir}/dh
+        fragment_size = 1024
+    }
+
+    # EAP-TTLS with PAP inner auth
+    # The supplicant sends User-Name + User-Password in plaintext
+    # inside the TLS tunnel. This is ideal for Cashu tokens because:
+    # - Password field has no length limits (unlike User-Name's 253 bytes)
+    # - Plaintext = no MSCHAPv2 challenge-response mangling
+    ttls {
+        tls = tls-common
+        default_eap_type = pap
+        copy_request_to_tunnel = yes
+        use_tunneled_reply = yes
+        virtual_server = "inner-tunnel"
+    }
+
+    # PEAP with MSCHAPv2 inner auth (legacy compat)
+    # Token must go in User-Name (shorter tokens only, <253 bytes)
+    peap {
+        tls = tls-common
+        default_eap_type = mschapv2
+        copy_request_to_tunnel = yes
+        use_tunneled_reply = yes
+        virtual_server = "inner-tunnel"
+    }
+
+    mschapv2 {
+        # Inner auth method within PEAP tunnel
+    }
+}

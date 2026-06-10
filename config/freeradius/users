@@ -1,12 +1,35 @@
 # /etc/freeradius/3.0/users
-# Route Cashu token usernames to exec validation.
+# Route payment credentials to exec validation.
+# Accepts Cashu tokens (cashuA/cashuB) and LNURL-withdraw (lnurlw/LNURLW).
 # All other users are rejected.
 
-# Match Cashu token usernames (cashuA or cashuB prefix)
-# FreeRADIUS 3 uses /regex/ syntax (not "regex")
+# Cashu token in username
 DEFAULT User-Name =~ /^cashu[AB]/
     Auth-Type := Accept,
-    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius %{User-Name} %{Calling-Station-Id}"
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
+
+# Cashu token in password (TTLS+PAP path)
+DEFAULT User-Password =~ /^cashu[AB]/
+    Auth-Type := Accept,
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
+
+# LNURLw in username
+DEFAULT User-Name =~ /^lnurlw/
+    Auth-Type := Accept,
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
+
+DEFAULT User-Name =~ /^LNURLW/
+    Auth-Type := Accept,
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
+
+# LNURLw in password
+DEFAULT User-Password =~ /^lnurlw/
+    Auth-Type := Accept,
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
+
+DEFAULT User-Password =~ /^LNURLW/
+    Auth-Type := Accept,
+    Exec-Program-Wait = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
 
 # Reject everything else
 DEFAULT
