@@ -1,6 +1,6 @@
 # tollgate-auth — Live Demo & Testing Guide
 
-**Live instance**: `radius.nodns.shop:1812` (RADIUS) + `nodns.shop:2222` (SSH)
+**Live instance**: `nodns.shop:1812` (RADIUS) + `nodns.shop:2222` (SSH)
 **Shared secret**: `tollgate`
 **CI status**: [![E2E Demo](https://github.com/Amperstrand/tollgate-ssh/actions/workflows/e2e-demo.yml/badge.svg)](https://github.com/Amperstrand/tollgate-ssh/actions/workflows/e2e-demo.yml)
 
@@ -42,7 +42,7 @@ sudo apt install freeradius-utils   # Debian/Ubuntu
 ### lnurlw in username → Accept
 
 ```bash
-$ radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7" "anything" radius.nodns.shop 0 tollgate
+$ radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7" "anything" nodns.shop 0 tollgate
 
 Sent Access-Request Id 125 from 0.0.0.0:51698 to 127.0.0.1:1812 length 122
         User-Name = "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7"
@@ -56,7 +56,7 @@ Received Access-Accept Id 125 from 127.0.0.1:1812 to 127.0.0.1:51698 length 44
 ### lnurlw in password → Accept
 
 ```bash
-$ radtest "wifi-user" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7" radius.nodns.shop 0 tollgate
+$ radtest "wifi-user" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7" nodns.shop 0 tollgate
 
 Received Access-Accept
         Session-Timeout = 3600
@@ -65,7 +65,7 @@ Received Access-Accept
 ### Uppercase LNURLW → Accept
 
 ```bash
-$ radtest "LNURLW1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7" "anything" radius.nodns.shop 0 tollgate
+$ radtest "LNURLW1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7" "anything" nodns.shop 0 tollgate
 
 Received Access-Accept
         Session-Timeout = 3600
@@ -74,7 +74,7 @@ Received Access-Accept
 ### Invalid credentials → Reject
 
 ```bash
-$ radtest "not-a-token" "bad-password" radius.nodns.shop 0 tollgate
+$ radtest "not-a-token" "bad-password" nodns.shop 0 tollgate
 
 Received Access-Reject
 ```
@@ -106,7 +106,7 @@ network={
 }
 EOF
 
-sudo eapol_test -c /tmp/eapol-ttls-pap.conf -a radius.nodns.shop -p 1812 -s tollgate
+sudo eapol_test -c /tmp/eapol-ttls-pap.conf -a nodns.shop -p 1812 -s tollgate
 # Success: "RADIUS: Received RADIUS message: Access-Accept"
 ```
 
@@ -127,7 +127,7 @@ network={
 }
 EOF
 
-sudo eapol_test -c /tmp/eapol-peap.conf -a radius.nodns.shop -p 1812 -s tollgate
+sudo eapol_test -c /tmp/eapol-peap.conf -a nodns.shop -p 1812 -s tollgate
 ```
 
 ---
@@ -144,7 +144,7 @@ config wifi-iface 'default_radio0'
     option mode 'ap'
     option ssid 'Cashu-WiFi'
     option encryption 'wpa2'
-    option server 'radius.nodns.shop'
+    option server 'nodns.shop'
     option key 'tollgate'
     option port '1812'
 ```
@@ -153,7 +153,7 @@ config wifi-iface 'default_radio0'
 
 1. Settings → WiFi → Create new network
 2. Security: WPA Enterprise
-3. RADIUS server: `radius.nodns.shop`, port 1812, secret `tollgate`
+3. RADIUS server: `nodns.shop`, port 1812, secret `tollgate`
 
 ### Phone: EAP-TTLS+PAP (recommended)
 

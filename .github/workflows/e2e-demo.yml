@@ -42,29 +42,28 @@ jobs:
 
       - name: Test — lnurlw in username (expect Accept)
         run: |
-          RESULT=$(radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7ci" "anything" radius.nodns.shop 0 tollgate 2>&1)
-          echo "$RESULT"
-          echo "$RESULT" | grep -q "Access-Accept"
+          set +e
+          radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7ci" "anything" nodns.shop 0 tollgate 2>&1 | tee /tmp/test1.log
+          grep -q "Access-Accept" /tmp/test1.log
 
       - name: Test — lnurlw in password (expect Accept)
         run: |
-          RESULT=$(radtest "ci-test" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7ci" radius.nodns.shop 0 tollgate 2>&1)
-          echo "$RESULT"
-          echo "$RESULT" | grep -q "Access-Accept"
+          set +e
+          radtest "ci-test" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7ci" nodns.shop 0 tollgate 2>&1 | tee /tmp/test2.log
+          grep -q "Access-Accept" /tmp/test2.log
 
       - name: Test — uppercase LNURLW (expect Accept)
         run: |
-          RESULT=$(radtest "LNURLW1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7CI" "anything" radius.nodns.shop 0 tollgate 2>&1)
-          echo "$RESULT"
-          echo "$RESULT" | grep -q "Access-Accept"
+          set +e
+          radtest "LNURLW1DP68GURN8GHJ7AMPD3KX2AR0VEEKZAR0WD5XJTNRDAKJ7CI" "anything" nodns.shop 0 tollgate 2>&1 | tee /tmp/test3.log
+          grep -q "Access-Accept" /tmp/test3.log
 
       - name: Test — invalid credentials (expect Reject)
         run: |
-          RESULT=$(radtest "not-a-token" "bad-password" radius.nodns.shop 0 tollgate 2>&1)
-          echo "$RESULT"
-          echo "$RESULT" | grep -q "Access-Reject"
+          set +e
+          radtest "not-a-token" "bad-password" nodns.shop 0 tollgate 2>&1 | tee /tmp/test4.log
+          grep -q "Access-Reject" /tmp/test4.log
 
       - name: Test — SSH tollgate is listening (port 2222)
         run: |
-          # Just verify the port is open and responds with SSH banner
-          timeout 5 bash -c 'echo | nc radius.nodns.shop 2222' | head -1 | grep -q "SSH"
+          timeout 5 bash -c 'echo | nc nodns.shop 2222' 2>/dev/null | head -1 | grep -q "SSH"
