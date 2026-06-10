@@ -118,17 +118,24 @@ jobs:
       #   inner-tunnel → tollgate-auth-radius → decode → verify → redeem → Accept
       - name: Test 7 — Cashu token via EAP-TTLS+PAP → Access-Accept
         run: |
-          # Install eapol_test (EAP test client from wpa_supplicant)
-          sudo apt-get install -y -qq wpasupplicant 2>/dev/null || true
+          # Build eapol_test from Ubuntu-patched source
+          # Ubuntu's wpasupplicant package doesn't include eapol_test.
+          # Vanilla wpa_supplicant 2.10 doesn't compile with OpenSSL 3.x,
+          # so we use the Ubuntu source package which has compatibility patches.
           if ! command -v eapol_test &>/dev/null; then
-            echo "Building eapol_test from source..."
-            sudo apt-get install -y -qq libssl-dev libnl-3-dev libnl-genl-3-dev pkg-config 2>/dev/null
-            wget -q https://w1.fi/releases/wpa_supplicant-2.10.tar.gz
-            tar xzf wpa_supplicant-2.10.tar.gz
-            cd wpa_supplicant-2.10/wpa_supplicant
+            echo "Building eapol_test from Ubuntu source package..."
+            # Enable deb-src (Ubuntu 24.04 uses DEB822 format)
+            sudo sed -i '/^Types:/s/deb$/deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+            sudo apt-get update -qq 2>/dev/null
+            sudo apt-get build-dep -y -qq wpasupplicant 2>/dev/null || \
+              sudo apt-get install -y -qq libssl-dev libnl-3-dev libnl-genl-3-dev pkg-config libdbus-1-dev 2>/dev/null
+            mkdir -p /tmp/eapol-build && cd /tmp/eapol-build
+            apt-get source --quiet wpasupplicant 2>/dev/null
+            cd wpa-*/wpa_supplicant
             cp defconfig .config
             echo "CONFIG_EAPOL_TEST=y" >> .config
-            make -j$(nproc) eapol_test 2>&1 | tail -5
+            echo "CFLAGS += -Wno-deprecated-declarations" >> .config
+            make -j$(nproc) eapol_test 2>&1 | tail -10
             sudo cp eapol_test /usr/local/bin/
             cd -
           fi
