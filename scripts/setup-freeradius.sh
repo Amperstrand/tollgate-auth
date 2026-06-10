@@ -62,6 +62,16 @@ ln -sf ../sites-available/inner-tunnel "$CONF_DIR/sites-enabled/inner-tunnel"
 echo ">>> Ensuring default site is enabled..."
 ln -sf ../sites-available/default "$CONF_DIR/sites-enabled/default" 2>/dev/null || true
 
+# --- Data directory with correct permissions ---
+echo ">>> Setting up data directory..."
+for DIR in /opt/tollgate-auth /opt/cashu-tollgate; do
+  mkdir -p "$DIR/radius-sessions" 2>/dev/null || true
+  touch "$DIR/radius-spent.txt" "$DIR/radius-tokens.log" 2>/dev/null || true
+  chown -R freerad:freerad "$DIR/radius-sessions" "$DIR/radius-spent.txt" "$DIR/radius-tokens.log" 2>/dev/null || true
+  chmod 770 "$DIR/radius-sessions" 2>/dev/null || true
+  chmod 660 "$DIR/radius-spent.txt" "$DIR/radius-tokens.log" 2>/dev/null || true
+done
+
 # --- Session cleanup cron ---
 echo ">>> Installing session cleanup cron..."
 cat > /etc/cron.d/tollgate-radius-cleanup << 'CRON'
