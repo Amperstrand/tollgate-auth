@@ -10,22 +10,50 @@ import (
 )
 
 // RedeemToken calls cdk-cli to redeem a token into the wallet.
+//
+// cdk-cli v0.16.0 output varies by token type:
+//   - Full DLEQ tokens: "Recovered 0 operations, N compensated, ..." then exits code 1
+//     (bug: prints "Error: code: 14005" after success)
+//   - No-DLEQ tokens: "Received: N" then exits code 0
+//
+// We check output for both "compensated" and "Received:" indicators.
 func RedeemToken(tokenStr string, walletDir string) error {
 	cmd := exec.Command(
-		"sudo", "-u", "cashu-wallet",
-		"cdk-cli",
+		"/usr/bin/sudo", "-u", "cashu-wallet",
+		"/usr/local/bin/cdk-cli",
 		"--work-dir", walletDir,
 		"receive",
 		"--allow-untrusted",
 		tokenStr,
 	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("cdk-cli receive failed: %s: %w", strings.TrimSpace(string(out)), err)
+	out, _ := cmd.CombinedOutput()
+	output := string(out)
+
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "compensated") {
+			var compensated, skipped, failed int
+			fmt.Sscanf(line, "Recovered %d operations, %d compensated, %d skipped, %d failed", new(int), &compensated, &skipped, &failed)
+			if compensated > 0 {
+				log.Printf("cdk-cli receive: %s", strings.TrimSpace(line))
+				return nil
+			}
+			if skipped > 0 {
+				return fmt.Errorf("cdk-cli receive: token already spent (skipped)")
+			}
+			if failed > 0 {
+				return fmt.Errorf("cdk-cli receive: token redemption failed")
+			}
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "Received:") {
+			var received int
+			fmt.Sscanf(strings.TrimSpace(line), "Received: %d", &received)
+			if received > 0 {
+				log.Printf("cdk-cli receive: %s", strings.TrimSpace(line))
+				return nil
+			}
+		}
 	}
-	result := strings.TrimSpace(string(out))
-	log.Printf("cdk-cli receive: %s", result)
-	return nil
+	return fmt.Errorf("cdk-cli receive failed: no compensation reported: %s", strings.TrimSpace(output))
 }
 
 // StoreInWallet appends the token to the wallet JSONL file.

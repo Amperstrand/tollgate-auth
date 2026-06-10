@@ -75,7 +75,7 @@ Received Access-Accept
 ### RADIUS features
 
 - **Dual transport**: UDP 1812 (shared secret `tollgate`) + TCP 2083/RadSec (TLS with Let's Encrypt cert)
-- **Dual EAP**: EAP-TTLS+PAP (token in password, no length limit) + PEAP+MSCHAPv2 (token in username, <253 bytes)
+- **Dual EAP**: EAP-TTLS+PAP (no-DLEQ 230b token in single password field, or split 378b across password+identity) + PEAP+MSCHAPv2 (token in username, <253 bytes)
 - **Payment from either field**: username or password — whichever has the `cashu`/`lnurlw` prefix
 - **Reply-Message**: Decoded payment info in Access-Accept (amount, duration, mint)
 - **Session tracking**: MAC-based reconnection — active sessions skip payment check
@@ -333,12 +333,14 @@ The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `
    - `lnurlw` in password field → Accept
    - Uppercase `LNURLW` → Accept
    - Invalid credentials → Reject
-   - **Cashu token via EAP-TTLS+PAP** (8 sats, minted fresh in CI, sent through TLS tunnel) → Access-Accept
-   - **Cashu token replay** (same token, different MAC) → Access-Reject
+   - **Cashu no-DLEQ token in password** (230 bytes, minted fresh, single field) → Access-Accept
+   - **Cashu no-DLEQ token in username** (230 bytes, single field) → Access-Accept
+   - **Cashu split token with DLEQ** (378 bytes, split 200b+178b) → Access-Accept
+   - **Cashu no-DLEQ token replay** (same token, different MAC) → Access-Reject
    - **RadSec** (TLS on port 2083) → Accept via encrypted transport
 3. Checks SSH tollgate responds with SSH banner on port 2222
 
-Cashu tokens are 378 bytes (fixed) and exceed RADIUS's 253-byte attribute limit, so Cashu tests use `eapol_test` which sends the token inside an EAP-TTLS+PAP TLS tunnel — the same path a real WiFi client would use. See [docs/radius-token-size.md](docs/radius-token-size.md) for details.
+Cashu V4 tokens with DLEQ proofs are 378 bytes, exceeding FreeRADIUS's `diameter2vp` 253-byte limit inside EAP-TTLS tunnels. Two solutions work: (1) strip the optional DLEQ proof to produce 230-byte tokens that fit in a single RADIUS attribute, or (2) split the 378-byte token across password (200b) and identity (178b) fields. DLEQ is a client-side verification feature (NUT-12) — not required for mint checkstate or token redemption. See [docs/radius-token-size.md](docs/radius-token-size.md) for details.
 
 ## Security Disclaimer
 
@@ -352,6 +354,44 @@ Cashu tokens are 378 bytes (fixed) and exceed RADIUS's 253-byte attribute limit,
 - **No rate limiting** — no protection against token brute-forcing or connection flooding.
 
 **Do not run this on a production server, a server with sensitive data, or any system you care about without understanding the risks.** If you're thinking about running this at work, **consult your IT/security team first.** This is a proof of concept for educational and experimental purposes.
+
+## Challenges
+
+### FreeRADIUS diameter2vp 253-byte limit inside EAP-TTLS tunnels
+
+We initially assumed EAP-TTLS+PAP had no password length limit inside the TLS tunnel — the tunnel encrypts everything, so why would there be a limit? In practice, FreeRADIUS's `diameter2vp` function (which converts Diameter AVPs to RADIUS VPs inside the TTLS tunnel) enforces a **253-byte attribute limit** even inside the encrypted tunnel.
+
+**Discovery**: Cashu tokens are exactly 378 bytes (fixed, regardless of amount). Sending a 378-byte token as the PAP password inside EAP-TTLS resulted in this silent failure:
+```
+eap_ttls: WARNING: diameter2vp skipping long attribute 2
+```
+The password was silently dropped. The inner tunnel received `User-Name` but NO `User-Password` at all — the request reached our Go binary with an empty password field, causing it to reject with "no payment credential found."
+
+This was NOT documented anywhere we could find. The RADIUS RFC 2865 specifies the 253-byte limit for RADIUS attributes, but the assumption was that inside a TLS tunnel this limit wouldn't apply. FreeRADIUS enforces it anyway.
+
+**Solution (primary)**: Strip the optional DLEQ proof (NUT-12) from the token. This produces a 230-byte token that fits entirely in a single RADIUS attribute — no split needed. DLEQ is a client-side verification feature that proves the mint didn't cheat during blind signing. It's NOT required for mint `checkstate` or NUT-03 swap (token redemption). Users paste one string into the password field — the same UX as typing a WiFi password.
+
+**Solution (fallback)**: For full DLEQ tokens (378 bytes), split across both EAP-TTLS+PAP inner fields:
+- Password: first 200 bytes (starts with `cashuB` prefix) — under 253 ✓
+- Username: remaining 178 bytes (raw base64url) — under 253 ✓
+
+The Go binary detects the split (password starts with `cashuB` + username is base64url-only, no `cashu`/`lnurlw` prefix) and concatenates them back into the full token.
+
+**Trade-offs**: The no-DLEQ approach makes Cashu tokens practical for real WiFi clients (single paste in password field). The split approach works for automated testing (eapol_test, scripts) but is impractical for real clients — users would need to paste two separate strings. Future improvement: token reference system (minter stores token, sends short hash).
+
+### eapol_test requires IP address, not hostname
+
+`eapol_test`'s `-a` flag uses `hostapd_parse_ip_addr()` which only accepts IP address literals, not DNS hostnames. The CI workflow resolves `nodns.shop` via `dig +short` at runtime into `$RADIUS_IP`.
+
+### FreeRADIUS exec module runs as `freerad` user, not root
+
+FreeRADIUS exec module runs external programs as the `freerad` system user. This caused two issues:
+1. **PATH**: `sudo` and `cdk-cli` weren't in the default PATH. Fixed by using absolute paths (`/usr/bin/sudo`, `/usr/local/bin/cdk-cli`).
+2. **Sudoers**: `freerad` needs passwordless sudo to run `cdk-cli` as `cashu-wallet`. Fixed with `/etc/sudoers.d/freerad-cdk`: `freerad ALL=(cashu-wallet) NOPASSWD: /usr/local/bin/cdk-cli`.
+
+### Cleartext-Password vs User-Password in inner tunnel
+
+Inside EAP-TTLS, the PAP password arrives as `Cleartext-Password` (not `User-Password`). The FreeRADIUS inner-tunnel config needed explicit handling to copy `Cleartext-Password` to `User-Password` for the exec module to receive it as a command-line argument.
 
 ## How It Works
 
@@ -373,13 +413,46 @@ Cashu tokens are 378 bytes (fixed) and exceed RADIUS's 253-byte attribute limit,
 ### RADIUS-specific
 
 6. **Session:** JSON file per MAC in `/opt/tollgate-auth/radius-sessions/`
-7. **Reconnection:** Same MAC + active session → accept without payment
-8. **Reply-Message:** Binary prints `Reply-Message = "..."` to stdout, FreeRADIUS parses it into Access-Accept
-9. **Session-Timeout:** Set by FreeRADIUS policy (3600s default)
+7. **Split token detection**: If password starts with `cashuB` but is NOT a complete token (too short), and username is base64url-only, concatenate password+username to reassemble the full 378-byte token
+8. **Reconnection:** Same MAC + active session → accept without payment
+9. **Reply-Message:** Binary prints `Reply-Message = "..."` to stdout, FreeRADIUS parses it into Access-Accept
+10. **Session-Timeout:** Set by FreeRADIUS policy (3600s default)
 
 ### Why shell out to cdk-cli
 
 [CDK](https://github.com/cashubtc/cdk) (Cashu Development Kit) is the reference Rust library for Cashu wallet operations. It has no Go bindings (only Python, Swift, Kotlin via UniFFI). Rather than reimplement the DHKE blinding math in Go, we call `cdk-cli receive` as a subprocess. The long-term plan is a Rust rewrite with native CDK integration.
+
+## Future Directions
+
+### Lightning HTLC preimage as RADIUS credential (L402-over-RADIUS)
+
+A Lightning payment preimage is **64 hex characters** (32 bytes) — 6x smaller than a no-DLEQ Cashu token, and verifiable with a single SHA-256 hash. This enables a two-phase RADIUS flow:
+
+```
+Phase 1: Request invoice
+→ Access-Request  User-Password = "request-invoice"
+← Access-Reject   Reply-Message = "lnbc1500n1pw5kjhmpp..."  (BOLT11 invoice)
+
+Phase 2: Present preimage
+→ Access-Request  User-Password = "a1b2c3d4e5f6...64hexchars"
+← Access-Accept   Reply-Message = "Lightning payment verified: 15 sat, 15 min"
+```
+
+The server creates a hold invoice (`H = sha256(preimage)`), returns the BOLT11 string in Reply-Message, and the user pays from any Lightning wallet. Verification is purely local — `sha256(preimage) == payment_hash` — no external API calls, no mint checkstate, no CBOR parsing. Works with any EAP method (64 chars << 253-byte limit).
+
+This is [L402](https://docs.lightning.engineering/the-lightning-network/l402) (Lightning HTTP 402) adapted for RADIUS instead of HTTP. L402 uses `macaroon:preimage` pairs over HTTP; for RADIUS, the preimage alone suffices since RADIUS provides the authentication transport. Requires an LND or CLN node with hold invoice support. See [docs/radius-token-size.md](docs/radius-token-size.md) for the full analysis including comparison with Cashu, LNURLPoS offline vending, and BIP39 seed phrase bearer instruments.
+
+### Captive portal for real-world deployment
+
+The Cashu-over-RADIUS approach works for single-proof tokens (230 bytes, no DLEQ). For multi-proof tokens (128+ sat, ~1800 bytes) or real-world phone UX, a captive portal sidesteps RADIUS attribute limits entirely — the token goes in an HTTP POST body (no size limit), and RADIUS handles only session management afterward. [OpenTollGate/tollgate](https://github.com/OpenTollGate/tollgate) uses this approach with OpenNDS on OpenWRT and BTCPayServer for payment processing, including sustained session management. A captive portal also solves the invoice delivery problem for Lightning HTLC payments — show the BOLT11 as a QR code.
+
+### Ark / Bark — Bitcoin over RADIUS?
+
+[Ark](https://ark-protocol.org/) is a Bitcoin scaling protocol using Virtual Transaction Outputs (VTXOs) — pre-signed transaction trees anchored on-chain. [Bark](https://gitlab.com/ark-bitcoin/bark) (by [Second](https://second.tech/)) is the reference wallet.
+
+Ark wallets use BIP39 12-word seed phrases (~160 chars) — these fit in a RADIUS attribute. But Ark doesn't have portable "tokens" like Cashu. Ark payments require cooperative rounds with an Ark Service Provider. A VTXO "proof" (V-PACK) with tree path + signatures exceeds 253 bytes for any non-trivial tree.
+
+A practical path: use Ark for backend settlement (fast Bitcoin transactions) but present Cashu-like UX at the RADIUS layer. The Ark wallet holds funds, mints Cashu tokens on demand, and those tokens flow through RADIUS as we've built here. See [docs/radius-token-size.md](docs/radius-token-size.md) for the full analysis.
 
 ## Related
 

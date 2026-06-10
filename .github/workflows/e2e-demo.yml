@@ -139,18 +139,20 @@ jobs:
           key: npm-cashu-ts-${{ hashFiles('scripts/mint-testnut.js') }}
           restore-keys: npm-cashu-ts-
 
-      # ─── Test 7: Cashu token via EAP-TTLS+PAP → Access-Accept ───
-      # Cashu tokens are 378 bytes (fixed), exceeding RADIUS's 253-byte attribute limit.
-      # EAP-TTLS+PAP sends the password inside a TLS tunnel where there's no length limit.
       - name: Resolve RADIUS server IP
         run: echo "RADIUS_IP=$(dig +short nodns.shop A | head -1)" >> "$GITHUB_ENV"
 
-      - name: Test 7 — Cashu token via EAP-TTLS+PAP → Access-Accept
+      - name: Install npm deps
+        run: npm install --no-package-lock @cashu/cashu-ts@4.5.1 2>&1 | tail -1
+
+      # ─── Test 7: Cashu token via EAP-TTLS+PAP (no-DLEQ, password-only) → Access-Accept ───
+      # No-DLEQ tokens are 230 bytes — fits in a single RADIUS attribute (under 253-byte limit).
+      # Token goes entirely in the password field. This is the simplest and most practical mode.
+      - name: Test 7 — Cashu no-DLEQ token in password → Access-Accept
         run: |
           echo "eapol_test: $(which eapol_test)"
 
-          npm install --no-package-lock @cashu/cashu-ts@4.5.1 2>&1 | tail -1
-          TOKEN=$(node scripts/mint-testnut.js --write-eapol-config /tmp/eapol7.conf --eap-identity ci-cashu-user 2>/tmp/mint7.log)
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq --write-eapol-config /tmp/eapol7.conf 2>/tmp/mint7.log)
           if [ -z "$TOKEN" ]; then
             echo "FAIL: Could not mint Cashu token"
             cat /tmp/mint7.log
@@ -158,19 +160,25 @@ jobs:
           fi
           echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
 
-          echo "--- EAP-TTLS+PAP against ${RADIUS_IP}:1812 ---"
+          # Verify token fits in single field
+          if [ ${#TOKEN} -gt 253 ]; then
+            echo "FAIL: No-DLEQ token is ${#TOKEN} bytes, expected <= 253"
+            exit 1
+          fi
+
+          echo "--- EAP-TTLS+PAP (password-only) against ${RADIUS_IP}:1812 ---"
           eapol_test -c /tmp/eapol7.conf -a "$RADIUS_IP" -s tollgate \
             -M ff:00:77:88:99:aa -r 1 -t 30 2>&1 | tee /tmp/eapol7.log
 
-          grep -q "Access-Accept" /tmp/eapol7.log || { echo "FAIL: Expected Access-Accept for Cashu via EAP"; cat /tmp/eapol7.log; exit 1; }
-          echo "SUCCESS: Cashu token validated via EAP-TTLS+PAP"
+          grep -q "Access-Accept" /tmp/eapol7.log || { echo "FAIL: Expected Access-Accept for no-DLEQ token in password"; cat /tmp/eapol7.log; exit 1; }
+          echo "SUCCESS: No-DLEQ Cashu token (password-only) validated via EAP-TTLS+PAP"
 
-      # ─── Test 8: Cashu token replay → Accept then Reject ───
-      # Verifies replay protection: same token used twice = second attempt rejected.
-      # Uses a DIFFERENT MAC for the replay to avoid session-reconnection path.
-      - name: Test 8 — Cashu token replay → Accept then Reject
+      # ─── Test 8: Cashu no-DLEQ token in username/identity → Access-Accept ───
+      # Same 230-byte no-DLEQ token, but in the identity (username) field instead of password.
+      # Tests the "token in username" path in extractPayment().
+      - name: Test 8 — Cashu no-DLEQ token in username → Access-Accept
         run: |
-          TOKEN=$(node scripts/mint-testnut.js --write-eapol-config /tmp/eapol8a.conf --eap-identity ci-replay-user 2>/tmp/mint8.log)
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq --token-in-username --write-eapol-config /tmp/eapol8.conf 2>/tmp/mint8.log)
           if [ -z "$TOKEN" ]; then
             echo "FAIL: Could not mint Cashu token"
             cat /tmp/mint8.log
@@ -178,21 +186,68 @@ jobs:
           fi
           echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
 
-          echo "--- First use (expect Accept) ---"
-          eapol_test -c /tmp/eapol8a.conf -a "$RADIUS_IP" -s tollgate \
-            -M ff:11:88:99:aa:bb -r 1 -t 30 2>&1 | tee /tmp/eapol8a.log
-          grep -q "Access-Accept" /tmp/eapol8a.log || { echo "FAIL: First use should Accept"; exit 1; }
+          echo "--- EAP-TTLS+PAP (identity-only) against ${RADIUS_IP}:1812 ---"
+          eapol_test -c /tmp/eapol8.conf -a "$RADIUS_IP" -s tollgate \
+            -M ff:33:aa:bb:cc:dd -r 1 -t 30 2>&1 | tee /tmp/eapol8.log
 
-          node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol8b.conf --eap-identity ci-replay-user2
+          grep -q "Access-Accept" /tmp/eapol8.log || { echo "FAIL: Expected Access-Accept for no-DLEQ token in username"; cat /tmp/eapol8.log; exit 1; }
+          echo "SUCCESS: No-DLEQ Cashu token (identity-only) validated via EAP-TTLS+PAP"
+
+      # ─── Test 9: Cashu split token via EAP-TTLS+PAP → Access-Accept ───
+      # Full 378-byte token with DLEQ proof exceeds 253-byte limit.
+      # Split at byte 200: password gets first 200b (with cashuB prefix), identity gets 178b tail.
+      # Go binary detects and reassembles. Tests the split-token fallback path.
+      - name: Test 9 — Cashu split token (with DLEQ) → Access-Accept
+        run: |
+          TOKEN=$(node scripts/mint-testnut.js --write-eapol-config /tmp/eapol9.conf --eap-identity ci-split-user 2>/tmp/mint9.log)
+          if [ -z "$TOKEN" ]; then
+            echo "FAIL: Could not mint Cashu token"
+            cat /tmp/mint9.log
+            exit 1
+          fi
+          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
+
+          # Verify this is a full DLEQ token (should be > 253)
+          if [ ${#TOKEN} -le 253 ]; then
+            echo "FAIL: Expected full DLEQ token > 253 bytes, got ${#TOKEN}"
+            exit 1
+          fi
+
+          echo "--- EAP-TTLS+PAP (split) against ${RADIUS_IP}:1812 ---"
+          eapol_test -c /tmp/eapol9.conf -a "$RADIUS_IP" -s tollgate \
+            -M ff:44:bb:cc:dd:ee -r 1 -t 30 2>&1 | tee /tmp/eapol9.log
+
+          grep -q "Access-Accept" /tmp/eapol9.log || { echo "FAIL: Expected Access-Accept for split Cashu token"; cat /tmp/eapol9.log; exit 1; }
+          echo "SUCCESS: Split Cashu token (with DLEQ) validated via EAP-TTLS+PAP"
+
+      # ─── Test 10: Cashu token replay → Accept then Reject ───
+      # Verifies replay protection: same no-DLEQ token used twice = second attempt rejected.
+      # Uses a DIFFERENT MAC for the replay to avoid session-reconnection path.
+      - name: Test 10 — Cashu no-DLEQ token replay → Accept then Reject
+        run: |
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq --write-eapol-config /tmp/eapol10a.conf 2>/tmp/mint10.log)
+          if [ -z "$TOKEN" ]; then
+            echo "FAIL: Could not mint Cashu token"
+            cat /tmp/mint10.log
+            exit 1
+          fi
+          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
+
+          echo "--- First use (expect Accept) ---"
+          eapol_test -c /tmp/eapol10a.conf -a "$RADIUS_IP" -s tollgate \
+            -M ff:55:cc:dd:ee:f0 -r 1 -t 30 2>&1 | tee /tmp/eapol10a.log
+          grep -q "Access-Accept" /tmp/eapol10a.log || { echo "FAIL: First use should Accept"; exit 1; }
+
+          node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol10b.conf
 
           echo "--- Replay (expect Reject) ---"
-          eapol_test -c /tmp/eapol8b.conf -a "$RADIUS_IP" -s tollgate \
-            -M ff:22:99:aa:bb:cc -r 1 -t 30 2>&1 | tee /tmp/eapol8b.log
-          grep -q "Access-Reject" /tmp/eapol8b.log || { echo "FAIL: Replay should Reject"; exit 1; }
+          eapol_test -c /tmp/eapol10b.conf -a "$RADIUS_IP" -s tollgate \
+            -M ff:66:dd:ee:ff:00 -r 1 -t 30 2>&1 | tee /tmp/eapol10b.log
+          grep -q "Access-Reject" /tmp/eapol10b.log || { echo "FAIL: Replay should Reject"; exit 1; }
           echo "SUCCESS: Replay protection working"
 
-      # ─── Test 9: RadSec (RADIUS over TLS on port 2083) ───
-      - name: Test 9 — RadSec (TLS on port 2083) → Accept
+      # ─── Test 11: RadSec (RADIUS over TLS on port 2083) ───
+      - name: Test 11 — RadSec (TLS on port 2083) → Accept
         run: |
           # Create local TLS tunnel to RadSec port
           socat TCP-LISTEN:11812,reuseaddr,fork SSL:nodns.shop:2083,verify=0 &
@@ -203,15 +258,15 @@ jobs:
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
           Calling-Station-Id = "ff-44-66-77-88-99"
-          NAS-Port = 0' | radclient -x -P tcp -r 1 -t 5 127.0.0.1:11812 auth radsec 2>&1 | tee /tmp/test9.log
+          NAS-Port = 0' | radclient -x -P tcp -r 1 -t 5 127.0.0.1:11812 auth radsec 2>&1 | tee /tmp/test11.log
 
           kill $SOCAT_PID 2>/dev/null
 
-          grep -q "Access-Accept" /tmp/test9.log || { echo "FAIL: Expected Access-Accept via RadSec"; exit 1; }
+          grep -q "Access-Accept" /tmp/test11.log || { echo "FAIL: Expected Access-Accept via RadSec"; exit 1; }
           echo "SUCCESS: RadSec accepted"
 
-      # ─── Test 10: SSH tollgate responds on port 2222 ───
-      - name: Test 10 — SSH tollgate responds on port 2222
+      # ─── Test 12: SSH tollgate responds on port 2222 ───
+      - name: Test 12 — SSH tollgate responds on port 2222
         run: |
           timeout 5 bash -c 'echo | nc nodns.shop 2222' 2>/dev/null | head -1 | grep -q "SSH" \
             || { echo "FAIL: SSH tollgate not responding on port 2222"; exit 1; }

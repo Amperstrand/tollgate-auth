@@ -133,6 +133,14 @@ func isLNURLw(s string) bool {
 	return strings.HasPrefix(lower, "lnurlw")
 }
 
+// base64urlPattern matches strings that contain only base64url characters.
+// Used to detect the tail portion of a split Cashu token in the username field.
+var base64urlPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func isBase64url(s string) bool {
+	return len(s) > 0 && base64urlPattern.MatchString(s)
+}
+
 // sanitizeInput rejects strings containing characters that could break
 // FreeRADIUS exec argument splitting or cause other issues.
 // Rejects: single quotes, backslashes, newlines, null bytes.
@@ -144,27 +152,62 @@ func sanitizeInput(s string) bool {
 	return !strings.ContainsAny(s, "'\\\n\r\x00")
 }
 
+// Split token threshold: Cashu tokens are 378 bytes, RADIUS attributes max 253.
+// We split at 200 bytes — first part goes in password (starts with cashuB prefix),
+// second part goes in username (base64url tail). Both under 253 bytes.
+// No-DLEQ tokens are ~230 bytes and fit in a single field — no split needed.
+const tokenSplitLen = 200
+
 // extractPayment finds a payment credential (Cashu token or LNURLw) in username or password.
-// Priority: whichever field matches first (username checked before password).
-// Rejects inputs containing dangerous characters or exceeding max length.
+//
+// Detection order:
+// 1. Full token in username (cashuA/B prefix in username field)
+// 2. LNURLw in any field
+// 3. Split token (password <= tokenSplitLen starts with cashuB, username is base64url tail)
+// 4. Full token in password/cleartext-password (cashuA/B prefix, must be > tokenSplitLen)
+//
+// The length guard on step 3 prevents misinterpreting a valid 230-byte no-DLEQ token
+// (which starts with "cashuB" just like a split password) as a split. Split passwords
+// are always exactly tokenSplitLen bytes by construction in the mint script.
 func extractPayment(username, password, clearTextPw string) (PaymentCredential, bool) {
+	// Full token in username
 	if isCashuToken(username) && sanitizeInput(username) {
 		return PaymentCredential{Value: username, Source: "username", Type: PaymentCashu}, true
 	}
 	if isLNURLw(username) && sanitizeInput(username) {
 		return PaymentCredential{Value: username, Source: "username", Type: PaymentLNURLW}, true
 	}
-	if isCashuToken(password) && sanitizeInput(password) {
-		return PaymentCredential{Value: password, Source: "password", Type: PaymentCashu}, true
-	}
 	if isLNURLw(password) && sanitizeInput(password) {
 		return PaymentCredential{Value: password, Source: "password", Type: PaymentLNURLW}, true
 	}
-	if isCashuToken(clearTextPw) && sanitizeInput(clearTextPw) {
-		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentCashu}, true
-	}
 	if isLNURLw(clearTextPw) && sanitizeInput(clearTextPw) {
 		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentLNURLW}, true
+	}
+	// Split token: password is the first tokenSplitLen bytes of a 378-byte DLEQ token.
+	// Only triggers when password starts with cashuB AND is exactly tokenSplitLen bytes
+	// (the length our mint script produces) AND username is base64url-only.
+	if isCashuToken(password) && len(password) <= tokenSplitLen &&
+		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) &&
+		sanitizeInput(password) && sanitizeInput(username) {
+		fullToken := password + username
+		if sanitizeInput(fullToken) {
+			return PaymentCredential{Value: fullToken, Source: "split-password+username", Type: PaymentCashu}, true
+		}
+	}
+	if isCashuToken(clearTextPw) && len(clearTextPw) <= tokenSplitLen &&
+		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) &&
+		sanitizeInput(clearTextPw) && sanitizeInput(username) {
+		fullToken := clearTextPw + username
+		if sanitizeInput(fullToken) {
+			return PaymentCredential{Value: fullToken, Source: "split-cleartext+username", Type: PaymentCashu}, true
+		}
+	}
+	// Full token in password (no-DLEQ 230b or any complete token > tokenSplitLen)
+	if isCashuToken(password) && sanitizeInput(password) {
+		return PaymentCredential{Value: password, Source: "password", Type: PaymentCashu}, true
+	}
+	if isCashuToken(clearTextPw) && sanitizeInput(clearTextPw) {
+		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentCashu}, true
 	}
 	return PaymentCredential{}, false
 }

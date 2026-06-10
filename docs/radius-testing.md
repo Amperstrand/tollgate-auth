@@ -13,8 +13,8 @@
   - **Cashu tokens** (`cashuA...` / `cashuB...`) — full decode → verify → redeem
   - **LNURL-withdraw** (`lnurlw...` / `LNURLW...`) — pass-through accept (TODO: claim payment)
 - **EAP methods**:
-  - **EAP-TTLS+PAP** (recommended) — payment in password field, no length limit
-  - **PEAP+MSCHAPv2** (legacy) — payment in username field, <253 byte limit
+  - **EAP-TTLS+PAP** (recommended) — token split: first 200b in password, remaining 178b in username (both under FreeRADIUS's 253-byte diameter2vp limit)
+  - **PEAP+MSCHAPv2** (legacy) — payment in username field only, <253 byte limit
 - Payment accepted from **username OR password** — whichever starts with `cashu` or `lnurlw`
 - Session tracking: MAC-based reconnection (skip payment check for active sessions)
 - **Reply-Message**: Payment info included in Access-Accept (amount, duration, mint)
@@ -178,37 +178,53 @@ radius-server host <server-ip> key radsec tls
 
 ## Full E2E test with eapol_test
 
-`eapol_test` simulates a real WiFi supplicant performing WPA2-Enterprise auth.
-This is the closest you can get to testing with a real phone, and the **only way** to test Cashu tokens over RADIUS — tokens are 378 bytes and exceed the 253-byte RADIUS attribute limit. EAP-TTLS+PAP sends the password inside a TLS tunnel where there's no length limit. See [radius-token-size.md](radius-token-size.md) for details.
+`eapol_test` simulates a real WiFi supplicant performing WPA2-Enterprise auth. This is the **only way** to test Cashu tokens over RADIUS — tokens are 378 bytes and exceed FreeRADIUS's `diameter2vp` 253-byte limit inside EAP-TTLS tunnels.
 
-### EAP-TTLS+PAP (recommended — Cashu tokens work here)
+The token must be split: first 200 bytes in password, remaining 178 bytes in username. The `scripts/mint-testnut.js` script handles this automatically. See [radius-token-size.md](radius-token-size.md) for details on why the split is necessary.
 
-Token goes in the **password** field. No length limit inside TLS tunnel.
+### EAP-TTLS+PAP with Cashu token (split)
 
 ```bash
-sudo apt install wpasupplicant
+# Install eapol_test (Ubuntu)
+sudo apt install eapoltest
 
-cat > /tmp/eapol-ttls-pap.conf << 'EOF'
+# Mint a test token and write eapol_test config (token is split automatically)
+node scripts/mint-testnut.js --write-eapol-config /tmp/eapol.conf
+# Output: Wrote eapol_test config to /tmp/eapol.conf (password=200b, identity=178b)
+
+# Resolve IP first — eapol_test requires IP address, not hostname
+RADIUS_IP=$(dig +short nodns.shop A | head -1)
+
+# Run (flags: -a=server IP, -p=port, -s=shared secret)
+eapol_test -c /tmp/eapol.conf -a "$RADIUS_IP" -p 1812 -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
+# Success: "MPPE keys OK: 1  mismatch: 0" and "SUCCESS"
+```
+
+> **Note**: eapol_test flags differ between builds. Ubuntu's `eapoltest` package uses `-p` for port and `-s` for shared secret. Builds from source (`wpasupplicant` source package) may use different flags.
+
+### EAP-TTLS+PAP with LNURLw (no split needed)
+
+LNURLw codes are short (~50 bytes) and fit in a single field:
+
+```bash
+cat > /tmp/eapol-lnurlw.conf << 'EOF'
 network={
     ssid="Cashu-WiFi"
     key_mgmt=IEEE8021X
     eap=TTLS
     identity="tollgate"
-    password="cashuB...paste-your-token-here..."
+    password="lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7"
     phase2="auth=PAP"
     anonymous_identity="anonymous"
 }
 EOF
 
-sudo eapol_test -c /tmp/eapol-ttls-pap.conf -a nodns.shop -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
-# Success: "Access-Accept"
+eapol_test -c /tmp/eapol-lnurlw.conf -a "$RADIUS_IP" -p 1812 -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
 ```
 
-> **Note**: `key_mgmt=IEEE8021X` (not `WPA-EAP`) for direct RADIUS testing. No `ca_cert` needed — the server uses a self-signed cert and verification is skipped. The `-M` flag sets the MAC address for session tracking.
+### PEAP+MSCHAPv2 (legacy — Cashu tokens do NOT work)
 
-### PEAP+MSCHAPv2 (legacy — Cashu tokens do NOT work here)
-
-Token goes in the **username** field. RADIUS User-Name is limited to 253 bytes — **Cashu tokens (378 bytes) cannot be sent this way.** Only LNURLw codes or other short credentials work with PEAP.
+Token must fit in User-Name alone (253-byte limit). Cashu tokens (378 bytes) cannot be sent this way. Only LNURLw codes or other short credentials work with PEAP.
 
 ```bash
 cat > /tmp/eapol-peap.conf << 'EOF'
@@ -223,7 +239,7 @@ network={
 }
 EOF
 
-sudo eapol_test -c /tmp/eapol-peap.conf -a nodns.shop -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
+eapol_test -c /tmp/eapol-peap.conf -a "$RADIUS_IP" -p 1812 -s tollgate -M aa:bb:cc:dd:ee:ff -r 1 -t 30
 ```
 
 ---
@@ -267,7 +283,7 @@ config wifi-iface 'default_radio0'
 
 ## What the CI checks
 
-The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `main`. It uses `radclient` with fake MAC addresses to test the full RADIUS flow:
+The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `main`. All tests are strict — a single failure stops the pipeline.
 
 1. Fresh `lnurlw` → Accept + Reply-Message
 2. Replay same code (different MAC) → Reject (replay protection)
@@ -275,7 +291,12 @@ The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `
 4. `lnurlw` in password field → Accept
 5. Uppercase `LNURLW` → Accept
 6. Invalid credentials → Reject
-7. SSH tollgate responds on port 2222
+7. **Cashu token via EAP-TTLS+PAP** (8 sats, minted fresh in CI, split token sent through TLS tunnel) → Access-Accept
+8. **Cashu token replay** (same token, different MAC) → Access-Reject
+9. **RadSec** (TLS on port 2083 via socat tunnel) → Accept via encrypted transport
+10. **SSH tollgate** responds with SSH banner on port 2222
+
+Tests 7-8 use `eapol_test` with split Cashu tokens (200b password + 178b identity). The token is minted fresh in CI using `@cashu/cashu-ts` from `testnut.cashu.exchange`.
 
 ---
 
@@ -519,6 +540,10 @@ This is primarily relevant for prepaid ISP models common in developing markets.
 - **Self-signed cert** — phones show certificate warning
 - **LNURL-w claiming not implemented** — lnurlw codes are accepted without claiming the payment
 - **No IP addresses in this project** — only domain names (`nodns.shop`, `radius.nodns.shop`)
+- **Cashu tokens require split for EAP-TTLS** — 378-byte tokens must be split at byte 200 across password (head) and username (tail) due to FreeRADIUS's diameter2vp 253-byte limit
+- **Split tokens impractical for real phones** — users would need to paste two separate strings into identity and password fields manually
+- **Cleartext-Password handling** — FreeRADIUS inner-tunnel delivers PAP password as `Cleartext-Password` (not `User-Password`), requiring explicit config to copy it
+- **cdk-cli requires sudoers config** — FreeRADIUS runs as `freerad`, needs NOPASSWD sudo to run `cdk-cli` as `cashu-wallet` user
 
 ---
 
