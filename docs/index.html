@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tollgate-ssh — test faucet</title>
+<title>tollgate-auth — test faucet</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -136,10 +136,10 @@
 </head>
 <body>
 
-<h1>tollgate-ssh</h1>
+<h1>tollgate-auth</h1>
 <p class="tagline">ecash for SSH</p>
 <p class="subtitle">
-  Get a free <strong>worthless</strong> test token from the <a href="https://testnut.cashu.exchange">testnut</a> fake mint, paste one command, get a Linux shell for 8 minutes.
+  Get a free <strong>worthless</strong> test token from the <a href="https://testnut.cashu.space">testnut</a> fake mint, paste one command, get a Linux shell for 8 minutes.
   These tokens have <strong>zero monetary value</strong> — they're for testing only.
 </p>
 
@@ -177,12 +177,12 @@
   </p>
   <p class="warn">
     Tokens are from <strong>testnut</strong> — a fake mint for testing Cashu wallets. They are <strong>not real Bitcoin</strong> and have zero monetary value.
-    Guests get real shell access on a real server. <a href="https://github.com/Amperstrand/tollgate-ssh#security-disclaimer">Read the security disclaimer</a>.
+    Guests get real shell access on a real server. <a href="https://github.com/Amperstrand/tollgate-auth#security-disclaimer">Read the security disclaimer</a>.
   </p>
 </div>
 
 <div class="footer">
-  <a href="https://github.com/Amperstrand/tollgate-ssh">GitHub</a>
+  <a href="https://github.com/Amperstrand/tollgate-auth">GitHub</a>
   &middot;
   <a href="https://cashu.space">Cashu</a>
   &middot;
@@ -192,7 +192,7 @@
 <script type="module">
 import { Wallet, getEncodedToken, MintQuoteState } from 'https://esm.sh/@cashu/cashu-ts@4.5.1';
 
-const MINT_URL = 'https://testnut.cashu.exchange';
+const MINT_URL = 'https://testnut.cashu.space';
 const TOLLGATE_HOST = 'npub1mv7l45exqsu5nr5tnefkr33ruhzjj4r8prg6qtcedv4lyf3rzguqptuwm4.nodns.shop';
 const AMOUNT = 8;
 

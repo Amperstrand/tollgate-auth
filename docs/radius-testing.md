@@ -2,11 +2,11 @@
 
 **Live instance**: `nodns.shop:1812` (RADIUS) + `nodns.shop:2222` (SSH)
 **Shared secret**: `tollgate`
-**CI status**: [![E2E Demo](https://github.com/Amperstrand/tollgate-ssh/actions/workflows/e2e-demo.yml/badge.svg)](https://github.com/Amperstrand/tollgate-ssh/actions/workflows/e2e-demo.yml)
+**CI status**: [![E2E Demo](https://github.com/Amperstrand/tollgate-auth/actions/workflows/e2e-demo.yml/badge.svg)](https://github.com/Amperstrand/tollgate-auth/actions/workflows/e2e-demo.yml)
 
 ## What's live
 
-- **RADIUS** (WiFi auth): FreeRADIUS 3 on `radius.nodns.shop:1812/1813`
+- **RADIUS** (WiFi auth): FreeRADIUS 3 on `nodns.shop:1812/1813`
 - **SSH** (shell access): tollgate-auth-ssh on `nodns.shop:2222`
 - **Accepted payment methods**:
   - **Cashu tokens** (`cashuA...` / `cashuB...`) — full decode → verify → redeem
@@ -16,7 +16,9 @@
   - **PEAP+MSCHAPv2** (legacy) — payment in username field, <253 byte limit
 - Payment accepted from **username OR password** — whichever starts with `cashu` or `lnurlw`
 - Session tracking: MAC-based reconnection (skip payment check for active sessions)
-- Token source: [testnut.cashu.exchange](https://testnut.cashu.exchange) (worthless test tokens)
+- **Reply-Message**: Payment info included in Access-Accept (amount, duration, mint)
+- **Mint allowlist**: Only test mints accepted (regex `(?i)test`)
+- Token source: [testnut.cashu.space](https://testnut.cashu.space) (worthless test tokens)
 
 ## Architecture: Bootstrap Token → Sustained Access
 
@@ -44,12 +46,8 @@ sudo apt install freeradius-utils   # Debian/Ubuntu
 ```bash
 $ radtest "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7" "anything" nodns.shop 0 tollgate
 
-Sent Access-Request Id 125 from 0.0.0.0:51698 to 127.0.0.1:1812 length 122
-        User-Name = "lnurlw1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7"
-        User-Password = "anything"
-        NAS-IP-Address = 127.0.0.1
-        NAS-Port = 0
-Received Access-Accept Id 125 from 127.0.0.1:1812 to 127.0.0.1:51698 length 44
+Received Access-Accept
+        Reply-Message = "Valid LNURLw code: 60m access (TODO: claim Lightning payment)"
         Session-Timeout = 3600
 ```
 
@@ -59,6 +57,7 @@ Received Access-Accept Id 125 from 127.0.0.1:1812 to 127.0.0.1:51698 length 44
 $ radtest "wifi-user" "lnurlw1aa68gurn8ghj7ampf3kx2ar0veekzar0wd5xjtnrdakj7" nodns.shop 0 tollgate
 
 Received Access-Accept
+        Reply-Message = "Valid LNURLw code: 60m access (TODO: claim Lightning payment)"
         Session-Timeout = 3600
 ```
 
@@ -77,6 +76,44 @@ Received Access-Accept
 $ radtest "not-a-token" "bad-password" nodns.shop 0 tollgate
 
 Received Access-Reject
+```
+
+---
+
+## Testing with radclient (fake MAC addresses)
+
+`radtest` doesn't send `Calling-Station-Id`, so all requests share one anonymous session. Use `radclient` to send custom MAC addresses for proper replay/reconnection testing:
+
+### Fresh payment → Accept
+
+```bash
+echo 'User-Name = "lnurlw1testmac12345kx2ar0veekzar0wd5xjtnrdakj7"
+User-Password = "anything"
+NAS-IP-Address = 10.0.0.1
+Calling-Station-Id = "aa-bb-cc-dd-ee-ff"
+NAS-Port = 0' | radclient -x nodns.shop auth tollgate
+```
+
+### Replay same code, different MAC → Reject
+
+```bash
+echo 'User-Name = "lnurlw1testmac12345kx2ar0veekzar0wd5xjtnrdakj7"
+User-Password = "anything"
+NAS-IP-Address = 10.0.0.1
+Calling-Station-Id = "11-22-33-44-55-66"
+NAS-Port = 0' | radclient -x nodns.shop auth tollgate
+# → Access-Reject + Reply-Message = "Rejected: LNURLw code already used"
+```
+
+### Same MAC, different code → Accept (reconnection)
+
+```bash
+echo 'User-Name = "lnurlw1differentcode7kx2ar0veekzar0wd5xjtnrdakj7"
+User-Password = "anything"
+NAS-IP-Address = 10.0.0.1
+Calling-Station-Id = "aa-bb-cc-dd-ee-ff"
+NAS-Port = 0' | radclient -x nodns.shop auth tollgate
+# → Access-Accept + Reply-Message = "Session resumed: 59m remaining..."
 ```
 
 ---
@@ -171,18 +208,15 @@ config wifi-iface 'default_radio0'
 
 ## What the CI checks
 
-The [E2E Demo workflow](../../actions/workflows/e2e-demo.yml) runs automatically on:
-- Every push to `main`
-- Every 6 hours (verifies deployment is alive)
-- Manual trigger from GitHub Actions tab
+The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `main`. It uses `radclient` with fake MAC addresses to test the full RADIUS flow:
 
-It verifies:
-1. Go binaries compile (`go vet` + cross-compile)
-2. `lnurlw` in username → Access-Accept
-3. `lnurlw` in password → Access-Accept
-4. Uppercase `LNURLW` → Access-Accept
-5. Invalid credentials → Access-Reject
-6. SSH tollgate on port 2222 responds with SSH banner
+1. Fresh `lnurlw` → Accept + Reply-Message
+2. Replay same code (different MAC) → Reject (replay protection)
+3. Same MAC, different code → Accept (session reconnection)
+4. `lnurlw` in password field → Accept
+5. Uppercase `LNURLW` → Accept
+6. Invalid credentials → Reject
+7. SSH tollgate responds on port 2222
 
 ---
 
@@ -193,9 +227,10 @@ It verifies:
 Full validation pipeline:
 1. Decode token (V3 JSON `cashuA` / V4 CBOR `cashuB`)
 2. Replay check (SHA256 hash against spent list)
-3. Verify unspent with mint API (`POST /v1/checkstate`)
-4. Redeem to wallet (`cdk-cli receive`)
-5. Create session: 1 sat = 60 seconds
+3. Mint allowlist (only test mints matching `(?i)test`)
+4. Verify unspent with mint API (`POST /v1/checkstate`)
+5. Redeem to wallet (`cdk-cli receive`)
+6. Create session: 1 sat = 60 seconds
 
 ### LNURL-withdraw (lnurlw)
 
@@ -213,7 +248,6 @@ Currently: any `lnurlw...` string gets 1 hour access, replay-protected by hash.
 
 - **Bootstrap token only** — no automated payment renewal yet
 - **Self-signed cert** — phones show certificate warning
-- **Session reconnection** — MAC-based; `radtest` sends no MAC so all requests share one anonymous session (works correctly with real APs)
 - **LNURL-w claiming not implemented** — lnurlw codes are accepted without claiming the payment
 - **No IP addresses in this project** — only domain names (`nodns.shop`, `radius.nodns.shop`)
 
@@ -226,10 +260,10 @@ Currently: any `lnurlw...` string gets 1 hour access, replay-protected by hash.
 systemctl status freeradius
 
 # View token validation logs
-tail -f /opt/cashu-tollgate/radius-tokens.log
+tail -f /opt/tollgate-auth/radius-tokens.log
 
 # Check active sessions
-ls /opt/cashu-tollgate/radius-sessions/
+ls /opt/tollgate-auth/radius-sessions/
 
 # Test binary directly
 /usr/local/bin/tollgate-auth-radius "lnurlw1test..." "aa:bb:cc:dd:ee:ff"

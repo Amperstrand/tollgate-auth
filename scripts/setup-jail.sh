@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-jail.sh — Create the busybox chroot template for tollgate-ssh
+# setup-jail.sh — Create the busybox chroot template for tollgate-auth-ssh
 # Run once on the target server as root.
 set -euo pipefail
 

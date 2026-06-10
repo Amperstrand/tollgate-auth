@@ -66,7 +66,7 @@ ln -sf ../sites-available/default "$CONF_DIR/sites-enabled/default" 2>/dev/null 
 echo ">>> Installing session cleanup cron..."
 cat > /etc/cron.d/tollgate-radius-cleanup << 'CRON'
 # Every 5 minutes, clean up expired RADIUS sessions
-*/5 * * * * root find /opt/cashu-tollgate/radius-sessions -name "*.json" -mmin +60 -delete 2>/dev/null
+*/5 * * * * root find /opt/tollgate-auth/radius-sessions -name "*.json" -mmin +60 -delete 2>/dev/null ; find /opt/cashu-tollgate/radius-sessions -name "*.json" -mmin +60 -delete 2>/dev/null
 CRON
 
 echo ">>> Restarting FreeRADIUS..."
