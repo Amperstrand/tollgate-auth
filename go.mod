@@ -1,4 +1,4 @@
-module cashu-tollgate
+module tollgate-auth
 
 go 1.22
 
