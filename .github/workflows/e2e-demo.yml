@@ -143,13 +143,13 @@ jobs:
 
           # Install cashu-ts and mint fresh token
           npm install --no-package-lock @cashu/cashu-ts@4.5.1 2>&1 | tail -1
-          TOKEN=$(node scripts/mint-testnut.js 2>/tmp/mint7.log)
+          TOKEN=$(node scripts/mint-testnut.js 2>&1 | tee /tmp/mint7.log)
           if [ -z "$TOKEN" ]; then
             echo "FAIL: Could not mint Cashu token"
             cat /tmp/mint7.log
             exit 1
           fi
-          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
+          echo "Minted: $(echo "$TOKEN" | head -c 40)... ($(echo -n "$TOKEN" | wc -c) bytes)"
 
           # Write eapol_test config (EAP-TTLS+PAP, no cert verification)
           cat > /tmp/eapol_test.conf << 'EOFCONF'
@@ -180,13 +180,13 @@ jobs:
       - name: Test 8 — Cashu token replay → Accept then Reject
         run: |
           # Mint fresh token
-          TOKEN=$(node scripts/mint-testnut.js 2>/tmp/mint8.log)
+          TOKEN=$(node scripts/mint-testnut.js 2>&1 | tee /tmp/mint8.log)
           if [ -z "$TOKEN" ]; then
             echo "FAIL: Could not mint Cashu token"
             cat /tmp/mint8.log
             exit 1
           fi
-          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
+          echo "Minted: $(echo "$TOKEN" | head -c 40)... ($(echo -n "$TOKEN" | wc -c) bytes)"
 
           # First use → Accept
           cat > /tmp/eapol8a.conf << 'EOFCONF'
