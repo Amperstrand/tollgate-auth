@@ -13,7 +13,7 @@
 
 exec cashu-auth {
     wait = yes
-    program = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}'"
+    program = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}' '%{Cleartext-Password}'"
     output_pairs = reply
     timeout = 15
 }

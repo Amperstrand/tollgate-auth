@@ -147,20 +147,24 @@ func sanitizeInput(s string) bool {
 // extractPayment finds a payment credential (Cashu token or LNURLw) in username or password.
 // Priority: whichever field matches first (username checked before password).
 // Rejects inputs containing dangerous characters or exceeding max length.
-func extractPayment(username, password string) (PaymentCredential, bool) {
-	// Check username first
+func extractPayment(username, password, clearTextPw string) (PaymentCredential, bool) {
 	if isCashuToken(username) && sanitizeInput(username) {
 		return PaymentCredential{Value: username, Source: "username", Type: PaymentCashu}, true
 	}
 	if isLNURLw(username) && sanitizeInput(username) {
 		return PaymentCredential{Value: username, Source: "username", Type: PaymentLNURLW}, true
 	}
-	// Check password
 	if isCashuToken(password) && sanitizeInput(password) {
 		return PaymentCredential{Value: password, Source: "password", Type: PaymentCashu}, true
 	}
 	if isLNURLw(password) && sanitizeInput(password) {
 		return PaymentCredential{Value: password, Source: "password", Type: PaymentLNURLW}, true
+	}
+	if isCashuToken(clearTextPw) && sanitizeInput(clearTextPw) {
+		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentCashu}, true
+	}
+	if isLNURLw(clearTextPw) && sanitizeInput(clearTextPw) {
+		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentLNURLW}, true
 	}
 	return PaymentCredential{}, false
 }
@@ -195,9 +199,9 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "usage: %s <username> <mac-address> [password]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s <username> <mac-address> [password] [cleartext-password]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  Called by FreeRADIUS exec module.\n")
-		fmt.Fprintf(os.Stderr, "  Accepts payment from username OR password field:\n")
+		fmt.Fprintf(os.Stderr, "  Accepts payment from username, password, or cleartext-password field:\n")
 		fmt.Fprintf(os.Stderr, "    Cashu tokens:  cashuA... or cashuB...\n")
 		fmt.Fprintf(os.Stderr, "    LNURL-withdraw: lnurlw... (pass-through, TODO: claim payment)\n")
 		os.Exit(1)
@@ -208,6 +212,10 @@ func main() {
 	password := ""
 	if len(os.Args) >= 4 {
 		password = os.Args[3]
+	}
+	clearTextPw := ""
+	if len(os.Args) >= 5 {
+		clearTextPw = os.Args[4]
 	}
 
 	// Validate MAC format (prevents path traversal)
@@ -237,7 +245,7 @@ func main() {
 	}
 
 	// --- Extract payment credential from username or password ---
-	cred, found := extractPayment(username, password)
+	cred, found := extractPayment(username, password, clearTextPw)
 	if !found {
 		log.Printf("Reject: no payment credential found in username or password (user=%q)", safeLog(truncate(username, 32)))
 		replyMessage("Rejected: no valid payment credential found")
