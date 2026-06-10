@@ -142,6 +142,9 @@ jobs:
       # ─── Test 7: Cashu token via EAP-TTLS+PAP → Access-Accept ───
       # Cashu tokens are 378 bytes (fixed), exceeding RADIUS's 253-byte attribute limit.
       # EAP-TTLS+PAP sends the password inside a TLS tunnel where there's no length limit.
+      - name: Resolve RADIUS server IP
+        run: echo "RADIUS_IP=$(dig +short nodns.shop A | head -1)" >> "$GITHUB_ENV"
+
       - name: Test 7 — Cashu token via EAP-TTLS+PAP → Access-Accept
         run: |
           echo "eapol_test: $(which eapol_test)"
@@ -155,8 +158,8 @@ jobs:
           fi
           echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
 
-          echo "--- EAP-TTLS+PAP against nodns.shop:1812 ---"
-          eapol_test -c /tmp/eapol7.conf -a nodns.shop -s tollgate \
+          echo "--- EAP-TTLS+PAP against ${RADIUS_IP}:1812 ---"
+          eapol_test -c /tmp/eapol7.conf -a "$RADIUS_IP" -s tollgate \
             -M ff:00:77:88:99:aa -r 1 -t 30 2>&1 | tee /tmp/eapol7.log
 
           grep -q "Access-Accept" /tmp/eapol7.log || { echo "FAIL: Expected Access-Accept for Cashu via EAP"; cat /tmp/eapol7.log; exit 1; }
@@ -176,14 +179,14 @@ jobs:
           echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
 
           echo "--- First use (expect Accept) ---"
-          eapol_test -c /tmp/eapol8a.conf -a nodns.shop -s tollgate \
+          eapol_test -c /tmp/eapol8a.conf -a "$RADIUS_IP" -s tollgate \
             -M ff:11:88:99:aa:bb -r 1 -t 30 2>&1 | tee /tmp/eapol8a.log
           grep -q "Access-Accept" /tmp/eapol8a.log || { echo "FAIL: First use should Accept"; exit 1; }
 
           node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol8b.conf --eap-identity ci-replay-user2
 
           echo "--- Replay (expect Reject) ---"
-          eapol_test -c /tmp/eapol8b.conf -a nodns.shop -s tollgate \
+          eapol_test -c /tmp/eapol8b.conf -a "$RADIUS_IP" -s tollgate \
             -M ff:22:99:aa:bb:cc -r 1 -t 30 2>&1 | tee /tmp/eapol8b.log
           grep -q "Access-Reject" /tmp/eapol8b.log || { echo "FAIL: Replay should Reject"; exit 1; }
           echo "SUCCESS: Replay protection working"
