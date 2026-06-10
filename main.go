@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-
 	"strings"
 	"sync"
 	"syscall"
@@ -28,9 +27,11 @@ import (
 // --- Configuration ---
 
 const (
-	Port            = 22
+	Port            = 2222
 	RateSecPerSat   = 60
 	BaseDir         = "/opt/cashu-tollgate"
+	JailTemplate    = BaseDir + "/jail-template"
+	SessionDir      = BaseDir + "/sessions"
 	WalletFile      = BaseDir + "/wallet.jsonl"
 	TokensLogFile   = BaseDir + "/tokens.log"
 	SpentHashesFile = BaseDir + "/spent.txt"
@@ -39,11 +40,11 @@ const (
 // --- Token Types ---
 
 type TokenData struct {
-	Mint   string     `json:"mint"`
-	Unit   string     `json:"unit"`
-	Memo   string     `json:"memo"`
-	Amount int        `json:"amount"`
-	Proofs []ProofEntry `json:"proofs"`
+	Mint   string        `json:"mint"`
+	Unit   string        `json:"unit"`
+	Memo   string        `json:"memo"`
+	Amount int           `json:"amount"`
+	Proofs []ProofEntry  `json:"proofs"`
 }
 
 type ProofEntry struct {
@@ -55,10 +56,10 @@ type ProofEntry struct {
 
 // V4 CBOR types
 type V4Token struct {
-	Mint  string      `cbor:"m"`
-	Unit  string      `cbor:"u"`
-	Memo  string      `cbor:"d"`
-	Token []V4Entry   `cbor:"t"`
+	Mint  string    `cbor:"m"`
+	Unit  string    `cbor:"u"`
+	Memo  string    `cbor:"d"`
+	Token []V4Entry `cbor:"t"`
 }
 
 type V4Entry struct {
@@ -107,7 +108,6 @@ type CheckStateResponse struct {
 // --- Token Decoding ---
 
 func b64urlDecode(s string) ([]byte, error) {
-	// Add padding
 	s = strings.ReplaceAll(s, "-", "+")
 	s = strings.ReplaceAll(s, "_", "/")
 	switch len(s) % 4 {
@@ -230,7 +230,6 @@ func verifyWithMint(tokenData *TokenData) (bool, string) {
 		return true, "OK"
 	}
 
-	// Test mint: verify unspent
 	reqBody := CheckStateRequest{}
 	for _, p := range tokenData.Proofs {
 		reqBody.Proofs = append(reqBody.Proofs, struct {
@@ -329,34 +328,52 @@ func storeInWallet(tokenStr string, tokenData *TokenData) {
 	log.Printf("Wallet +%d %s from %s", tokenData.Amount, tokenData.Unit, tokenData.Mint)
 }
 
-// --- Guest User Management ---
+// --- Session Identity ---
 
 func guestUsername(tokenStr string) string {
 	return "g-" + tokenHash(tokenStr)[:8]
 }
 
-func createGuestUser(name string) error {
-	cmd := exec.Command("useradd", "-m", "-d", "/home/"+name, "-s", "/bin/bash", name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("useradd failed: %s: %w", strings.TrimSpace(string(out)), err)
+// --- Jail Management ---
+
+type SessionMeta struct {
+	Started  float64 `json:"started"`
+	Duration int     `json:"duration"`
+	Guest    string  `json:"guest"`
+	Mint     string  `json:"mint"`
+	Amount   int     `json:"amount"`
+}
+
+func createJail(guest string, tokenData *TokenData, seconds int) error {
+	jailPath := SessionDir + "/" + guest
+
+	cmd := exec.Command("cp", "-a", JailTemplate, jailPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("jail copy failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	home := "/home/" + name
-	exec.Command("chmod", "700", home).Run()
-
-	bashrc := "export PS1=\"\\u@tollgate:\\w\\$ \"\nexport PATH=\"/usr/local/bin:/usr/bin:/bin:/usr/games\"\n"
-	rcPath := home + "/.bashrc"
-	os.WriteFile(rcPath, []byte(bashrc), 0644)
-	exec.Command("chown", name+":"+name, rcPath).Run()
+	// Write session metadata inside the jail
+	meta := SessionMeta{
+		Started:  float64(time.Now().Unix()),
+		Duration: seconds,
+		Guest:    guest,
+		Mint:     tokenData.Mint,
+		Amount:   tokenData.Amount,
+	}
+	data, _ := json.Marshal(meta)
+	metaPath := jailPath + "/home/nobody/.tollgate"
+	if err := os.WriteFile(metaPath, data, 0600); err != nil {
+		return fmt.Errorf("write metadata failed: %w", err)
+	}
+	os.Chown(metaPath, 65534, 65534)
 
 	return nil
 }
 
-func cleanupGuest(name string) {
-	log.Printf("Cleaning up guest: %s", name)
-	exec.Command("pkill", "-u", name).Run()
-	exec.Command("userdel", "-r", "-f", name).Run()
+func cleanupJail(name string) {
+	log.Printf("Cleaning up jail: %s", name)
+	jailPath := SessionDir + "/" + name
+	exec.Command("rm", "-rf", jailPath).Run()
 }
 
 func redeemToken(tokenStr string) (int, error) {
@@ -390,30 +407,6 @@ func setWinsize(f *os.File, w, h int) {
 	)
 }
 
-// --- Session Metadata ---
-
-type SessionMeta struct {
-	Started  float64 `json:"started"`
-	Duration int     `json:"duration"`
-	Guest    string  `json:"guest"`
-	Mint     string  `json:"mint"`
-	Amount   int     `json:"amount"`
-}
-
-func writeSessionMeta(guest string, tokenData *TokenData, seconds int) {
-	meta := SessionMeta{
-		Started:  float64(time.Now().UnixMilli()) / 1000.0,
-		Duration: seconds,
-		Guest:    guest,
-		Mint:     tokenData.Mint,
-		Amount:   tokenData.Amount,
-	}
-	data, _ := json.Marshal(meta)
-	path := "/home/" + guest + "/.tollgate"
-	os.WriteFile(path, data, 0600)
-	exec.Command("chown", guest+":"+guest, path).Run()
-}
-
 // --- MOTD ---
 
 func renderMOTD(tokenData *TokenData, guest string, seconds int) string {
@@ -439,8 +432,8 @@ func renderMOTD(tokenData *TokenData, guest string, seconds int) string {
 			"  |  User:   %-28s |\r\n"+
 			"  |  Test:   %-28s |\r\n"+
 			"  +======================================+\r\n"+
-			"  |  Run 'timeleft' to see remaining time|\r\n"+
-			"  |  Session self-destructs on timeout.  |\r\n"+
+			"  |  Type 'timeleft' to see time left    |\r\n"+
+			"  |  Session ends when time runs out.    |\r\n"+
 			"  +======================================+\r\n"+
 			"\r\n",
 		mintDisplay, minutes, tokenData.Unit, minutes, seconds, guest, testStr,
@@ -467,6 +460,7 @@ func markSpentSafe(thash string) {
 
 func main() {
 	os.MkdirAll(BaseDir, 0755)
+	os.MkdirAll(SessionDir, 0755)
 
 	ssh.Handle(func(s ssh.Session) {
 		username := s.User()
@@ -505,7 +499,7 @@ func main() {
 		if _, err := redeemToken(username); err != nil {
 			log.Printf("Token redemption failed: %v", err)
 			logToken(username, tokenData, guest, false)
-			io.WriteString(s, fmt.Sprintf("\r\nError: token redemption failed\r\n\r\n"))
+			io.WriteString(s, "\r\nError: token redemption failed\r\n\r\n")
 			s.Exit(1)
 			return
 		}
@@ -515,23 +509,25 @@ func main() {
 		markSpentSafe(thash)
 		logToken(username, tokenData, guest, true)
 
-		// 6. Create guest user
-		if err := createGuestUser(guest); err != nil {
-			log.Printf("Failed to create guest: %v", err)
-			io.WriteString(s, "\r\nError: could not create guest account\r\n\r\n")
+		// 6. Create jail
+		if err := createJail(guest, tokenData, seconds); err != nil {
+			log.Printf("Failed to create jail: %v", err)
+			io.WriteString(s, "\r\nError: could not create session\r\n\r\n")
 			s.Exit(1)
 			return
 		}
 
-		// 7. Write session metadata
-		writeSessionMeta(guest, tokenData, seconds)
-
-		// 8. MOTD
+		// 7. MOTD
 		io.WriteString(s, renderMOTD(tokenData, guest, seconds))
 
-		// 9. Spawn bash as guest inside a PTY
+		// 8. Spawn chroot shell inside PTY
+		jailPath := SessionDir + "/" + guest
 		ptyReq, winCh, isPty := s.Pty()
-		cmd := exec.Command("sudo", "-u", guest, "-H", "bash", "-i")
+		cmd := exec.Command("chroot", "--userspec=nobody:nogroup", jailPath, "/bin/sh", "-l")
+		cmd.Env = []string{
+			"HOME=/home/nobody",
+			"PATH=/bin",
+		}
 		if isPty {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("TERM=%s", ptyReq.Term))
 		}
@@ -539,14 +535,15 @@ func main() {
 		ptmx, err := pty.Start(cmd)
 		if err != nil {
 			log.Printf("PTY start failed: %v", err)
-			cleanupGuest(guest)
+			cleanupJail(guest)
 			io.WriteString(s, "\r\nError: could not start shell\r\n\r\n")
 			s.Exit(1)
 			return
 		}
 
-		log.Printf("Bash PID=%d started for %s", cmd.Process.Pid, guest)
+		log.Printf("Chroot shell PID=%d for %s", cmd.Process.Pid, guest)
 
+		sessionStart := time.Now()
 		done := make(chan struct{})
 		cleanupOnce := sync.Once{}
 		cleanup := func() {
@@ -555,7 +552,7 @@ func main() {
 				cmd.Process.Kill()
 				cmd.Wait()
 				s.Close()
-				cleanupGuest(guest)
+				cleanupJail(guest)
 				log.Printf("Session ended: %s", guest)
 			})
 		}
@@ -567,15 +564,42 @@ func main() {
 			}
 		}()
 
+		// Timer: kill session on timeout
 		go func() {
 			select {
 			case <-time.After(time.Duration(seconds) * time.Second):
 				log.Printf("Time's up: %s", guest)
-				io.WriteString(s, "\r\n=== Time's up! Session ending. ===\r\n")
+				io.WriteString(s, "\r\n\r\n  === Time's up! Session ending. ===\r\n")
 				cmd.Process.Signal(syscall.SIGTERM)
 				time.Sleep(500 * time.Millisecond)
 				cleanup()
 			case <-done:
+			}
+		}()
+
+		// Periodic time reminder
+		go func() {
+			reminderInterval := 60 * time.Second
+			// For short sessions (< 2 min), remind every 15 seconds
+			if seconds < 120 {
+				reminderInterval = 15 * time.Second
+			}
+			ticker := time.NewTicker(reminderInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					elapsed := time.Since(sessionStart)
+					remaining := time.Duration(seconds)*time.Second - elapsed
+					if remaining <= 0 {
+						return
+					}
+					mins := int(remaining.Minutes())
+					secs := int(remaining.Seconds()) % 60
+					io.WriteString(s, fmt.Sprintf("\r\n  [%dm %02ds remaining]\r\n", mins, secs))
+				case <-done:
+					return
+				}
 			}
 		}()
 
@@ -622,6 +646,8 @@ func main() {
 	// No auth - accept any username (the token IS the auth)
 
 	log.Printf("Cashu Tollgate listening on port %d", Port)
+	log.Printf("Jail template: %s", JailTemplate)
+	log.Printf("Session dir: %s", SessionDir)
 	log.Printf("Wallet: %s", WalletFile)
 	log.Printf("Token log: %s", TokensLogFile)
 

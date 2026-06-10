@@ -1,4 +1,4 @@
-.PHONY: build build-linux deploy clean
+.PHONY: build build-linux deploy deploy-jail deploy-faucet clean
 
 BINARY := cashu-tollgate
 REMOTE_USER := debian
@@ -18,9 +18,15 @@ deploy: build-linux
 		'sudo systemctl stop cashu-tollgate && \
 		 sudo cp /tmp/$(BINARY) $(REMOTE_DIR)/$(BINARY) && \
 		 sudo chmod +x $(REMOTE_DIR)/$(BINARY) && \
+		 sudo mkdir -p $(REMOTE_DIR)/sessions && \
 		 sudo systemctl start cashu-tollgate && \
 		 sleep 2 && \
 		 sudo systemctl status cashu-tollgate --no-pager | tail -5'
+
+deploy-jail:
+	scp -P $(REMOTE_PORT) scripts/setup-jail.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/setup-jail.sh
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'sudo bash /tmp/setup-jail.sh'
 
 deploy-faucet:
 	scp -P $(REMOTE_PORT) docs/index.html $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-faucet.html
