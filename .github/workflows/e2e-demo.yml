@@ -129,7 +129,8 @@ jobs:
             sudo apt-get update -qq 2>/dev/null
             sudo apt-get build-dep -y -qq wpasupplicant 2>/dev/null || \
               sudo apt-get install -y -qq libssl-dev libnl-3-dev libnl-genl-3-dev pkg-config libdbus-1-dev 2>/dev/null
-            mkdir -p /tmp/eapol-build && cd /tmp/eapol-build
+            mkdir -p /tmp/eapol-build
+            cd /tmp/eapol-build
             apt-get source --quiet wpasupplicant 2>/dev/null
             cd wpa-*/wpa_supplicant
             cp defconfig .config
@@ -137,7 +138,6 @@ jobs:
             echo "CFLAGS += -Wno-deprecated-declarations" >> .config
             make -j$(nproc) eapol_test 2>&1 | tail -10
             sudo cp eapol_test /usr/local/bin/
-            cd -
           fi
           echo "eapol_test: $(which eapol_test)"
 
