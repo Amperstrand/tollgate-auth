@@ -19,7 +19,6 @@ import (
 // We check output for both "compensated" and "Received:" indicators.
 func RedeemToken(tokenStr string, walletDir string) error {
 	cmd := exec.Command(
-		"/usr/sbin/runuser", "-u", "cashu-wallet", "--",
 		"/usr/local/bin/cdk-cli",
 		"--work-dir", walletDir,
 		"receive",
