@@ -109,37 +109,41 @@ jobs:
           NAS-Port = 0' | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test6.log
           grep -q "Access-Reject" /tmp/test6.log || { echo "FAIL: Expected Access-Reject for invalid creds"; exit 1; }
 
+      - name: Cache eapol_test binary
+        id: cache-eapol
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/eapol_test
+          key: eapol-test-ubuntu2404-v1
+
+      - name: Build eapol_test (cache miss)
+        if: steps.cache-eapol.outputs.cache-hit != 'true'
+        run: |
+          sudo sed -i '/^Types:/s/deb$/deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          sudo apt-get update -qq 2>/dev/null
+          sudo apt-get build-dep -y -qq wpasupplicant 2>/dev/null || \
+            sudo apt-get install -y -qq libssl-dev libnl-3-dev libnl-genl-3-dev pkg-config libdbus-1-dev 2>/dev/null
+          mkdir -p /tmp/eapol-build && cd /tmp/eapol-build
+          apt-get source --quiet wpasupplicant 2>/dev/null
+          cd wpa-*/wpa_supplicant
+          cp defconfig .config
+          echo "CONFIG_EAPOL_TEST=y" >> .config
+          echo "CFLAGS += -Wno-deprecated-declarations" >> .config
+          make -j$(nproc) eapol_test 2>&1 | tail -10
+          sudo cp eapol_test /usr/local/bin/
+
+      - name: Cache npm deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-cashu-ts-${{ hashFiles('scripts/mint-testnut.js') }}
+          restore-keys: npm-cashu-ts-
+
       # ─── Test 7: Cashu token via EAP-TTLS+PAP → Access-Accept ───
-      # This is the PRIMARY Cashu test. Cashu tokens are 378 bytes (fixed),
-      # exceeding RADIUS's 253-byte attribute limit. EAP-TTLS+PAP sends the
-      # password inside a TLS tunnel where there's no length limit.
-      #
-      # Flow: mint token → eapol_test EAP-TTLS+PAP → FreeRADIUS →
-      #   inner-tunnel → tollgate-auth-radius → decode → verify → redeem → Accept
+      # Cashu tokens are 378 bytes (fixed), exceeding RADIUS's 253-byte attribute limit.
+      # EAP-TTLS+PAP sends the password inside a TLS tunnel where there's no length limit.
       - name: Test 7 — Cashu token via EAP-TTLS+PAP → Access-Accept
         run: |
-          # Build eapol_test from Ubuntu-patched source
-          # Ubuntu's wpasupplicant package doesn't include eapol_test.
-          # Vanilla wpa_supplicant 2.10 doesn't compile with OpenSSL 3.x,
-          # so we use the Ubuntu source package which has compatibility patches.
-          if ! command -v eapol_test &>/dev/null; then
-            echo "Building eapol_test from Ubuntu source package..."
-            # Enable deb-src (Ubuntu 24.04 uses DEB822 format)
-            sudo sed -i '/^Types:/s/deb$/deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
-            sudo apt-get update -qq 2>/dev/null
-            sudo apt-get build-dep -y -qq wpasupplicant 2>/dev/null || \
-              sudo apt-get install -y -qq libssl-dev libnl-3-dev libnl-genl-3-dev pkg-config libdbus-1-dev 2>/dev/null
-            mkdir -p /tmp/eapol-build
-            cd /tmp/eapol-build
-            apt-get source --quiet wpasupplicant 2>/dev/null
-            cd wpa-*/wpa_supplicant
-            cp defconfig .config
-            echo "CONFIG_EAPOL_TEST=y" >> .config
-            echo "CFLAGS += -Wno-deprecated-declarations" >> .config
-            make -j$(nproc) eapol_test 2>&1 | tail -10
-            sudo cp eapol_test /usr/local/bin/
-            cd "$GITHUB_WORKSPACE"
-          fi
           echo "eapol_test: $(which eapol_test)"
 
           npm install --no-package-lock @cashu/cashu-ts@4.5.1 2>&1 | tail -1
