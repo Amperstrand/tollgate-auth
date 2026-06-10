@@ -321,8 +321,10 @@ jobs:
 
           node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol14.conf
 
+          MAC14=$(printf 'aa:%02x:%02x:%02x:%02x:%02x' $((RUNID % 256)) $((RUNID / 256 % 256)) $((RUNID / 65536 % 256)) $((RUNID / 16777216 % 256)) $((RUNID / 4294967296 % 256)))
+          echo "Using MAC: $MAC14"
           eapol_test -c /tmp/eapol14.conf -a "$RADIUS_IP" -s tollgate \
-            -M "ff:14:$RUNID" -r 1 -t 30 2>&1 | tee /tmp/eapol14.log
+            -M "$MAC14" -r 1 -t 30 2>&1 | tee /tmp/eapol14.log
 
           grep -q "Access-Accept" /tmp/eapol14.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/eapol14.log; exit 1; }
           ST=$(grep "Session-Timeout" /tmp/eapol14.log | grep -oE '[0-9]+' | head -1)
