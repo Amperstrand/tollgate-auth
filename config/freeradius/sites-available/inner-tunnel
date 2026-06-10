@@ -10,12 +10,23 @@
 
 server inner-tunnel {
     authorize {
+        # EAP-TTLS+PAP puts the password in Cleartext-Password, not User-Password.
+        # Copy it so the regex and exec module see it in the expected attribute.
+        if (Cleartext-Password && !User-Password) {
+            update request {
+                User-Password := "%{Cleartext-Password}"
+            }
+        }
+
         if ((User-Name =~ /^cashu[AB]/) || \
             (User-Password =~ /^cashu[AB]/) || \
+            (Cleartext-Password =~ /^cashu[AB]/) || \
             (User-Name =~ /^lnurlw/) || \
             (User-Name =~ /^LNURLW/) || \
             (User-Password =~ /^lnurlw/) || \
-            (User-Password =~ /^LNURLW/)) {
+            (User-Password =~ /^LNURLW/) || \
+            (Cleartext-Password =~ /^lnurlw/) || \
+            (Cleartext-Password =~ /^LNURLW/)) {
             cashu-auth
             if (ok) {
                 update reply {
