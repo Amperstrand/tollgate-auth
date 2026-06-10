@@ -334,20 +334,18 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 		os.Exit(1)
 	}
 
-	// Mint verification (check proofs are unspent)
 	ok, msg := cashu.VerifyWithMint(tokenData)
 	if !ok {
 		log.Printf("Reject: cashu mint verification failed (%s): %s", cred.Source, msg)
 		replyMessage("Rejected: mint verification failed — %s", msg)
-		cashu.LogToken(cred.Value, tokenData, "radius-"+mac, false, TokensLogFile)
+		cashu.LogTokenWithError(cred.Value, tokenData, "radius-"+mac, false, "verify: "+msg, TokensLogFile)
 		os.Exit(1)
 	}
 
-	// Redeem token (only for test mints — guaranteed by allowlist check above)
 	if err := cashu.RedeemToken(cred.Value, WalletDir); err != nil {
 		log.Printf("Reject: cashu redemption failed (%s): %v", cred.Source, err)
 		replyMessage("Rejected: token redemption failed")
-		cashu.LogToken(cred.Value, tokenData, "radius-"+mac, false, TokensLogFile)
+		cashu.LogTokenWithError(cred.Value, tokenData, "radius-"+mac, false, "redeem: "+err.Error(), TokensLogFile)
 		os.Exit(1)
 	}
 

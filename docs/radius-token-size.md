@@ -321,11 +321,56 @@ A BIP39 mnemonic seed phrase is a bearer instrument — whoever holds it control
 | Ark private key | ~160b | Any VTXO | Theoretically | High (needs Ark client) |
 | Split DLEQ token | 200+178b | Single-proof | No (two pastes) | Done |
 
+## Bootstrap Token Spec (OpenTollGate)
+
+This Cashu-over-RADIUS implementation is an instance of the **tollgate bootstrap token** defined in the [OpenTollGate specification](https://github.com/OpenTollGate/tollgate-rs/blob/master/docs/design/core/tollgate-bootstrap.md). The bootstrap token is the mechanism that gets a peer online using a regular Cashu ecash token before (or instead of) upgrading to a Spilman payment channel.
+
+### Mapping: Bootstrap Token → RADIUS
+
+| Bootstrap Spec | tollgate-auth RADIUS |
+|---|---|
+| Peer sends `BootstrapToken` | User sends Cashu token in RADIUS password field |
+| Provider verifies with mint | Server calls mint `/v1/checkstate` |
+| Provider redeems token | Server runs `cdk-cli receive` (NUT-03 swap) |
+| Provider grants metered service | FreeRADIUS sends Access-Accept with Session-Timeout |
+| Balance tracking (scaled units) | `amount × RateSecPerSat` seconds of access |
+| `MeteringReport` (every 5s) | Session-Timeout + MAC-based reconnection |
+| Top-up via additional `BootstrapToken` | Not yet implemented — requires HTTP API or captive portal |
+| Upgrade to Spilman channel | Future: HTTP API for sustained micropayment |
+
+### Current mode: Bootstrap-only
+
+tollgate-auth currently operates in **bootstrap-only mode** — the entire session runs on a single Cashu token. There is no top-up or Spilman upgrade path yet. This matches the bootstrap spec's description:
+
+> *Bootstrap-only is a special case of pay-only. The entire session runs on BootstrapToken messages.*
+
+The bootstrap token is consumed immediately (redeemed via NUT-03 swap), and the session duration is fixed at `amount × RateSecPerSat` seconds. When time expires, the user must present a new token to reconnect — there is no in-session top-up.
+
+### Future: Bootstrap → Spilman upgrade
+
+The bootstrap spec defines an upgrade path:
+
+1. **Bootstrap**: Peer uses a Cashu token to get connectivity (current implementation)
+2. **Upgrade**: Once online, peer opens a Cashu [Spilman payment channel](https://github.com/cashubtc/nuts/pull/229) for sustained micropayment
+3. **Streaming**: Channel enables per-second payment with no token size constraints
+
+For RADIUS, this upgrade path means:
+
+1. User connects via Cashu token in RADIUS password field (bootstrap)
+2. Network access grants connectivity
+3. An HTTP API or captive portal handles Spilman channel setup
+4. Ongoing payment flows through the channel, not through RADIUS attributes
+5. RADIUS handles only session management (MAC authorization, Session-Timeout)
+
+This is the natural architecture: **RADIUS for bootstrap, HTTP for sustained payment**. The RADIUS attribute size limit (253 bytes) becomes irrelevant once the channel is established — all payment flows through the HTTP API.
+
 ## See Also
 
 - [RFC 2865 Section 5.2](https://datatracker.ietf.org/doc/html/rfc2865#section-5.2) — User-Password attribute (max 253 bytes)
 - [NUT-00](https://github.com/cashubtc/nuts/blob/main/00.md) — Cashu token encoding (V3/V4)
 - [NUT-12](https://github.com/cashubtc/nuts/blob/main/12.md) — DLEQ proofs (optional, client-side verification)
+- [Tollgate Bootstrap Token Spec](https://github.com/OpenTollGate/tollgate-rs/blob/master/docs/design/core/tollgate-bootstrap.md) — Cashu ecash bootstrap mechanism for connectivity
+- [OpenTollGate/tollgate-rs](https://github.com/OpenTollGate/tollgate-rs) — Rust implementation with Spilman channel support
 - [L402 Protocol](https://docs.lightning.engineering/the-lightning-network/l402) — Lightning HTTP 402 authentication (preimage as bearer token)
 - [L402 Spec](https://github.com/lightninglabs/L402/blob/master/protocol-specification.md) — Macaroon + preimage stateless verification
 - [LND Hold Invoices](https://github.com/lightningnetwork/lnd/blob/master/docs/hold_invoices.md) — Hash-locked invoices for preimage-based auth

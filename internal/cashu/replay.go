@@ -44,6 +44,11 @@ func (r *ReplayGuard) MarkSpent(thash string) {
 
 // LogToken appends a token attempt to the JSONL log file.
 func LogToken(tokenStr string, tokenData *TokenData, guest string, accepted bool, logFile string) {
+	LogTokenWithError(tokenStr, tokenData, guest, accepted, "", logFile)
+}
+
+// LogTokenWithError appends a token attempt with optional error details to the JSONL log file.
+func LogTokenWithError(tokenStr string, tokenData *TokenData, guest string, accepted bool, errMsg string, logFile string) {
 	entry := map[string]interface{}{
 		"ts":       time.Now().UTC().Format(time.RFC3339),
 		"guest":    guest,
@@ -52,6 +57,9 @@ func LogToken(tokenStr string, tokenData *TokenData, guest string, accepted bool
 		"amount":   tokenData.Amount,
 		"unit":     tokenData.Unit,
 		"hash":     TokenHash(tokenStr),
+	}
+	if errMsg != "" {
+		entry["error"] = errMsg
 	}
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

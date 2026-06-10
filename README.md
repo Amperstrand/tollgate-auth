@@ -424,6 +424,16 @@ Inside EAP-TTLS, the PAP password arrives as `Cleartext-Password` (not `User-Pas
 
 ## Future Directions
 
+### Bootstrap token → Spilman channel upgrade
+
+tollgate-auth is an implementation of the **tollgate bootstrap token** spec — a Cashu ecash token used to get connectivity before (or instead of) upgrading to a [Spilman payment channel](https://github.com/cashubtc/nuts/pull/229). The [OpenTollGate bootstrap spec](https://github.com/OpenTollGate/tollgate-rs/blob/master/docs/design/core/tollgate-bootstrap.md) defines the flow:
+
+1. **Bootstrap**: Peer sends Cashu token → provider verifies with mint → grants metered access (current implementation via RADIUS)
+2. **Upgrade**: Once online, peer opens a Spilman channel for sustained micropayment
+3. **Streaming**: Channel enables per-second payment, no token size constraints
+
+Our current implementation is **bootstrap-only** — single token, fixed session duration, no in-session top-up. The natural upgrade path: **RADIUS for bootstrap, HTTP for sustained payment**. Once the user has connectivity (via the RADIUS bootstrap token), an HTTP API or captive portal handles Spilman channel setup. RADIUS then handles only session management (MAC authorization). The 253-byte RADIUS attribute limit becomes irrelevant. See [docs/radius-token-size.md](docs/radius-token-size.md) for the full analysis.
+
 ### Lightning HTLC preimage as RADIUS credential (L402-over-RADIUS)
 
 A Lightning payment preimage is **64 hex characters** (32 bytes) — 6x smaller than a no-DLEQ Cashu token, and verifiable with a single SHA-256 hash. This enables a two-phase RADIUS flow:
