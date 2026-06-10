@@ -21,10 +21,17 @@ const (
 	TokensLogFile    = BaseDir + "/radius-tokens.log"
 	RateSecPerSat    = 60
 	LNURLWDefaultSec = 3600 // 1 hour default for lnurlw (until we claim and know the amount)
+	MaxInputLen      = 8192 // Maximum length for username/password fields
 )
 
 // macPattern validates Calling-Station-Id: hex digits, colons, dashes, or empty.
 var macPattern = regexp.MustCompile(`^[0-9a-fA-F:\-]*$`)
+
+// testMintPattern matches mint URLs that are allowed for token redemption.
+// Only mints with "test" in the URL (case-insensitive) are accepted.
+// This prevents accidental redemption of tokens with real monetary value.
+// Customize this regex to allow additional mints.
+var testMintPattern = regexp.MustCompile(`(?i)test`)
 
 // PaymentType identifies the kind of payment credential.
 type PaymentType string
@@ -127,14 +134,19 @@ func isLNURLw(s string) bool {
 }
 
 // sanitizeInput rejects strings containing characters that could break
-// FreeRADIUS exec argument splitting (single quotes, backslashes, newlines).
+// FreeRADIUS exec argument splitting or cause other issues.
+// Rejects: single quotes, backslashes, newlines, null bytes.
+// Also rejects strings exceeding MaxInputLen.
 func sanitizeInput(s string) bool {
-	return !strings.ContainsAny(s, "'\\\n\r")
+	if len(s) > MaxInputLen {
+		return false
+	}
+	return !strings.ContainsAny(s, "'\\\n\r\x00")
 }
 
 // extractPayment finds a payment credential (Cashu token or LNURLw) in username or password.
 // Priority: whichever field matches first (username checked before password).
-// Rejects inputs containing dangerous characters.
+// Rejects inputs containing dangerous characters or exceeding max length.
 func extractPayment(username, password string) (PaymentCredential, bool) {
 	// Check username first
 	if isCashuToken(username) && sanitizeInput(username) {
@@ -158,6 +170,23 @@ func safeLog(s string) string {
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	s = strings.ReplaceAll(s, "\r", "\\r")
 	return s
+}
+
+// replyMessage outputs a Reply-Message attribute to stdout.
+// FreeRADIUS exec module with output=reply parses stdout as RADIUS attribute pairs.
+// Format: Reply-Message = "value"
+func replyMessage(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	// Sanitize the message — no newlines or quotes that would break RADIUS parsing
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", "")
+	msg = strings.ReplaceAll(msg, `"`, `'`)
+	fmt.Printf("Reply-Message = \"%s\"\n", msg)
+}
+
+// isTestMint checks if a mint URL matches the allowed test mint pattern.
+func isTestMint(mintURL string) bool {
+	return testMintPattern.MatchString(mintURL)
 }
 
 // --- Main ---
@@ -184,6 +213,7 @@ func main() {
 	// Validate MAC format (prevents path traversal)
 	if !macPattern.MatchString(mac) {
 		log.Printf("Reject: invalid MAC format: %q", safeLog(truncate(mac, 32)))
+		replyMessage("Rejected: invalid session identifier")
 		os.Exit(1)
 	}
 
@@ -198,6 +228,8 @@ func main() {
 		if sessions.IsActive(rec) {
 			remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
 			log.Printf("Reconnection: MAC=%s session active (%dm remaining), accepting", mac, int(remaining.Minutes()))
+			replyMessage("Session resumed: %dm remaining (type=%s, amount=%d sat)",
+				int(remaining.Minutes()), rec.PayType, rec.Amount)
 			os.Exit(0)
 		}
 		log.Printf("Reconnection: MAC=%s session expired, removing", mac)
@@ -208,6 +240,7 @@ func main() {
 	cred, found := extractPayment(username, password)
 	if !found {
 		log.Printf("Reject: no payment credential found in username or password (user=%q)", safeLog(truncate(username, 32)))
+		replyMessage("Rejected: no valid payment credential found")
 		os.Exit(1)
 	}
 
@@ -221,34 +254,48 @@ func main() {
 }
 
 // handleCashu validates a Cashu token: decode → verify → redeem → session.
+// Only redeems tokens from test mints (matching testMintPattern regex).
 func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, replay *cashu.ReplayGuard) {
 	tokenData, err := cashu.DecodeToken(cred.Value)
 	if err != nil {
 		log.Printf("Reject: cashu decode failed (%s): %v", cred.Source, err)
+		replyMessage("Rejected: invalid Cashu token format")
 		cashu.LogToken(cred.Value, &cashu.TokenData{}, "radius-"+mac, false, TokensLogFile)
 		os.Exit(1)
 	}
 
 	thash := cashu.TokenHash(cred.Value)
 	seconds := tokenData.Amount * RateSecPerSat
+	minutes := seconds / 60
 
 	// Replay check
 	if replay.IsSpent(thash) {
 		log.Printf("Reject: cashu token already spent (hash=%s, source=%s)", thash[:16], cred.Source)
+		replyMessage("Rejected: token already used")
 		os.Exit(1)
 	}
 
-	// Mint verification
-	ok, msg := cashu.VerifyWithMint(tokenData)
-	if !ok {
-		log.Printf("Reject: cashu mint verification failed (%s): %s", cred.Source, msg)
+	// Mint allowlist: only accept test mints
+	if !isTestMint(tokenData.Mint) {
+		log.Printf("Reject: non-test mint (%s) — only test mints are accepted", tokenData.Mint)
+		replyMessage("Rejected: mint '%s' is not a testnet mint — only test mints accepted", tokenData.Mint)
 		cashu.LogToken(cred.Value, tokenData, "radius-"+mac, false, TokensLogFile)
 		os.Exit(1)
 	}
 
-	// Redeem token
+	// Mint verification (check proofs are unspent)
+	ok, msg := cashu.VerifyWithMint(tokenData)
+	if !ok {
+		log.Printf("Reject: cashu mint verification failed (%s): %s", cred.Source, msg)
+		replyMessage("Rejected: mint verification failed — %s", msg)
+		cashu.LogToken(cred.Value, tokenData, "radius-"+mac, false, TokensLogFile)
+		os.Exit(1)
+	}
+
+	// Redeem token (only for test mints — guaranteed by allowlist check above)
 	if err := cashu.RedeemToken(cred.Value, WalletDir); err != nil {
 		log.Printf("Reject: cashu redemption failed (%s): %v", cred.Source, err)
+		replyMessage("Rejected: token redemption failed")
 		cashu.LogToken(cred.Value, tokenData, "radius-"+mac, false, TokensLogFile)
 		os.Exit(1)
 	}
@@ -275,6 +322,9 @@ func handleCashu(cred PaymentCredential, mac string, sessions *SessionStore, rep
 
 	log.Printf("Accept: MAC=%s type=cashu amount=%d sat duration=%ds mint=%s source=%s",
 		mac, tokenData.Amount, seconds, tokenData.Mint, cred.Source)
+
+	replyMessage("Valid Cashu token: %d sat = %dm access from %s",
+		tokenData.Amount, minutes, tokenData.Mint)
 	os.Exit(0)
 }
 
@@ -294,6 +344,7 @@ func handleLNURLw(cred PaymentCredential, mac string, sessions *SessionStore, re
 
 	if replay.IsSpent(thash) {
 		log.Printf("Reject: lnurlw code already used (hash=%s, source=%s)", thash[:16], cred.Source)
+		replyMessage("Rejected: LNURLw code already used")
 		os.Exit(1)
 	}
 
@@ -321,6 +372,7 @@ func handleLNURLw(cred PaymentCredential, mac string, sessions *SessionStore, re
 		log.Printf("Warning: failed to save session record: %v", err)
 	}
 
+	replyMessage("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60)
 	os.Exit(0)
 }
 
