@@ -1,5 +1,53 @@
 # tollgate-auth + tollgate-rs Integration
 
+## Implementation Status (Phase 2 — Delegated Mode via v1 Server)
+
+Delegated mode is **implemented** for both RADIUS and SSH. The approach uses the existing `tollgate-net` v1 server rather than building a new `tollgate-sessiond` crate.
+
+### What was built
+
+**Rust changes (tollgate-rs):**
+- `X-TollGate-MAC` header in `handle_post_payment` and `handle_usage` — overrides IP-based MAC resolution when present, enabling external callers (Go binaries) to specify session identity
+- `NoopValve` — no-op valve for RADIUS deployments where enforcement is via `Session-Timeout` + CoA, not ndsctl
+- `--valve noop` CLI option wired into the v1 server binary
+- `NoopValve` exported from `v1::server` module
+
+**Go changes (tollgate-auth):**
+- `internal/sessiond/client.go` — HTTP client for the v1 server. `Bootstrap(token, mac)` POSTs raw Cashu token to `/` with `X-TollGate-MAC` header, parses Nostr kind 1022 response for allotment/metric/start-time. `GetUsage(mac)` GETs `/usage` with the same header.
+- `internal/sessiond/client_test.go` — 6 unit tests with mocked HTTP server (all pass)
+- `cmd/tollgate-auth-radius/main.go` — `TOLLGATE_AUTH_MODE=local|delegated` (default: local), `TOLLGATE_SESSIOND_URL` (default: `http://127.0.0.1:2121`). Delegated mode: reconnection via `GET /usage`, payment via `POST /` → parse allotment → `Session-Timeout`. Local mode completely unchanged.
+- `cmd/tollgate-auth-ssh/main.go` — Same `TOLLGATE_AUTH_MODE` env var. Delegated mode: POSTs token to v1 server with pseudo-MAC `ssh:<client-ip>`, skips local verify/redeem, uses server allotment for session timer. Local mode completely unchanged.
+
+### How it works
+
+```
+tollgate-auth (Go)                    tollgate-rs v1 server (Rust)
+─────────────────────                 ─────────────────────────────
+POST / cashuB...                      extract_payment_token()
+  X-TollGate-MAC: aa:bb:cc:dd:ee:ff   wallet.receive_token()
+         ─────────────────────►        add_allotment(mac, allotment)
+                                       build_session_event(kind 1022)
+         ◄─────────────────────
+{kind:1022, tags:[["allotment","480000"],...]}
+                                       valve.open_gate() [NoopValve → no-op]
+
+Go: parse allotment → seconds
+Go: Session-Timeout = seconds
+```
+
+### Key design decisions
+
+1. **Don't build tollgate-sessiond** — the v1 server already handles token acceptance, session management, wallet integration, and allotment calculation. `POST /` with `X-TollGate-MAC` header is sufficient for delegated mode.
+2. **MAC as session identity** — matching both Go module and v1 server. secp256k1 keypairs deferred to the v2 session API described below.
+3. **Nostr kind 1022 response** — `tollgate-auth` parses the allotment tag for session duration. No new response format needed.
+4. **NoopValve** — RADIUS enforcement is via `Session-Timeout` + CoA, not iptables/ndsctl. The v1 server tracks session state but doesn't touch gates.
+
+### Remaining for the v2 session API
+
+The sections below describe the **future target architecture** with a dedicated session daemon, secp256k1 session identity, top-up, accounting, and CoA. These remain the long-term goal. The v1 server approach is a pragmatic milestone that delivers delegated mode without new endpoints or a new crate.
+
+---
+
 ## Summary
 
 `tollgate-rs` is the TollGate engine: protocol, wallet, pricing, metering, bootstrap balance, Spilman upgrade, and session ledger.

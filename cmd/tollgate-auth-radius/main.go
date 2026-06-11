@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/sessiond"
 )
 
 // --- Configuration ---
@@ -32,6 +34,19 @@ var macPattern = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 // This prevents accidental redemption of tokens with real monetary value.
 // Customize this regex to allow additional mints.
 var testMintPattern = regexp.MustCompile(`(?i)test`)
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// Delegated mode configuration (read once at startup).
+var (
+	authMode    = getEnv("TOLLGATE_AUTH_MODE", "local")       // "local" or "delegated"
+	sessiondURL = getEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
+)
 
 // PaymentType identifies the kind of payment credential.
 type PaymentType string
@@ -305,6 +320,12 @@ func main() {
 		sessions.Remove(sessionID)
 	}
 
+	if authMode == "delegated" {
+		if handleDelegatedReconnection(sessionID) {
+			os.Exit(0)
+		}
+	}
+
 	// --- Extract payment credential from username or password ---
 	cred, found := extractPayment(username, password, clearTextPw)
 	if !found {
@@ -316,7 +337,11 @@ func main() {
 	// --- Route by payment type ---
 	switch cred.Type {
 	case PaymentCashu:
-		handleCashu(cred, sessionID, sessions, replay)
+		if authMode == "delegated" {
+			handleCashuDelegated(cred, sessionID, sessions)
+		} else {
+			handleCashu(cred, sessionID, sessions, replay)
+		}
 	case PaymentLNURLW:
 		handleLNURLw(cred, sessionID, sessions, replay)
 	}
@@ -436,6 +461,90 @@ func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionSto
 
 	replyMessage("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60)
 	radiusAttr("Session-Timeout", LNURLWDefaultSec)
+	radiusAttr("Acct-Interim-Interval", 60)
+	os.Exit(0)
+}
+
+func handleDelegatedReconnection(sessionID string) bool {
+	client := sessiond.NewClient(sessiondURL)
+	usage, err := client.GetUsage(sessionID)
+	if err != nil {
+		log.Printf("Delegated reconnection: GetUsage failed for %s: %v", sessionID, err)
+		return false
+	}
+
+	parts := strings.SplitN(usage, "/", 2)
+	if len(parts) != 2 {
+		log.Printf("Delegated reconnection: unexpected usage format %q", usage)
+		return false
+	}
+
+	usedMs, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		log.Printf("Delegated reconnection: parsing used ms: %v", err)
+		return false
+	}
+	allotmentMs, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		log.Printf("Delegated reconnection: parsing allotment ms: %v", err)
+		return false
+	}
+
+	if usedMs >= allotmentMs {
+		return false
+	}
+
+	remainingMs := allotmentMs - usedMs
+	remainingSec := int(remainingMs / 1000)
+	remainingMin := remainingSec / 60
+
+	log.Printf("Delegated reconnection: session=%s active (%dm remaining), accepting", sessionID, remainingMin)
+	replyMessage("Session resumed: %dm remaining (delegated)", remainingMin)
+	radiusAttr("Session-Timeout", max(1, remainingSec))
+	radiusAttr("Acct-Interim-Interval", 60)
+	return true
+}
+
+func handleCashuDelegated(cred PaymentCredential, sessionID string, sessions *SessionStore) {
+	client := sessiond.NewClient(sessiondURL)
+	state, err := client.Bootstrap(cred.Value, sessionID)
+	if err != nil {
+		log.Printf("Reject: delegated bootstrap failed (%s): %v", cred.Source, err)
+		replyMessage("Rejected: delegated session failed — %v", err)
+		os.Exit(1)
+	}
+
+	seconds := int(state.AllotmentMs / 1000)
+	minutes := seconds / 60
+
+	if seconds <= 0 {
+		log.Printf("Reject: delegated bootstrap returned zero allotment for session=%s", sessionID)
+		replyMessage("Rejected: zero allotment from server")
+		os.Exit(1)
+	}
+
+	thash := cashu.TokenHash(cred.Value)
+
+	rec := &SessionRecord{
+		MAC:      sessionID,
+		Token:    thash,
+		Guest:    "radius-delegated-" + thash[:8],
+		Mint:     "delegated",
+		Amount:   minutes,
+		Started:  time.Now(),
+		Duration: seconds,
+		Source:   cred.Source,
+		PayType:  PaymentCashu,
+	}
+	if err := sessions.Save(rec); err != nil {
+		log.Printf("Warning: failed to save session record: %v", err)
+	}
+
+	log.Printf("Accept: session=%s type=delegated duration=%ds source=%s",
+		sessionID, seconds, cred.Source)
+
+	replyMessage("Valid Cashu token: %dm access (delegated)", minutes)
+	radiusAttr("Session-Timeout", seconds)
 	radiusAttr("Acct-Interim-Interval", 60)
 	os.Exit(0)
 }

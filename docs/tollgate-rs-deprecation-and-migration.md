@@ -1,5 +1,59 @@
 # tollgate-auth Go Deprecation and Migration Plan
 
+## Implementation Status (Phase 2 — Delegated Mode via v1 Server)
+
+Phase 3 (Add Delegated Mode) is **implemented** for both RADIUS and SSH. The approach uses the existing `tollgate-net` v1 server (port 2121) instead of building a new `tollgate-sessiond` crate.
+
+### What changed from the original plan
+
+- **No new `tollgate-sessiond` crate.** The v1 server already has `POST /` (accept Cashu token), `GET /usage` (query usage), session management, wallet integration, and allotment calculation. Adding `X-TollGate-MAC` header support was sufficient.
+- **No new endpoints.** `POST /` accepts raw Cashu tokens as body (falls back when body is not a Nostr event). `GET /usage` returns `"used/allotment"` with the MAC header.
+- **NoopValve** added for RADIUS deployments — `open_gate`/`close_gate` are no-ops since enforcement is via `Session-Timeout` + CoA.
+- **MAC-based session identity** (not secp256k1). `Class = "tollgate:<mac>"` for now. secp256k1 keypairs deferred to the v2 session API.
+
+### New Go files
+
+| File | Purpose |
+|---|---|
+| `internal/sessiond/client.go` | HTTP client for v1 server — `Bootstrap(token, mac)` and `GetUsage(mac)` |
+| `internal/sessiond/client_test.go` | 6 unit tests with mocked HTTP server |
+
+### Modified Go files
+
+| File | Changes |
+|---|---|
+| `cmd/tollgate-auth-radius/main.go` | `TOLLGATE_AUTH_MODE=local\|delegated`, `TOLLGATE_SESSIOND_URL`. Delegated reconnection via `GET /usage`. Delegated payment via `POST /` → parse Nostr 1022 → `Session-Timeout`. |
+| `cmd/tollgate-auth-ssh/main.go` | Same env vars. Delegated mode: POSTs token to v1 server with `ssh:<client-ip>` as pseudo-MAC, skips local verify/redeem, uses server allotment for timer. |
+
+### Modified Rust files (tollgate-rs)
+
+| File | Changes |
+|---|---|
+| `crates/tollgate-net/src/v1/server/handlers.rs` | `X-TollGate-MAC` header check in `handle_post_payment` and `handle_usage` |
+| `crates/tollgate-net/src/v1/server/valve.rs` | `NoopValve` struct implementing `Valve` trait |
+| `crates/tollgate-net/src/v1/server/mod.rs` | Export `NoopValve` |
+| `crates/tollgate-net/src/main.rs` | `--valve noop` CLI option |
+
+### Deployment
+
+```bash
+# Start v1 server with mock wallet and noop valve (for testing)
+tollgate-net v1-server --port 2121 --wallet mock --valve noop
+
+# Start v1 server with CDK wallet and noop valve (production)
+tollgate-net v1-server --port 2121 --wallet cdk --valve noop --mint-url https://testnut.cashu.exchange
+
+# Run tollgate-auth in delegated mode
+TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 tollgate-auth-radius "$USER" "$MAC"
+TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 tollgate-auth-ssh
+```
+
+### What's next (v2 session API)
+
+The sections below describe the full phased migration plan with a dedicated `tollgate-sessiond`, secp256k1 session identity, top-up, accounting, and CoA. Phases 0 and 1 are complete. Phase 2 is partially addressed by the v1 server approach (delegated mode works, but no new session daemon crate). Phases 3-9 remain as the long-term roadmap.
+
+---
+
 ## Decision
 
 Deprecate the Go payment/session/wallet implementation in `tollgate-auth` in favor of `tollgate-rs` as the canonical TollGate engine. Keep Go RADIUS/SSH adapter code during migration, and introduce delegated mode before removing local mode.
@@ -11,7 +65,7 @@ Deprecate the Go payment/session/wallet implementation in `tollgate-auth` in fav
 - Do not require captive portal for all deployments.
 - Do not require RADIUS for all deployments.
 - Do not implement CoA in this documentation-only task.
-- Do not implement `tollgate-sessiond` in this repository.
+- ~~Do not implement `tollgate-sessiond` in this repository.~~ → Delegated mode implemented via v1 server (no new crate needed).
 
 ## Why Deprecate the Go Payment Stack
 
@@ -71,9 +125,9 @@ The Go code that should remain is the RADIUS/SSH access adapter logic. That code
 
 | Gap | Description | Where It Should Be Built |
 |---|---|---|
-| `tollgate-sessiond` | Local daemon exposing session API (`/bootstrap`, `/topups`, `/usage`, `/terminate`) | `tollgate-rs` repo — new `crates/tollgate-sessiond` or extend `tollgate-net` |
-| Delegated mode in `cmd/tollgate-auth-radius/main.go` | Config flag + HTTP client calling session daemon API | This repo |
-| Delegated mode in `cmd/tollgate-auth-ssh/main.go` | Config flag + HTTP client calling session daemon API | This repo |
+| `tollgate-sessiond` | ~~Local daemon exposing session API~~ **Resolved: use existing v1 server** | `tollgate-rs` repo — `POST /` + `GET /usage` with `X-TollGate-MAC` header |
+| Delegated mode in `cmd/tollgate-auth-radius/main.go` | Config flag + HTTP client calling session daemon API | **Done** — `internal/sessiond/client.go` + delegated branch in main.go |
+| Delegated mode in `cmd/tollgate-auth-ssh/main.go` | Config flag + HTTP client calling session daemon API | **Done** — delegated branch in main.go, pseudo-MAC `ssh:<ip>` |
 | RADIUS `Class` attribute emission | `Class = "tollgate:<session_id>"` in Access-Accept | This repo |
 | RADIUS accounting forwarding | Parse Start/Interim/Stop, forward to session daemon | This repo |
 | RADIUS CoA client | Send CoA-Request on top-up, Disconnect-Request on termination | This repo |

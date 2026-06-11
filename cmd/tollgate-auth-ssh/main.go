@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"unsafe"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/sessiond"
 
 	"github.com/creack/pty"
 	"github.com/gliderlabs/ssh"
@@ -32,6 +34,18 @@ const (
 	WalletDir     = "/var/lib/cashu-wallet"
 	WalletFile    = BaseDir + "/wallet.jsonl"
 	TokensLogFile = BaseDir + "/tokens.log"
+)
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+var (
+	sshAuthMode    = getEnv("TOLLGATE_AUTH_MODE", "local")
+	sshSessiondURL = getEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
 )
 
 // --- Session Metadata ---
@@ -153,7 +167,6 @@ func main() {
 
 		thash := cashu.TokenHash(username)
 		guest := guestUsername(username)
-		seconds := tokenData.Amount * RateSecPerSat
 
 		// 2. Check replay
 		if replay.IsSpent(thash) {
@@ -162,29 +175,63 @@ func main() {
 			return
 		}
 
-		// 3. Verify with mint
-		ok, msg := cashu.VerifyWithMint(tokenData)
-		if !ok {
-			cashu.LogToken(username, tokenData, guest, false, TokensLogFile)
-			io.WriteString(s, fmt.Sprintf("\r\nError: %s\r\n\r\n", msg))
-			s.Exit(1)
-			return
-		}
+		var seconds int
+		if sshAuthMode == "delegated" {
+			// Delegated mode: post token to v1 server for verification/redemption
+			remoteAddr := s.RemoteAddr().String()
+			mac := remoteAddr
+			if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+				mac = "ssh:" + host
+			}
 
-		// 4. Redeem token to wallet
-		io.WriteString(s, "  Redeeming token...\r\n")
-		if err := cashu.RedeemToken(username, WalletDir); err != nil {
-			log.Printf("Token redemption failed: %v", err)
-			cashu.LogToken(username, tokenData, guest, false, TokensLogFile)
-			io.WriteString(s, "\r\nError: token redemption failed\r\n\r\n")
-			s.Exit(1)
-			return
-		}
-		log.Printf("Token redeemed to wallet: %d sat from %s", tokenData.Amount, tokenData.Mint)
+			client := sessiond.NewClient(sshSessiondURL)
+			state, err := client.Bootstrap(username, mac)
+			if err != nil {
+				log.Printf("Reject: delegated bootstrap failed: %v", err)
+				io.WriteString(s, fmt.Sprintf("\r\nError: delegated session failed — %v\r\n\r\n", err))
+				s.Exit(1)
+				return
+			}
 
-		// 5. Mark spent & log
-		replay.MarkSpent(thash)
-		cashu.LogToken(username, tokenData, guest, true, TokensLogFile)
+			seconds = int(state.AllotmentMs / 1000)
+			if seconds <= 0 {
+				io.WriteString(s, "\r\nError: zero allotment from server\r\n\r\n")
+				s.Exit(1)
+				return
+			}
+			log.Printf("Delegated accept: guest=%s duration=%ds allotment=%dms", guest, seconds, state.AllotmentMs)
+
+			// Mark as spent for local replay protection
+			replay.MarkSpent(thash)
+			cashu.LogToken(username, tokenData, guest, true, TokensLogFile)
+		} else {
+			// Local mode: verify and redeem token directly
+			seconds = tokenData.Amount * RateSecPerSat
+
+			// 3. Verify with mint
+			ok, msg := cashu.VerifyWithMint(tokenData)
+			if !ok {
+				cashu.LogToken(username, tokenData, guest, false, TokensLogFile)
+				io.WriteString(s, fmt.Sprintf("\r\nError: %s\r\n\r\n", msg))
+				s.Exit(1)
+				return
+			}
+
+			// 4. Redeem token to wallet
+			io.WriteString(s, "  Redeeming token...\r\n")
+			if err := cashu.RedeemToken(username, WalletDir); err != nil {
+				log.Printf("Token redemption failed: %v", err)
+				cashu.LogToken(username, tokenData, guest, false, TokensLogFile)
+				io.WriteString(s, "\r\nError: token redemption failed\r\n\r\n")
+				s.Exit(1)
+				return
+			}
+			log.Printf("Token redeemed to wallet: %d sat from %s", tokenData.Amount, tokenData.Mint)
+
+			// 5. Mark spent & log
+			replay.MarkSpent(thash)
+			cashu.LogToken(username, tokenData, guest, true, TokensLogFile)
+		}
 
 		// 6. Create jail
 		if err := createJail(guest, tokenData, seconds); err != nil {
