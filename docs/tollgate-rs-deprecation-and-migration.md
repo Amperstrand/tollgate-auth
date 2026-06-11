@@ -169,11 +169,17 @@ The `tollgate-rs` repository (at `/Users/macbook/src/tollgate-rs`) contains:
 | **Usage endpoint** | `POST /v1/sessions/{id}/usage` — accept normalized usage events (from RADIUS accounting) | **P1** |
 | **Terminate endpoint** | `POST /v1/sessions/{id}/terminate` — close session, final settlement | **P1** |
 | **Session query** | `GET /v1/sessions/{id}` — return current session state | **P2** |
-| **Session identity generation** | `tg_<random>` session IDs, stored in session ledger | **P0** |
+| **Session identity generation** | secp256k1 keypair per session — compressed public key (33 bytes, hex-encoded) as session ID, aligned with `tollgate-core`'s `PubKey` type | **P0** |
 
 ## Proposed Session API Contract
 
 The API runs over HTTP on localhost (`127.0.0.1:2121`) or a Unix domain socket. This matches the port used by `tollgate-net` v1 server for TIP-03 compatibility.
+
+**Design principle: daemon is access-method-agnostic.** The session daemon returns TollGate-domain data — balance, quota, enforcement actions — not RADIUS-specific attributes. Access adapters (RADIUS, SSH, captive portal) translate daemon responses into their own enforcement format. See `docs/tollgate-rs-integration.md` for the full design rationale.
+
+### Relationship to `tollgate-net` v1 server
+
+`tollgate-net` already has a v1 HTTP server with endpoints like `POST /` (Cashu token payment), `GET /usage`, `GET /whoami`, `GET /balance`. These are TIP-03 endpoints for the OpenWRT captive portal use case (port 2121). The session daemon API is a different interface — plain JSON, not Nostr event payloads. Both wrap `tollgate-core`, but for different consumers. The session daemon could be a new crate (`tollgate-sessiond`) or additional routes on the existing v1 server.
 
 ### Endpoints
 
@@ -209,17 +215,17 @@ Response:
 ```json
 {
   "status": "accepted",
-  "session_id": "tg_abc123",
+  "session_id": "02a1b2c3d4e5f6...33bytes",
+  "peer_pubkey": "02a1b2c3d4e5f6...33byte_compressed_secp256k1",
   "remaining_quota_scaled": 480000,
   "remaining_seconds_estimate": 480,
-  "access": {
-    "level": "active",
-    "session_timeout": 480,
-    "acct_interim_interval": 60,
-    "class": "tollgate:tg_abc123"
-  }
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
 }
 ```
+
+`session_id` is the hex-encoded 33-byte compressed secp256k1 public key generated for this session. This aligns with `tollgate-core`'s `PubKey([u8; 32])` peer identity. `access_level` maps to `AccessLevel`, `exhaustion_action` maps to `ExhaustionAction`, `is_final` maps to `MeteringReportResponse.is_final`. `tollgate-auth` formats these into RADIUS attributes (e.g. `Class = "tollgate:02a1b2c3..."`).
 
 ### Top-Up
 
@@ -242,15 +248,16 @@ Response:
 ```json
 {
   "status": "accepted",
-  "session_id": "tg_abc123",
+  "session_id": "02a1b2c3d4e5f6...33bytes",
   "remaining_quota_scaled": 720000,
   "remaining_seconds_estimate": 720,
-  "enforcement": {
-    "action": "extend",
-    "session_timeout": 720
-  }
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
 }
 ```
+
+`tollgate-auth` reads `remaining_seconds_estimate` and decides how to enforce (CoA with new `Session-Timeout`). The daemon does not prescribe RADIUS attributes.
 
 ### Usage Report
 
@@ -264,6 +271,32 @@ Request:
   "source": "radius-accounting"
 }
 ```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "remaining_quota_scaled": 360000,
+  "remaining_seconds_estimate": 360,
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
+}
+```
+
+The response maps directly to `BootstrapIntervalResult` from `tollgate-core`. When exhausted:
+
+```json
+{
+  "status": "exhausted",
+  "remaining_quota_scaled": 0,
+  "exhaustion_action": "terminate",
+  "access_level": "suspended"
+}
+```
+
+`tollgate-auth` translates this into a RADIUS Disconnect-Request or CoA depending on the `exhaustion_action`.
 
 ### Terminate
 
@@ -351,10 +384,10 @@ Future phases may add:
 In delegated mode, `Class` is emitted from the session daemon response:
 
 ```
-Class = "tollgate:tg_abc123"
+Class = "tollgate:02a1b2c3d4e5f6...66hexchars"
 ```
 
-In local mode, `Class` can be generated locally from a `tg_`-prefixed random ID. The format is the same either way.
+Where the hex string is the compressed secp256k1 public key (session ID). In local mode, `Class` can be generated locally using the same keypair approach. The format is the same either way.
 
 The `Class` attribute is echoed by the NAS in accounting packets, enabling correlation between accounting events and TollGate sessions.
 
@@ -371,15 +404,15 @@ New code path in `tollgate-auth`:
 
 ### RADIUS CoA Trigger
 
-When a top-up is accepted out-of-band (captive portal, HTTP API) and the session daemon returns `enforcement.action = "extend"`:
+When a top-up is accepted out-of-band (captive portal, HTTP API) and the session daemon returns updated `remaining_seconds_estimate` and `access_level = "active"`:
 
-1. `tollgate-auth` receives the enforcement action (polling, webhook, or triggered by the top-up API handler).
-2. `tollgate-auth` sends CoA-Request to the NAS:
+1. `tollgate-auth` receives the updated session state (polling, webhook, or triggered by the top-up API handler).
+2. `tollgate-auth` translates the daemon's TollGate-domain response into a CoA-Request:
    ```
    CoA-Request:
        NAS-IP-Address = <nas_ip from session>
-       Class = "tollgate:tg_abc123"
-       Session-Timeout = <new value>
+       Class = "tollgate:02a1b2c3d4e5f6...66hexchars"
+       Session-Timeout = <remaining_seconds_estimate from daemon>
    ```
 3. If CoA-ACK: session extended.
 4. If CoA-NAK or timeout: fall back to Disconnect-Request or wait for current timeout.
@@ -412,7 +445,7 @@ Create `tollgate-sessiond` in the `tollgate-rs` repository. It wraps `tollgate-c
 - `POST /v1/sessions/{id}/terminate` — close session
 - `GET /v1/sessions/{id}` — query session state
 
-Session identity: `tg_<random>`. Session store: SQLite or in-memory with file persistence.
+Session identity: secp256k1 keypair per session. The daemon generates a keypair, stores the secret key (nsec) server-side, and uses the compressed public key (npub, 33 bytes, hex-encoded) as the session ID. This aligns with `tollgate-core`'s `PubKey([u8; 32])` peer identity type and enables future native TollGate/Spilman protocol participation with the same identity. Session store: SQLite or in-memory with file persistence.
 
 This phase happens entirely in the `tollgate-rs` repo. No changes to `tollgate-auth`.
 
@@ -588,6 +621,17 @@ Read `tollgate-rs-integration.md` for the "what" and "why". Read this document f
 - [docs/radius-token-size.md](radius-token-size.md) — Token size analysis and payment approaches
 - [docs/tollgate-opentollgate-comparison.md](tollgate-opentollgate-comparison.md) — Comparative analysis with OpenTollGate protocol
 - [tollgate-rs repository](https://github.com/Amperstrand/tollgate-rs-ai-research-and-experiments) — Rust TollGate engine
-- [tollgate-core bootstrap.rs](https://github.com/Amperstrand/tollgate-rs-ai-research-and-experiments/blob/main/crates/tollgate-core/src/bootstrap.rs) — Rust `BootstrapSession` implementation
-- [tollgate-core wallet.rs](https://github.com/Amperstrand/tollgate-rs-ai-research-and-experiments/blob/main/crates/tollgate-core/src/wallet.rs) — Rust `Wallet` trait
-- [tollgate-net cdk_wallet.rs](https://github.com/Amperstrand/tollgate-rs-ai-research-and-experiments/blob/main/crates/tollgate-net/src/cdk_wallet.rs) — Native `CdkWallet` implementation
+
+### Key `tollgate-core` types referenced in this document
+
+| Type | Location | How it maps to the session API |
+|---|---|---|
+| `PubKey([u8; 32])` | `tollgate-core/src/protocol.rs` | Session identity — compressed secp256k1 public key, hex-encoded as `session_id` |
+| `MeteringReportResponse` | `tollgate-core/src/protocol.rs` | `remaining_quota`, `next_checkin_ms`, `is_final` — maps to usage report response |
+| `BootstrapIntervalResult` | `tollgate-core/src/bootstrap.rs` | `Ok { balance_scaled, cost_scaled, next_checkin_ms, is_final }` / `Exhausted { action }` — drives enforcement |
+| `ExhaustionAction` | `tollgate-core/src/bootstrap.rs` | `Terminate`, `Restrict`, `Allow` — maps to `exhaustion_action` in daemon responses |
+| `AccessLevel` | `tollgate-core/src/access.rs` | `Active`, `Suspended`, `ZeroPrice` — maps to `access_level` in daemon responses |
+| `BootstrapSession` | `tollgate-core/src/bootstrap.rs` | Scaled balance, top_up(), process_interval() — the core session engine |
+| `Wallet` trait | `tollgate-core/src/wallet.rs` | `receive_token()`, `create_token()`, `mint_reachable()` — Cashu wallet abstraction |
+| `CdkWallet` | `tollgate-net/src/cdk_wallet.rs` | Production `Wallet` impl — native Rust, no subprocess |
+| `ResourceAdapter` trait | `tollgate-core/src/adapter.rs` | `set_peer_access()`, `peer_metrics()` — enforcement abstraction |

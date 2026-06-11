@@ -95,6 +95,16 @@ For prototyping, HTTP over localhost (or Unix socket) is simplest. The protocol 
 
 The proposed local API runs over HTTP on localhost or a Unix domain socket. HTTP/Unix socket is documented first because it is easiest to prototype and debug.
 
+### Design principle: daemon is access-method-agnostic
+
+The session daemon returns **TollGate-domain data** — balance, quota, enforcement actions — not RADIUS-specific attributes. Access adapters (RADIUS, SSH, captive portal) translate daemon responses into their own enforcement format. This keeps the daemon reusable across all access methods and avoids coupling it to RADIUS or any other specific protocol.
+
+### Relationship to existing `tollgate-net` v1 server
+
+`tollgate-net` already has a v1 HTTP server with endpoints like `POST /` (Cashu token payment), `GET /usage`, `GET /whoami`, `GET /balance`. These are TIP-03 endpoints designed for the OpenWRT captive portal use case (port 2121).
+
+The session daemon API proposed here is a **different interface**. The v1 server speaks the TIP-03 protocol (Nostr event payloads). The session daemon speaks a session-management API designed for access adapters. Both wrap `tollgate-core`, but for different consumers. The session daemon could be built as a new crate (`tollgate-sessiond`) or as additional routes on the existing v1 server. The wire format is the main difference — the session daemon uses plain JSON, not Nostr events.
+
 ### Endpoints
 
 ```
@@ -129,17 +139,19 @@ Response:
 ```json
 {
   "status": "accepted",
-  "session_id": "tg_abc123",
+  "session_id": "02a1b2c3...33bytes",
+  "peer_pubkey": "02a1b2c3d4e5f6...33byte_compressed_secp256k1",
   "remaining_quota_scaled": 480000,
   "remaining_seconds_estimate": 480,
-  "access": {
-    "level": "active",
-    "session_timeout": 480,
-    "acct_interim_interval": 60,
-    "class": "tollgate:tg_abc123"
-  }
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
 }
 ```
+
+`session_id` is the hex-encoded 33-byte compressed secp256k1 public key generated for this session. `tollgate-auth` formats this into RADIUS attributes (e.g. `Class = "tollgate:02a1b2c3..."`), but the daemon itself returns only the raw TollGate-domain values.
+
+`access_level` maps to `tollgate-core`'s `AccessLevel` enum (`active`, `suspended`, `restricted`). `exhaustion_action` maps to `ExhaustionAction` (`terminate`, `restrict`, `allow`). `is_final` maps to the `is_final` field in `MeteringReportResponse`.
 
 ### Top-up
 
@@ -162,17 +174,18 @@ Response:
 ```json
 {
   "status": "accepted",
-  "session_id": "tg_abc123",
+  "session_id": "02a1b2c3...33bytes",
   "remaining_quota_scaled": 720000,
   "remaining_seconds_estimate": 720,
-  "enforcement": {
-    "action": "extend",
-    "session_timeout": 720
-  }
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
 }
 ```
 
 The top-up endpoint is the **only canonical top-up path**. Captive portal, RADIUS, SSH, and future native TollGate clients must all call this same endpoint. No access adapter maintains its own top-up ledger.
+
+`tollgate-auth` reads `remaining_seconds_estimate` and decides how to enforce the change (CoA with new `Session-Timeout`, firewall update, shell deadline extension). The daemon does not prescribe RADIUS attributes.
 
 ### Usage Report
 
@@ -186,6 +199,34 @@ Request:
   "source": "radius-accounting"
 }
 ```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "remaining_quota_scaled": 360000,
+  "remaining_seconds_estimate": 360,
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
+}
+```
+
+The session daemon runs `BootstrapSession::process_interval()` on the usage data and returns the resulting `BootstrapIntervalResult`. The `is_final` field is set when the next interval would exhaust the quota — this maps directly to `tollgate-core`'s `MeteringReportResponse.is_final`.
+
+If the session is exhausted:
+
+```json
+{
+  "status": "exhausted",
+  "remaining_quota_scaled": 0,
+  "exhaustion_action": "terminate",
+  "access_level": "suspended"
+}
+```
+
+`tollgate-auth` translates this into a RADIUS Disconnect-Request or CoA depending on the `exhaustion_action`.
 
 The session daemon consumes normalized usage events. It does not need to know whether they came from RADIUS accounting, captive portal metering, or an SSH heartbeat.
 
@@ -206,11 +247,12 @@ Response:
 
 ```json
 {
-  "session_id": "tg_abc123",
+  "session_id": "02a1b2c3...33bytes",
   "access_method": "radius",
-  "status": "active",
+  "access_level": "active",
   "remaining_quota_scaled": 360000,
   "remaining_seconds_estimate": 360,
+  "exhaustion_action": "terminate",
   "created_at": "2025-06-11T10:00:00Z",
   "subject": {
     "mac": "aa:bb:cc:dd:ee:ff",
@@ -311,7 +353,7 @@ Access-Accept:
     Reply-Message = "Valid Cashu token: 8 sat = 8m access"
     Session-Timeout = 480
     Acct-Interim-Interval = 60
-    Class = "tollgate:tg_abc123"
+    Class = "tollgate:02a1b2c3d4e5f67890abcdef...66hexchars"
 ```
 
 The `Class` attribute is an opaque blob that the NAS echoes back in accounting packets. Using `tollgate:<session_id>` lets accounting packets correlate with the correct TollGate session even if MAC randomization, reconnects, or NAS quirks are involved.
@@ -332,13 +374,15 @@ The `Class` attribute in the original Access-Accept is echoed back in accounting
 
 ### 4. CoA-Request for active session extension
 
-When `tollgate-sessiond` accepts a top-up and returns `enforcement.action = "extend"`, `tollgate-auth` sends a CoA-Request:
+When `tollgate-sessiond` accepts a top-up and returns a response with `access_level = "active"` and updated `remaining_seconds_estimate`, `tollgate-auth` translates this into a CoA-Request:
 
 ```
 CoA-Request:
-    Class = "tollgate:tg_abc123"
+    Class = "tollgate:02a1b2c3d4e5f67890abcdef...66hexchars"
     Session-Timeout = 720
 ```
+
+The daemon does not include RADIUS-specific fields. `tollgate-auth` reads `remaining_seconds_estimate` from the daemon response and formats the CoA with the appropriate RADIUS attributes.
 
 ### 5. Disconnect-Request for termination
 
@@ -346,7 +390,7 @@ When the session daemon signals termination (balance exhausted, fraud detected, 
 
 ```
 Disconnect-Request:
-    Class = "tollgate:tg_abc123"
+    Class = "tollgate:02a1b2c3d4e5f67890abcdef...66hexchars"
 ```
 
 ### 6. Reconnect fallback
@@ -372,17 +416,21 @@ The session engine should not contain vendor-specific RADIUS logic. That belongs
 
 MAC-only session identity is not enough. MAC addresses can be randomized, spoofed, or reused across VLANs.
 
-Canonical session identity is generated by `tollgate-sessiond`:
+Canonical session identity uses **generated secp256k1 keypairs**, aligned with `tollgate-core`'s `PeerSession` model:
 
 ```
-session_id = tg_<random>
+session_id = hex(33-byte compressed secp256k1 public key)
 ```
+
+The session daemon generates a keypair per session. The **nsec** (secret key) is stored server-side. The **npub** (compressed public key, 33 bytes) becomes the peer identifier — this is the `session_id`. This matches `tollgate-core`'s `PubKey([u8; 32])` peer identity type and `PeerSession`'s use of `PubKey` as the session key.
+
+This design enables a future upgrade path: when the peer upgrades from bootstrap tokens to native TollGate/Spilman, the same identity can be used. The daemon already knows the session's keypair — it can sign challenges, authenticate Nostr events, and participate in the TollGate protocol without requiring a new identity.
 
 Tracked fields:
 
 | Field | Description |
 |---|---|
-| `session_id` | Canonical TollGate session identifier (`tg_...`) |
+| `session_id` | Hex-encoded 33-byte compressed secp256k1 public key (the npub) |
 | `access_method` | `radius`, `captive_portal`, `ssh`, `native` |
 | `subject_mac` | Client MAC from NAS or portal |
 | `username` | RADIUS User-Name or portal username |
@@ -392,13 +440,20 @@ Tracked fields:
 | `class` | `tollgate:<session_id>` — the value sent in RADIUS Class attribute |
 | `product_id` | Pricing/product selected at session creation |
 | `created_at` | Timestamp of session creation |
-| `paid_until` / `balance_scaled` | Current session state |
-| `access_level` | `active`, `restricted`, `terminated` |
+| `balance_scaled` | Current scaled balance (`i128` in `tollgate-core`) |
+| `access_level` | `active`, `suspended`, `restricted` — maps to `tollgate-core` `AccessLevel` |
+| `exhaustion_action` | `terminate`, `restrict`, `allow` — maps to `tollgate-core` `ExhaustionAction` |
 
 RADIUS should use:
 
 ```
 Class = "tollgate:<session_id>"
+```
+
+Where `<session_id>` is the hex-encoded 33-byte public key. Example:
+
+```
+Class = "tollgate:02a1b2c3d4e5f67890abcdef...66hexchars"
 ```
 
 This lets accounting packets correlate with the correct session even if MAC randomization, reconnects, or NAS quirks are involved.
@@ -490,18 +545,23 @@ In `local` mode, accounting events are logged but not processed for metering.
 
 ### Phase 6: Add CoA extension
 
-When `tollgate-sessiond` accepts a top-up and returns:
+When `tollgate-sessiond` accepts a top-up and returns a response with updated `remaining_seconds_estimate` and `exhaustion_action`:
 
 ```json
 {
-  "enforcement": {
-    "action": "extend",
-    "session_timeout": 720
-  }
+  "status": "accepted",
+  "session_id": "02a1b2c3...33bytes",
+  "remaining_quota_scaled": 720000,
+  "remaining_seconds_estimate": 720,
+  "access_level": "active",
+  "exhaustion_action": "terminate",
+  "is_final": false
 }
 ```
 
-`tollgate-auth` sends a CoA-Request to the NAS with the new `Session-Timeout`. The NAS extends the session without disconnecting the user.
+`tollgate-auth` reads `remaining_seconds_estimate` and sends a CoA-Request to the NAS with the new `Session-Timeout`. The NAS extends the session without disconnecting the user.
+
+The daemon returns TollGate-domain data. `tollgate-auth` translates it into RADIUS enforcement.
 
 This requires:
 
@@ -592,7 +652,7 @@ Once `delegated` mode is stable and tested across real deployments:
 - **Use token hashes for replay tracking.** SHA-256 hash of the token (or proof secrets) for the spent-token list. Already implemented in `tollgate-auth` as `radius-spent.txt`.
 - **Treat RADIUS shared secrets and CoA secrets as sensitive.** These protect RADIUS communication. Rotate them if compromised.
 - **Do not trust MAC address alone as identity.** MAC addresses can be spoofed and randomized. Use `Class` + `Acct-Session-Id` + MAC for session matching.
-- **Validate `Class` values and session IDs.** Only accept `Class` values that match the pattern `tollgate:tg_<alphanumeric>`. Reject malformed values.
+- **Validate `Class` values and session IDs.** Only accept `Class` values that match the pattern `tollgate:<66-hex-char-compressed-secp256k1-pubkey>`. Reject malformed values.
 - **Ensure top-up is idempotent or replay-safe.** If the same top-up request is received twice (network retry, client double-submit), the balance should only be credited once. Use token hash deduplication.
 - **Store session ledger durably if real value is used.** Test/demo mode can use in-memory or file-based storage. Production mode with real Cashu tokens must persist the ledger to survive restarts.
 - **Avoid accepting unverified tokens.** Every token must be verified with the mint (`checkstate`) and preferably redeemed (NUT-03 swap) before granting access.
@@ -614,7 +674,7 @@ Once `delegated` mode is stable and tested across real deployments:
 - **Should `tollgate-sessiond` use HTTP, gRPC, or Unix socket JSON-RPC?** HTTP over localhost is easiest to prototype. gRPC offers better performance and schema evolution. Unix socket avoids TCP overhead. Decision should be made in Phase 2.
 - **Should `tollgate-auth` be rewritten in Rust later or remain Go?** A Rust rewrite would enable native CDK integration (no `cdk-cli` subprocess) and tighter coupling with `tollgate-rs`. But Go works well for the current RADIUS/SSH adapter. No urgency.
 - **Should Cashu redemption move entirely to `tollgate-rs` immediately, or remain dual-mode during migration?** Dual-mode (`local` + `delegated`) is safer for migration. Full delegation can be enforced once the session daemon is proven in production.
-- **How should remaining bootstrap balance be handled when upgrading to Spilman?** The bootstrap balance could be transferred into the Spilman channel as opening credit, or consumed first before channel payments begin. This depends on the Spilman spec evolution.
+- **How should remaining bootstrap balance be handled when upgrading to Spilman?** Resolved: the bootstrap residual is abandoned at Spilman upgrade. This is already documented in `tollgate-bootstrap.md` in the `tollgate-rs` design docs. The bootstrap balance is consumed by metering until exhausted or until the session ends — it is not transferred into the Spilman channel. The Spilman channel starts with its own funding transaction.
 - **What exact RADIUS attributes should be sent in CoA for UniFi, MikroTik, OpenWRT, Cisco, and Aruba?** Each vendor has different CoA support and attribute requirements. This needs per-vendor testing. Start with `Session-Timeout` in CoA-Request (most widely supported).
 - **Should `Session-Timeout` represent remaining time from now or total session lease?** Remaining time from now is more intuitive for top-up. Total session lease is easier for NAS enforcement. Current behavior: remaining time from now.
 - **How should data-based billing map to RADIUS accounting octets?** `Acct-Input-Octets` and `Acct-Output-Octets` are cumulative counters. The session daemon needs to track deltas between Interim-Updates to compute per-interval usage.
