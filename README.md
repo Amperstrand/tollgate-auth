@@ -188,6 +188,8 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `docs/radius-testing.md` | Live demo guide with copy-paste examples |
 | `docs/radius-payment-models.md` | Session management, accounting, infrastructure use cases |
 | `docs/radius-token-size.md` | Token size analysis, payment approaches, bootstrap spec |
+| `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA, migration plan |
+| `docs/tollgate-rs-deprecation-and-migration.md` | Go payment stack deprecation plan — file inventory, deprecation map, phased migration |
 
 ## Requirements
 
