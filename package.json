@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@cashu/cashu-ts": "^4.5.1"
+  }
+}

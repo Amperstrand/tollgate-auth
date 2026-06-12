@@ -23,7 +23,7 @@
 
 exec tollgate-acct {
     wait = yes
-    program = "/bin/sh -c 'TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 TOLLGATE_API_KEY=73ecee3aa1ee08c6cf97c388f29081bc /usr/local/bin/tollgate-auth-radius --accounting \"%{Acct-Status-Type}\" \"%{Acct-Session-Id}\" \"%{Calling-Station-Id}\" \"%{User-Name}\" \"%{Acct-Session-Time}\" \"%{Acct-Input-Octets}\" \"%{Acct-Output-Octets}\" \"%{Acct-Terminate-Cause}\" \"%{NAS-IP-Address}\"'"
+    program = "/bin/sh -c 'TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 TOLLGATE_API_KEY=CHANGE_ME /usr/local/bin/tollgate-auth-radius --accounting \"%{Acct-Status-Type}\" \"%{Acct-Session-Id}\" \"%{Calling-Station-Id}\" \"%{User-Name}\" \"%{Acct-Session-Time}\" \"%{Acct-Input-Octets}\" \"%{Acct-Output-Octets}\" \"%{Acct-Terminate-Cause}\" \"%{NAS-IP-Address}\"'"
     output_pairs = reply
     timeout = 15
 }

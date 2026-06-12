@@ -1,30 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"os/exec"
-	"strings"
+
+	"tollgate-auth/internal/radius"
 )
 
 // sendCoA sends a RADIUS CoA-Request to extend Session-Timeout on the NAS.
-// Uses radclient CLI: echo "Session-Timeout=X" | radclient NAS_IP:3799 coa SECRET
+// Uses the native Go RADIUS client (layeh.com/radius) instead of radclient subprocess.
 func sendCoA(nasIP string, port string, sessionTimeout int, sessionID string, username string, secret string) error {
-	attrs := fmt.Sprintf("Session-Timeout=%d", sessionTimeout)
-	if sessionID != "" {
-		attrs += fmt.Sprintf(",Acct-Session-Id=%s", sessionID)
-	}
-	if username != "" {
-		attrs += fmt.Sprintf(",User-Name=%s", username)
-	}
-
-	cmd := exec.Command("radclient", "-x", fmt.Sprintf("%s:%s", nasIP, port), "coa", secret)
-	cmd.Stdin = strings.NewReader(attrs + "\n")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("radclient coa failed: %w, output: %s", err, string(output))
-	}
-	return nil
+	nasAddr := fmt.Sprintf("%s:%s", nasIP, port)
+	return radius.SendCoA(context.Background(), nasAddr, secret, sessionTimeout, sessionID, username)
 }
 
 // sendCoAOrDisconnect sends a CoA-Request to update Session-Timeout on the NAS.

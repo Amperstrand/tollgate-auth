@@ -34,7 +34,7 @@ This confirms the core concept: Cashu tokens as RADIUS credentials for WiFi acce
 FreeRADIUS `cashu-debug.log` showed the phone's MAC delivering the token through the EAP-TTLS inner tunnel:
 
 ```
-USER="anonymous" PASS="cashuBo2FteB5..." CPASS="" MAC="B6-95-54-46-E0-27"
+USER="anonymous" PASS="cashuBo2FteB5..." CPASS="" MAC="AA-BB-CC-DD-EE-FF"
 ```
 
 FreeRADIUS `radius.log` confirmed the Go binary processed it (token was rejected only because it was already spent from a previous CI run, not because of any transport failure):
