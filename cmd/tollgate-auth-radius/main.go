@@ -241,10 +241,13 @@ func safeLog(s string) string {
 // Format: Reply-Message = "value"
 func replyMessage(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	// Sanitize the message — no newlines or quotes that would break RADIUS parsing
+	// Sanitize the message — no newlines, quotes, or commas that would break RADIUS exec output parsing.
+	// FreeRADIUS exec module treats commas as attribute separators in program output,
+	// so commas inside quoted values truncate the message and break subsequent attributes.
 	msg = strings.ReplaceAll(msg, "\n", " ")
 	msg = strings.ReplaceAll(msg, "\r", "")
 	msg = strings.ReplaceAll(msg, `"`, `'`)
+	msg = strings.ReplaceAll(msg, ",", ";")
 	fmt.Printf("Reply-Message = \"%s\"\n", msg)
 }
 

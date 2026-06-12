@@ -390,6 +390,84 @@ jobs:
           grep -q "Access-Accept" /tmp/conc2.log || { echo "FAIL: Concurrent session 2 not accepted"; exit 1; }
           echo "SUCCESS: Both concurrent sessions accepted"
 
+      # ═══════════════════════════════════════════════════════════════════
+      # Delegated Mode Tests (production v1 server on nodns.shop)
+      # These test the full delegated pipeline:
+      #   radclient → FreeRADIUS → tollgate-auth-radius (delegated mode)
+      #   → POST / to v1 server (tollgate-net:2121) → CDK wallet swap
+      #   → Access-Accept with Session-Timeout
+      # ═══════════════════════════════════════════════════════════════════
+
+      # ─── Test D1: Delegated fresh auth with real Cashu token ───
+      - name: "Test D1 - Delegated fresh auth"
+        run: |
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq 8 2>/tmp/mint-d1.log)
+          if [ -z "$TOKEN" ]; then echo "FAIL: Could not mint token"; cat /tmp/mint-d1.log; exit 1; fi
+          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
+
+          echo "User-Name = \"ci-delegated\"
+          User-Password = \"$TOKEN\"
+          NAS-IP-Address = 10.0.0.1
+          Calling-Station-Id = \"dd-00-d1-$RUNID\"" | radclient -x -r 1 -t 15 nodns.shop auth tollgate 2>&1 | tee /tmp/delegated-d1.log
+
+          grep -q "Access-Accept" /tmp/delegated-d1.log || { echo "FAIL: Expected Access-Accept for delegated fresh auth"; exit 1; }
+          ST=$(grep "Session-Timeout" /tmp/delegated-d1.log | grep -oE '[0-9]+' | head -1)
+          echo "Session-Timeout = $ST"
+          if [ -z "$ST" ] || [ "$ST" -lt 400 ]; then
+            echo "FAIL: Expected Session-Timeout >= 400 (7+ min after fee), got $ST"
+            exit 1
+          fi
+          echo "SUCCESS: Delegated fresh auth accepted (Session-Timeout=$ST)"
+
+      # ─── Test D2: Delegated reconnection (same MAC + same token) ───
+      - name: "Test D2 - Delegated reconnection"
+        run: |
+          # Re-send the same token+MAC — Go binary should find the local session and resume
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq 8 2>/tmp/mint-d2a.log)
+          if [ -z "$TOKEN" ]; then echo "FAIL: Could not mint token"; exit 1; fi
+
+          echo "User-Name = \"ci-delegated\"
+          User-Password = \"$TOKEN\"
+          NAS-IP-Address = 10.0.0.1
+          Calling-Station-Id = \"dd-00-d2-$RUNID\"" | radclient -x -r 1 -t 15 nodns.shop auth tollgate 2>&1 | tee /tmp/delegated-d2a.log
+
+          grep -q "Access-Accept" /tmp/delegated-d2a.log || { echo "FAIL: First auth should Accept"; exit 1; }
+          ST1=$(grep "Session-Timeout" /tmp/delegated-d2a.log | grep -oE '[0-9]+' | head -1)
+          echo "First auth: Session-Timeout = $ST1"
+
+          sleep 2
+
+          echo "User-Name = \"ci-delegated\"
+          User-Password = \"$TOKEN\"
+          NAS-IP-Address = 10.0.0.1
+          Calling-Station-Id = \"dd-00-d2-$RUNID\"" | radclient -x -r 1 -t 15 nodns.shop auth tollgate 2>&1 | tee /tmp/delegated-d2b.log
+
+          grep -q "Access-Accept" /tmp/delegated-d2b.log || { echo "FAIL: Reconnection should Accept"; exit 1; }
+          ST2=$(grep "Session-Timeout" /tmp/delegated-d2b.log | grep -oE '[0-9]+' | head -1)
+          echo "Reconnection: Session-Timeout = $ST2"
+
+          # Reconnection should have slightly less time (consumed between requests)
+          if [ -z "$ST2" ] || [ "$ST2" -ge "$ST1" ]; then
+            echo "FAIL: Expected reconnection Session-Timeout < first ($ST2 >= $ST1)"
+            exit 1
+          fi
+
+          grep -q "Session resumed" /tmp/delegated-d2b.log || { echo "FAIL: Expected 'Session resumed' in Reply-Message"; exit 1; }
+          echo "SUCCESS: Delegated reconnection works (first=$ST1, resumed=$ST2)"
+
+      # ─── Test D3: Delegated SSH with real Cashu token ───
+      - name: "Test D3 - Delegated SSH auth on port 2222"
+        run: |
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq 8 2>/tmp/mint-d3.log)
+          if [ -z "$TOKEN" ]; then echo "FAIL: Could not mint token"; exit 1; fi
+          echo "Minted: ${TOKEN:0:40}..."
+
+          timeout 15 ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+            -p 2222 "${TOKEN}@nodns.shop" "echo SUCCESS" 2>&1 | tee /tmp/delegated-d3.log
+
+          grep -q "SUCCESS" /tmp/delegated-d3.log || { echo "FAIL: SSH delegated auth did not produce SUCCESS"; exit 1; }
+          echo "SUCCESS: Delegated SSH auth works"
+
   delegated-e2e:
     name: Delegated Mode E2E (v1 server)
     runs-on: ubuntu-latest
