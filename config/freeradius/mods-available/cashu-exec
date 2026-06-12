@@ -11,9 +11,12 @@
 # Stdout is parsed as RADIUS attribute pairs (e.g. Reply-Message = "...")
 # and added to the Access-Accept response for the NAS/captive portal.
 
+# Uses /bin/sh wrapper to inject env vars (FreeRADIUS exec doesn't inherit
+# systemd EnvironmentFile). TOLLGATE_API_KEY is the session daemon write key.
+
 exec cashu-auth {
     wait = yes
-    program = "/usr/local/bin/tollgate-auth-radius '%{User-Name}' '%{Calling-Station-Id}' '%{User-Password}' '%{Cleartext-Password}'"
+    program = "/bin/sh -c 'TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 TOLLGATE_API_KEY=73ecee3aa1ee08c6cf97c388f29081bc /usr/local/bin/tollgate-auth-radius \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\"'"
     output_pairs = reply
     timeout = 15
 }
