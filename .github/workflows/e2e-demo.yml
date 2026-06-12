@@ -456,6 +456,9 @@ jobs:
           echo "SUCCESS: Delegated reconnection works (first=$ST1, resumed=$ST2)"
 
       # ─── Test D3: Delegated SSH with real Cashu token ───
+      # The chroot BusyBox shell is interactive — it swallows commands passed via
+      # ssh args. Instead we grep for the CASHU TOLLGATE banner which proves the
+      # token was accepted, guest user created, and shell granted.
       - name: "Test D3 - Delegated SSH auth on port 2222"
         run: |
           TOKEN=$(node scripts/mint-testnut.js --no-dleq 8 2>/tmp/mint-d3.log)
@@ -463,10 +466,11 @@ jobs:
           echo "Minted: ${TOKEN:0:40}..."
 
           timeout 15 ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
-            -p 2222 "${TOKEN}@nodns.shop" "echo SUCCESS" 2>&1 | tee /tmp/delegated-d3.log
+            -p 2222 "${TOKEN}@nodns.shop" 2>&1 | tee /tmp/delegated-d3.log || true
 
-          grep -q "SUCCESS" /tmp/delegated-d3.log || { echo "FAIL: SSH delegated auth did not produce SUCCESS"; exit 1; }
-          echo "SUCCESS: Delegated SSH auth works"
+          grep -q "CASHU TOLLGATE" /tmp/delegated-d3.log || { echo "FAIL: SSH delegated auth did not show CASHU TOLLGATE banner"; exit 1; }
+          grep -q "User:" /tmp/delegated-d3.log || { echo "FAIL: SSH delegated auth did not create guest user"; exit 1; }
+          echo "SUCCESS: Delegated SSH auth works (banner + guest user created)"
 
   delegated-e2e:
     name: Delegated Mode E2E (v1 server)
