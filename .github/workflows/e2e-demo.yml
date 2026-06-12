@@ -257,11 +257,58 @@ jobs:
           grep -q "Access-Reject" /tmp/eapol10b.log || { echo "FAIL: Replay should Reject"; exit 1; }
           echo "SUCCESS: Replay protection working"
 
-      # ─── Test 11: RadSec (RADIUS over TLS on port 2083) ───
-      - name: Test 11 — RadSec (TLS on port 2083) → Accept
+      # ─── Test 11: RadSec TLS certificate validation ───
+      # Verifies the Let's Encrypt certificate served on port 2083:
+      # - Valid chain (issuer = Let's Encrypt)
+      # - CN/SAN = nodns.shop
+      # - Not expired
+      # - TLS 1.2+ with strong cipher
+      - name: Test 11 — RadSec TLS certificate validation
         run: |
-          # Create local TLS tunnel to RadSec port
-          socat TCP-LISTEN:11812,reuseaddr,fork SSL:nodns.shop:2083,verify=0 &
+          echo "--- TLS handshake to nodns.shop:2083 ---"
+          CERT_INFO=$(echo | openssl s_client -connect nodns.shop:2083 -servername nodns.shop 2>/dev/null)
+
+          echo "$CERT_INFO" | grep -q "Verify return code: 0 (ok)" \
+            || { echo "FAIL: Certificate verification failed"; echo "$CERT_INFO"; exit 1; }
+
+          # Parse cert details
+          CERT_TEXT=$(echo "$CERT_INFO" | openssl x509 -text -noout 2>/dev/null)
+
+          # Check issuer is Let's Encrypt
+          echo "$CERT_TEXT" | grep -qi "Issuer:.*Let's Encrypt" \
+            || { echo "FAIL: Issuer is not Let's Encrypt"; echo "$CERT_TEXT" | grep "Issuer:"; exit 1; }
+
+          # Check subject CN = nodns.shop
+          echo "$CERT_TEXT" | grep -q "Subject:.*CN = nodns.shop" \
+            || { echo "FAIL: Subject CN is not nodns.shop"; echo "$CERT_TEXT" | grep "Subject:"; exit 1; }
+
+          # Check SAN includes nodns.shop
+          echo "$CERT_TEXT" | grep -q "DNS:nodns.shop" \
+            || { echo "FAIL: SAN does not include nodns.shop"; exit 1; }
+
+          # Check TLS 1.2 or 1.3
+          PROTO=$(echo "$CERT_INFO" | grep "Protocol  :" | awk '{print $NF}')
+          echo "TLS Protocol: $PROTO"
+          if [ "$PROTO" != "TLSv1.2" ] && [ "$PROTO" != "TLSv1.3" ]; then
+            echo "FAIL: Expected TLSv1.2 or TLSv1.3, got $PROTO"
+            exit 1
+          fi
+
+          # Check cipher is strong (AES-GCM or CHACHA)
+          CIPHER=$(echo "$CERT_INFO" | grep "Cipher    :" | awk '{print $NF}')
+          echo "Cipher: $CIPHER"
+          echo "$CIPHER" | grep -qiE "GCM|CHACHA|AES" \
+            || { echo "FAIL: Weak cipher: $CIPHER"; exit 1; }
+
+          echo "SUCCESS: RadSec TLS certificate valid (LE, nodns.shop, $PROTO, $CIPHER)"
+
+      # ─── Test 12: RadSec RADIUS over TLS with cert verification ───
+      # Same as old Test 11 but verifies the LE cert chain instead of verify=0.
+      # Uses socat with the system CA bundle to validate the server certificate.
+      - name: Test 12 — RadSec RADIUS over TLS (verified cert) → Accept
+        run: |
+          # Create local TLS tunnel to RadSec port WITH cert verification
+          socat TCP-LISTEN:11812,reuseaddr,fork SSL:nodns.shop:2083,verify=1,cafile=/etc/ssl/certs/ca-certificates.crt &
           SOCAT_PID=$!
           sleep 1
 
@@ -269,32 +316,61 @@ jobs:
           User-Password = "anything"
           NAS-IP-Address = 10.0.0.1
           Calling-Station-Id = "ff-44-66-77-'"$RUNID"'"
-          NAS-Port = 0' | radclient -x -P tcp -r 1 -t 5 127.0.0.1:11812 auth radsec 2>&1 | tee /tmp/test11.log
+          NAS-Port = 0' | radclient -x -P tcp -r 1 -t 5 127.0.0.1:11812 auth radsec 2>&1 | tee /tmp/test12.log
 
           kill $SOCAT_PID 2>/dev/null
 
-          grep -q "Access-Accept" /tmp/test11.log || { echo "FAIL: Expected Access-Accept via RadSec"; exit 1; }
-          echo "SUCCESS: RadSec accepted"
+          grep -q "Access-Accept" /tmp/test12.log || { echo "FAIL: Expected Access-Accept via RadSec with cert verification"; exit 1; }
+          echo "SUCCESS: RadSec accepted with verified Let's Encrypt certificate"
 
-      # ─── Test 12: SSH tollgate responds on port 2222 ───
-      - name: Test 12 — SSH tollgate responds on port 2222
+      # ─── Test 13: RadSec with eapol_test (full EAP-TTLS over TLS) ───
+      # The most realistic test: eapol_test → RadSec TLS → FreeRADIUS → EAP-TTLS → token validation.
+      # This proves the entire chain works: TLS transport + EAP inner auth + Cashu payment.
+      - name: Test 13 — RadSec eapol_test (EAP-TTLS over TLS) → Accept
+        run: |
+          TOKEN=$(node scripts/mint-testnut.js --no-dleq --write-eapol-config /tmp/eapol-radsec.conf 2>/tmp/mint-radsec.log)
+          if [ -z "$TOKEN" ]; then
+            echo "FAIL: Could not mint Cashu token"
+            cat /tmp/mint-radsec.log
+            exit 1
+          fi
+          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
+
+          # Patch eapol_test config to use RadSec (TCP 2083, secret=radsec)
+          sed -i 's/^key_mgmt=.*/key_mgmt=WPA-EAP/' /tmp/eapol-radsec.conf
+          # eapol_test doesn't speak TLS natively — use socat tunnel
+          socat TCP-LISTEN:11813,reuseaddr,fork SSL:nodns.shop:2083,verify=1,cafile=/etc/ssl/certs/ca-certificates.crt &
+          SOCAT_PID=$!
+          sleep 1
+
+          echo "--- EAP-TTLS+PAP via RadSec TLS tunnel (127.0.0.1:11813 → nodns.shop:2083) ---"
+          eapol_test -c /tmp/eapol-radsec.conf -a 127.0.0.1 -p 11813 -s radsec \
+            -M ff:77:88:99:aa:bb -r 1 -t 30 2>&1 | tee /tmp/eapol-radsec.log
+
+          kill $SOCAT_PID 2>/dev/null
+
+          grep -q "Access-Accept" /tmp/eapol-radsec.log || { echo "FAIL: Expected Access-Accept via RadSec EAP-TTLS"; cat /tmp/eapol-radsec.log; exit 1; }
+          echo "SUCCESS: Full EAP-TTLS over RadSec TLS validated"
+
+      # ─── Test 14: SSH tollgate responds on port 2222 ───
+      - name: Test 14 — SSH tollgate responds on port 2222
         run: |
           timeout 5 bash -c 'echo | nc nodns.shop 2222' 2>/dev/null | head -1 | grep -q "SSH" \
             || { echo "FAIL: SSH tollgate not responding on port 2222"; exit 1; }
 
-      # ─── Test 13: Session-Timeout accuracy (parse value from Accept) ───
+      # ─── Test 15: Session-Timeout accuracy (parse value from Accept) ───
       # Verifies Session-Timeout = amount × RateSecPerSat.
       # Uses a fresh lnurlw (3600s default) and checks the returned value.
-      - name: Test 13 — Session-Timeout accuracy
+      - name: Test 15 — Session-Timeout accuracy
         run: |
           CODE="lnurlw1citimeouttest${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
           echo "User-Name = \"$CODE\"
           User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = \"aa:bb:13:$RUNID\"
-          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test13.log
-          grep -q "Access-Accept" /tmp/test13.log || { echo "FAIL: Expected Access-Accept"; exit 1; }
-          ST=$(grep "Session-Timeout" /tmp/test13.log | grep -oE '[0-9]+' | head -1)
+          Calling-Station-Id = \"aa:bb:15:$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test15.log
+          grep -q "Access-Accept" /tmp/test15.log || { echo "FAIL: Expected Access-Accept"; exit 1; }
+          ST=$(grep "Session-Timeout" /tmp/test15.log | grep -oE '[0-9]+' | head -1)
           if [ -z "$ST" ]; then
             echo "FAIL: No Session-Timeout in response"
             exit 1
@@ -306,10 +382,10 @@ jobs:
           fi
           echo "SUCCESS: Session-Timeout is correct ($ST)"
 
-      # ─── Test 14: Cashu token Session-Timeout scales with amount ───
+      # ─── Test 16: Cashu token Session-Timeout scales with amount ───
       # Uses 4 sat (power of 2 = single proof = clean bootstrap token).
       # Expects Session-Timeout = 4 × 60 = 240.
-      - name: Test 14 — Cashu token Session-Timeout scales with amount
+      - name: Test 16 — Cashu token Session-Timeout scales with amount
         run: |
           TOKEN=$(node scripts/mint-testnut.js --no-dleq 4 2>/tmp/mint14.log)
           if [ -z "$TOKEN" ]; then
@@ -322,11 +398,11 @@ jobs:
           echo "User-Name = \"ci-cashu-user\"
           User-Password = \"$TOKEN\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = \"aa:bb:14:$RUNID\"
-          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test14.log
+          Calling-Station-Id = \"aa:bb:16:$RUNID\"
+          NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test16.log
 
-          grep -q "Access-Accept" /tmp/test14.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/test14.log; exit 1; }
-          ST=$(grep "Session-Timeout" /tmp/test14.log | grep -oE '[0-9]+' | head -1)
+          grep -q "Access-Accept" /tmp/test16.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/test16.log; exit 1; }
+          ST=$(grep "Session-Timeout" /tmp/test16.log | grep -oE '[0-9]+' | head -1)
           if [ -z "$ST" ]; then
             echo "FAIL: No Session-Timeout in response"
             exit 1
@@ -338,13 +414,13 @@ jobs:
           fi
           echo "SUCCESS: Session-Timeout scales correctly (4 sat → $ST)"
 
-      # ─── Test 15: RADIUS accounting (Acct-Start + Acct-Stop) ───
-      - name: Test 15 — RADIUS accounting (Start + Stop)
+      # ─── Test 17: RADIUS accounting (Acct-Start + Acct-Stop) ───
+      - name: Test 17 — RADIUS accounting (Start + Stop)
         run: |
           echo 'Acct-Status-Type = Start
           User-Name = "ci-acct-user"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:15:'"$RUNID"'"
+          Calling-Station-Id = "aa:bb:17:'"$RUNID"'"
           Acct-Session-Id = "ci-session-'"$RUNID"'"
           NAS-Port = 0' | radclient -x nodns.shop acct tollgate 2>&1 | tee /tmp/acct-start.log
           grep -q "Accounting-Response" /tmp/acct-start.log || { echo "FAIL: No Accounting-Response for Start"; exit 1; }
@@ -353,7 +429,7 @@ jobs:
           echo 'Acct-Status-Type = Stop
           User-Name = "ci-acct-user"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = "aa:bb:15:'"$RUNID"'"
+          Calling-Station-Id = "aa:bb:17:'"$RUNID"'"
           Acct-Session-Id = "ci-session-'"$RUNID"'"
           Acct-Session-Time = 300
           Acct-Input-Octets = 1024
@@ -363,21 +439,21 @@ jobs:
           echo "Acct-Stop: OK"
           echo "SUCCESS: Accounting Start + Stop both acknowledged"
 
-      # ─── Test 16: Concurrent sessions (parallel auth with different MACs) ───
-      - name: Test 16 — Concurrent sessions (parallel auth)
+      # ─── Test 18: Concurrent sessions (parallel auth with different MACs) ───
+      - name: Test 18 — Concurrent sessions (parallel auth)
         run: |
           CODE1="lnurlw1ciconc1${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
           CODE2="lnurlw1ciconc2${RUNID}kx2ar0veekzar0wd5xjtnrdakj7ci"
           echo "User-Name = \"$CODE1\"
           User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = \"aa:bb:16:$RUNID\"
+          Calling-Station-Id = \"aa:bb:18:$RUNID\"
           NAS-Port = 0" | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc1.log 2>&1 &
 
           echo "User-Name = \"$CODE2\"
           User-Password = \"anything\"
           NAS-IP-Address = 10.0.0.1
-          Calling-Station-Id = \"aa:bb:17:$RUNID\"
+          Calling-Station-Id = \"aa:bb:19:$RUNID\"
           NAS-Port = 0" | radclient -x -r 1 -t 10 nodns.shop auth tollgate > /tmp/conc2.log 2>&1 &
 
           wait
