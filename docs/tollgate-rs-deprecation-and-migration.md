@@ -129,9 +129,9 @@ The Go code that should remain is the RADIUS/SSH access adapter logic. That code
 | Delegated mode in `cmd/tollgate-auth-radius/main.go` | Config flag + HTTP client calling session daemon API | **Done** — `internal/sessiond/client.go` + delegated branch in main.go |
 | Delegated mode in `cmd/tollgate-auth-ssh/main.go` | Config flag + HTTP client calling session daemon API | **Done** — delegated branch in main.go, pseudo-MAC `ssh:<ip>` |
 | RADIUS `Class` attribute emission | `Class = "tollgate:<session_id>"` in Access-Accept | This repo |
-| RADIUS accounting forwarding | Parse Start/Interim/Stop, forward to session daemon | This repo |
-| RADIUS CoA client | Send CoA-Request on top-up, Disconnect-Request on termination | This repo |
-| RADIUS accounting handler in FreeRADIUS config | exec module for port 1813 accounting packets | This repo (`config/freeradius/`) |
+| RADIUS accounting forwarding | Parse Start/Interim/Stop, forward to session daemon | **Done** — `cmd/tollgate-auth-radius/accounting.go` + `config/freeradius/mods-available/tollgate-acct` |
+| RADIUS CoA client | Send CoA-Request on top-up, Disconnect-Request on termination | **Partial** — Disconnect-Request on `access_level: "suspended"` via `radclient` in `accounting.go`. CoA for top-up extension not yet implemented. |
+| RADIUS accounting handler in FreeRADIUS config | exec module for port 1813 accounting packets | **Done** — `config/freeradius/mods-available/tollgate-acct` installed, `tollgate-acct` added to default site's accounting section |
 
 ## Deprecation Map
 
@@ -483,7 +483,7 @@ TOLLGATE_COA_SECRET=<shared secret>
 
 ### Phase 0: Current State (Now)
 
-`tollgate-auth` independently validates/redeems Cashu tokens, maps amount to `Session-Timeout`, and stores sessions as JSON files. No top-up, no CoA, no accounting processing. `tollgate-rs` has `BootstrapSession`, `CdkWallet`, pricing, and v1 server but no `tollgate-sessiond` daemon.
+`tollgate-auth` independently validates/redeems Cashu tokens, maps amount to `Session-Timeout`, and stores sessions as JSON files. In delegated mode, accounting forwarding to the session daemon is implemented. CoA disconnect-on-suspend is implemented. Top-up CoA (Session-Timeout extension) is not yet implemented. `tollgate-rs` has `BootstrapSession`, `CdkWallet`, pricing, v1 server, and HTTP-04 Session Management API (`/v1/sessions/`).
 
 ### Phase 1: Documentation (This PR)
 

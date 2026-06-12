@@ -44,7 +44,7 @@ Go: Session-Timeout = seconds
 
 ### Remaining for the v2 session API
 
-The sections below describe the **future target architecture** with a dedicated session daemon, secp256k1 session identity, top-up, accounting, and CoA. These remain the long-term goal. The v1 server approach is a pragmatic milestone that delivers delegated mode without new endpoints or a new crate.
+The sections below describe the **target architecture** with a dedicated session daemon, secp256k1 session identity, top-up, accounting, and CoA. The HTTP-04 Session Management API (`/v1/sessions/`) is now live, providing bootstrap, usage reporting, top-up, query, and terminate endpoints. RADIUS accounting forwarding and Disconnect-on-suspend CoA are also deployed. The remaining gaps are: CoA for mid-session top-up (Session-Timeout extension), secp256k1 session identity, and captive portal integration.
 
 ---
 
@@ -526,7 +526,7 @@ This lets accounting packets correlate with the correct session even if MAC rand
 
 ### Phase 0: Current state
 
-`tollgate-auth` independently validates/redeems Cashu tokens and maps amount to `Session-Timeout` (RADIUS) and session duration (SSH). Token verification uses `cdk-cli` subprocess calls. Session state is stored as JSON files per MAC address. There is no top-up, no CoA, no accounting processing.
+`tollgate-auth` independently validates/redeems Cashu tokens and maps amount to `Session-Timeout` (RADIUS) and session duration (SSH). Token verification uses `cdk-cli` subprocess calls. Session state is stored as JSON files per MAC address. In delegated mode, sessions are also tracked by the tollgate-rs session daemon. Accounting forwarding (Start/Interim-Update/Stop → session daemon API) is implemented. CoA disconnect on suspend is implemented. Top-up CoA (extending Session-Timeout mid-session) is not yet implemented.
 
 This is useful and working. It handles the bootstrap-only use case correctly.
 

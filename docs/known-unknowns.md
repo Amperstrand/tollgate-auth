@@ -81,19 +81,20 @@ All EAP packets (including EAP-TTLS) automatically include Message-Authenticator
 
 ---
 
-### 6. No accounting (RFC 2866) implementation
+### 6. Accounting (RFC 2866) — IMPLEMENTED
 
-**What we know**: The Go binary outputs `Acct-Interim-Interval = 60` in Access-Accept, telling the NAS to send usage reports every 60 seconds. But FreeRADIUS has no accounting handler configured — these reports are silently discarded.
+**Status**: FreeRADIUS accounting section now calls `tollgate-auth-radius --accounting` via the `tollgate-acct` exec module. The binary parses Start/Interim-Update/Stop packets and forwards usage data (Acct-Session-Time, Acct-Input-Octets, Acct-Output-Octets) to the tollgate-rs session daemon API at `POST /v1/sessions/{mac}/usage`.
 
-**What we don't know**: Whether the NAS (OpenWrt hostapd) actually sends interim updates. Whether accounting-start and accounting-stop packets arrive.
+**What works**:
+- FreeRADIUS receives accounting packets on port 1813 and calls the exec module
+- The Go binary parses Acct-Status-Type, session ID, MAC, usage counters, NAS-IP
+- Usage reports are forwarded to the session daemon as JSON
+- If the session daemon returns `access_level: "suspended"`, a RADIUS Disconnect-Request is sent to the NAS via `radclient`
 
-**Why it matters**: Without accounting, there's no way to:
-- Track how long a session actually lasted (vs. how long was paid for)
-- Detect if a NAS ignores Session-Timeout and grants indefinite access
-- Bill accurately in multi-operator scenarios
-- Implement CoA (Change of Authorization) for mid-session top-up
-
-**Fix**: Configure FreeRADIUS accounting section to log session start/stop/interim to a file or database.
+**Remaining gaps**:
+- Session daemon only logs usage data — not yet deducting from balance (valve/janitor still handles metering internally)
+- CoA for Session-Timeout extension (mid-session top-up) not yet implemented — only Disconnect on suspend
+- Real NAS (OpenWrt hostapd) accounting not yet verified — only tested via `radclient` from localhost
 
 ---
 
@@ -160,7 +161,7 @@ All EAP packets (including EAP-TTLS) automatically include Message-Authenticator
 
 ### 11. RadSec enforcement — should UDP 1812 be disabled?
 
-**What we know**: Both UDP 1812 (plaintext) and TCP 2083/RadSec (TLS) are active. The token travels inside EAP-TTLS (already encrypted), so the plaintext UDP path doesn't expose the token to network sniffers. But RADIUS accounting packets (if implemented) would be sent in the clear over UDP.
+**What we know**: Both UDP 1812 (plaintext) and TCP 2083/RadSec (TLS) are active. The token travels inside EAP-TTLS (already encrypted), so the plaintext UDP path doesn't expose the token to network sniffers. RADIUS accounting packets are now forwarded to the session daemon — they travel over UDP 1813 in the clear (standard RADIUS accounting). In production, the NAS and FreeRADIUS are on the same LAN, so this is acceptable. For WAN deployments, RadSec should be used for accounting as well.
 
 **What we don't know**: Whether hostapd on OpenWrt supports RadSec natively. Whether consumer-grade APs support it. Whether disabling UDP 1812 breaks any client compatibility.
 

@@ -516,7 +516,7 @@ The core concept is validated — Cashu tokens work as RADIUS credentials. Secur
 
 - **Fresh token e2e on real hardware** — CI passes (16/16), but no complete phone test with an unspent token + internet
 - **Certificate validation** — "Do not validate CA" is vulnerable to rogue AP / MITM
-- **No RADIUS accounting** — `Acct-Interim-Interval` set but reports discarded
+- **RADIUS accounting** — implemented: FreeRADIUS forwards Start/Interim-Update/Stop to tollgate-rs session daemon API (`/v1/sessions/`)
 - **Token acquisition UX** — chicken-and-egg problem: need internet to get tokens, need tokens to get internet
 - **Multi-proof token sizes** — unknown whether no-DLEQ scales past 64 sat
 - **clients.conf accepts 0.0.0.0/0** — should restrict to AP's IP address
