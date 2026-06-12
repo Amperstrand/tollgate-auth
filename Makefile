@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config test-e2e clean
+.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config deploy-certs test-e2e clean
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
@@ -51,6 +51,19 @@ deploy-radius-config:
 		 chmod 640 /etc/freeradius/3.0/certs/radsec/server.key && \
 		 chmod 644 /etc/freeradius/3.0/certs/radsec/server.crt && \
 		 freeradius -XC && systemctl restart freeradius'
+
+deploy-certs:
+	scp -P $(REMOTE_PORT) scripts/sync-caddy-certs.sh $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/sbin/sync-caddy-certs-to-freeradius
+	scp -P $(REMOTE_PORT) config/systemd/sync-caddy-certs.service $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/sync-caddy-certs.service
+	scp -P $(REMOTE_PORT) config/systemd/sync-caddy-certs.timer $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/sync-caddy-certs.timer
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'chmod +x /usr/local/sbin/sync-caddy-certs-to-freeradius && \
+		 mkdir -p /etc/freeradius/3.0/certs/letsencrypt && \
+		 chown freerad:freerad /etc/freeradius/3.0/certs/letsencrypt && \
+		 chmod 0700 /etc/freeradius/3.0/certs/letsencrypt && \
+		 systemctl daemon-reload && \
+		 systemctl enable sync-caddy-certs.timer && \
+		 /usr/local/sbin/sync-caddy-certs-to-freeradius'
 
 deploy-jail:
 	scp -P $(REMOTE_PORT) scripts/setup-jail.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/setup-jail.sh

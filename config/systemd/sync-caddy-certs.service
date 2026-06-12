@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync Caddy Let's Encrypt certs to FreeRADIUS
+After=network.target caddy.service freeradius.service
+Wants=caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sync-caddy-certs-to-freeradius
+PrivateTmp=true
+NoNewPrivileges=true

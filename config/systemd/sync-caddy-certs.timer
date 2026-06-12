@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync Caddy Let's Encrypt certs to FreeRADIUS every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

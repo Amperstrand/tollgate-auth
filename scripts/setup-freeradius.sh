@@ -100,78 +100,59 @@ systemctl status freeradius --no-pager | tail -5
 echo ""
 echo ">>> Setting up RadSec (RADIUS over TLS)..."
 
-RADSEC_CERT_DIR="$CONF_DIR/certs/radsec"
-mkdir -p "$RADSEC_CERT_DIR"
+# Create LE cert destination directory (sync script will populate it)
+LE_CERT_DIR="$CONF_DIR/certs/letsencrypt"
+mkdir -p "$LE_CERT_DIR"
+chown freerad:freerad "$LE_CERT_DIR"
+chmod 0700 "$LE_CERT_DIR"
 
-# Check for existing Let's Encrypt cert (from Caddy or certbot)
-CADDY_LE="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/nodns.shop"
-CERTBOT_LE="/etc/letsencrypt/live/nodns.shop"
-LE_SRC=""
-
-if [ -f "$CADDY_LE/nodns.shop.crt" ] && [ -f "$CADDY_LE/nodns.shop.key" ]; then
-    LE_SRC="$CADDY_LE"
-    echo ">>> Found Caddy Let's Encrypt cert for nodns.shop"
-elif [ -f "$CERTBOT_LE/fullchain.pem" ] && [ -f "$CERTBOT_LE/privkey.pem" ]; then
-    LE_SRC="$CERTBOT_LE"
-    echo ">>> Found certbot Let's Encrypt cert for nodns.shop"
+# Install RadSec site config
+if [ -f "$SCRIPT_DIR/../config/freeradius/sites-available/radsec" ]; then
+    cp "$SCRIPT_DIR/../config/freeradius/sites-available/radsec" "$CONF_DIR/sites-available/radsec"
+    ln -sf ../sites-available/radsec "$CONF_DIR/sites-enabled/radsec"
 fi
 
-if [ -n "$LE_SRC" ]; then
-    cp "$LE_SRC/nodns.shop.crt" "$RADSEC_CERT_DIR/server.crt" 2>/dev/null || \
-    cp "$LE_SRC/fullchain.pem" "$RADSEC_CERT_DIR/server.crt" 2>/dev/null
-
-    cp "$LE_SRC/nodns.shop.key" "$RADSEC_CERT_DIR/server.key" 2>/dev/null || \
-    cp "$LE_SRC/privkey.pem" "$RADSEC_CERT_DIR/server.key" 2>/dev/null
-
-    chown -R root:freerad "$RADSEC_CERT_DIR"
-    chmod 640 "$RADSEC_CERT_DIR/server.key"
-    chmod 644 "$RADSEC_CERT_DIR/server.crt"
-
-    # Install RadSec site config
-    if [ -f "$SCRIPT_DIR/../config/freeradius/sites-available/radsec" ]; then
-        cp "$SCRIPT_DIR/../config/freeradius/sites-available/radsec" "$CONF_DIR/sites-available/radsec"
-        ln -sf ../sites-available/radsec "$CONF_DIR/sites-enabled/radsec"
-    fi
-
-    # Install RadSec clients.conf
-    if [ -f "$SCRIPT_DIR/../config/freeradius/clients.conf" ]; then
-        cp "$SCRIPT_DIR/../config/freeradius/clients.conf" "$CONF_DIR/clients.conf"
-    fi
-
-    # Cert renewal hook — copy fresh cert from Caddy and reload FreeRADIUS
-    mkdir -p /etc/caddy/cert-hooks
-    cat > /etc/caddy/cert-hooks/reload-freeradius.sh << 'HOOK'
-#!/bin/bash
-# Copy fresh Let's Encrypt cert to FreeRADIUS RadSec and reload
-RADSEC_DIR="/etc/freeradius/3.0/certs/radsec"
-CADDY_DIR="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/nodns.shop"
-
-if [ -d "$CADDY_DIR" ]; then
-    cp "$CADDY_DIR/nodns.shop.crt" "$RADSEC_DIR/server.crt"
-    cp "$CADDY_DIR/nodns.shop.key" "$RADSEC_DIR/server.key"
-    chown root:freerad "$RADSEC_DIR/server.key" "$RADSEC_DIR/server.crt"
-    chmod 640 "$RADSEC_DIR/server.key"
-    chmod 644 "$RADSEC_DIR/server.crt"
-    systemctl reload freeradius
+# Install cert sync script
+if [ -f "$SCRIPT_DIR/sync-caddy-certs.sh" ]; then
+    cp "$SCRIPT_DIR/sync-caddy-certs.sh" /usr/local/sbin/sync-caddy-certs-to-freeradius
+    chmod +x /usr/local/sbin/sync-caddy-certs-to-freeradius
+    echo ">>> Installed cert sync script to /usr/local/sbin/sync-caddy-certs-to-freeradius"
 fi
-HOOK
-    chmod +x /etc/caddy/cert-hooks/reload-freeradius.sh
 
-    # Test config and restart
+# Install systemd timer+service for periodic cert sync
+SYSTEMD_DIR="$SCRIPT_DIR/../config/systemd"
+if [ -f "$SYSTEMD_DIR/sync-caddy-certs.service" ] && [ -f "$SYSTEMD_DIR/sync-caddy-certs.timer" ]; then
+    cp "$SYSTEMD_DIR/sync-caddy-certs.service" /etc/systemd/system/sync-caddy-certs.service
+    cp "$SYSTEMD_DIR/sync-caddy-certs.timer" /etc/systemd/system/sync-caddy-certs.timer
+    systemctl daemon-reload
+    systemctl enable sync-caddy-certs.timer
+    echo ">>> Enabled cert sync timer (every 6 hours)"
+fi
+
+# Run initial cert sync
+if [ -x /usr/local/sbin/sync-caddy-certs-to-freeradius ]; then
+    echo ">>> Running initial cert sync..."
+    /usr/local/sbin/sync-caddy-certs-to-freeradius || true
+fi
+
+# Check if LE certs are now available
+if [ -f "$LE_CERT_DIR/nodns.shop.crt" ] && [ -f "$LE_CERT_DIR/nodns.shop.key" ]; then
+    # Test config and restart with LE certs
     if freeradius -XC 2>/dev/null; then
         systemctl restart freeradius
         sleep 2
-        echo ">>> RadSec enabled on TCP port 2083 (TLS)"
+        echo ">>> RadSec enabled on TCP port 2083 (TLS with Let's Encrypt)"
     else
-        echo "WARN: RadSec config validation failed, skipping"
+        echo "WARN: RadSec config validation failed, disabling"
         rm -f "$CONF_DIR/sites-enabled/radsec"
         systemctl restart freeradius
     fi
 else
-    echo ">>> No Let's Encrypt cert found — RadSec not configured"
-    echo ">>> To enable RadSec later:"
-    echo ">>>   1. Get a cert: certbot certonly --standalone -d nodns.shop"
-    echo ">>>   2. Re-run this script"
+    echo ">>> No Let's Encrypt cert found — RadSec site enabled but will fail to start"
+    echo ">>> Cert sync timer will pick up certs once Caddy provisions them"
+    echo ">>> FreeRADIUS continues using self-signed certs for EAP"
+    # Don't restart FreeRADIUS — RadSec will fail without certs, keep it disabled
+    rm -f "$CONF_DIR/sites-enabled/radsec"
 fi
 
 echo ""

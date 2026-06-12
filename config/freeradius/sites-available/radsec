@@ -1,7 +1,7 @@
 # /etc/freeradius/3.0/sites-available/radsec
 # RadSec (RADIUS over TLS) — RFC 6614
 # Encrypts the entire RADIUS conversation between NAS and server.
-# Uses Let's Encrypt cert for nodns.shop (valid, trusted by most clients).
+# Uses Let's Encrypt cert for nodns.shop synced from Caddy via systemd timer.
 # Runs alongside UDP 1812 (plain RADIUS with shared secret).
 
 server radsec {
@@ -12,11 +12,12 @@ server radsec {
 		proto = tcp
 
 		tls {
-			private_key_file = ${certdir}/radsec/server.key
-			certificate_file = ${certdir}/radsec/server.crt
-			ca_file = ${certdir}/radsec/server.crt
-			dh_file = ${certdir}/dh
+			private_key_file = /etc/freeradius/3.0/certs/letsencrypt/nodns.shop.key
+			certificate_file = /etc/freeradius/3.0/certs/letsencrypt/nodns.shop.crt
+			ca_file = /etc/freeradius/3.0/certs/letsencrypt/nodns.shop.crt
 			fragment_size = 1024
+			tls_min_version = "1.2"
+			tls_max_version = "1.3"
 		}
 	}
 
