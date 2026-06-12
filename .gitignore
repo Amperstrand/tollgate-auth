@@ -3,3 +3,22 @@ cashu-tollgate
 *.exe
 .env
 .omo/
+
+# Binaries
+tollgate-auth-radius
+tollgate-auth-radius.linux-*
+tollgate-auth-ssh
+tollgate-auth-ssh.linux-*
+
+# Build artifacts
+*.pyc
+__pycache__/
+
+# Dependency locks (generated)
+package-lock.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
