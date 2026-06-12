@@ -575,6 +575,14 @@ func handleCashuDelegated(cred PaymentCredential, sessionID string, sessions *Se
 		os.Exit(1)
 	}
 
+	// Top-up (RFC 5176 CoA): extend NAS Session-Timeout without disconnect
+	if existingRec, hasExisting := sessions.Get(sessionID); hasExisting && sessions.IsActive(existingRec) {
+		if nasIP := getEnv("TOLLGATE_NAS_IP", ""); nasIP != "" {
+			log.Printf("CoA: top-up detected for session=%s, sending CoA to nas=%s", sessionID, nasIP)
+			sendCoAOrDisconnect(nasIP, seconds, "", sessionID)
+		}
+	}
+
 	thash := cashu.TokenHash(cred.Value)
 
 	rec := &SessionRecord{
