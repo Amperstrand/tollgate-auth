@@ -251,7 +251,7 @@ jobs:
 
           node scripts/mint-testnut.js --token "$TOKEN" --write-eapol-config /tmp/eapol10b.conf
 
-          sleep 3
+          sleep 5
 
           echo "--- Replay (expect Reject) ---"
           eapol_test -c /tmp/eapol10b.conf -a "$RADIUS_IP" -s tollgate \
