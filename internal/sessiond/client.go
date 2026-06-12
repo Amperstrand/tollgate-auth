@@ -151,7 +151,8 @@ type UsageReport struct {
 // GetSession retrieves session state from the session daemon via
 // GET /v1/session with X-TollGate-MAC header.
 func (c *Client) GetSession(mac string) (*SessionResponse, error) {
-	req, err := http.NewRequest("GET", c.BaseURL+"/v1/session", nil)
+	normalizedMAC := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(mac, "-", ":"), ".", ":"))
+	req, err := http.NewRequest("GET", c.BaseURL+"/v1/sessions/"+normalizedMAC, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -180,20 +181,23 @@ func (c *Client) GetSession(mac string) (*SessionResponse, error) {
 }
 
 // ReportUsage sends a usage report to the session daemon via
-// POST /v1/session/usage with JSON body and X-TollGate-MAC header.
+// POST /v1/sessions/{mac}/usage with JSON body and X-API-Key header.
 // Returns updated session state for CoA enforcement decisions.
-func (c *Client) ReportUsage(mac string, report UsageReport) (*SessionResponse, error) {
+func (c *Client) ReportUsage(mac string, report UsageReport, apiKey string) (*SessionResponse, error) {
 	payload, err := json.Marshal(report)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling usage report: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.BaseURL+"/v1/session/usage", bytes.NewReader(payload))
+	normalizedMAC := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(mac, "-", ":"), ".", ":"))
+	url := c.BaseURL + "/v1/sessions/" + normalizedMAC + "/usage"
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-TollGate-MAC", mac)
+	req.Header.Set("X-API-Key", apiKey)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

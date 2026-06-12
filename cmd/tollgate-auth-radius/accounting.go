@@ -1,14 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strconv"
-	"strings"
 	"time"
 
+	"tollgate-auth/internal/radius"
 	"tollgate-auth/internal/sessiond"
 )
 
@@ -62,7 +62,8 @@ func handleAccounting() {
 	}
 
 	client := sessiond.NewClient(sessiondURL)
-	resp, err := client.ReportUsage(mac, report)
+	apiKey := getEnv("TOLLGATE_API_KEY", "")
+	resp, err := client.ReportUsage(mac, report, apiKey)
 	if err != nil {
 		log.Printf("Accounting: ReportUsage failed for mac=%s: %v", mac, err)
 		// Don't fail accounting on session daemon error — FreeRADIUS accounting must succeed
@@ -84,19 +85,11 @@ func handleAccounting() {
 	}
 }
 
+// sendDisconnect sends a RADIUS Disconnect-Request to terminate a session on the NAS.
+// Delegates to the native Go RADIUS client in internal/radius.
 func sendDisconnect(nasIP, port, acctSessionID, username, secret string) error {
-	attrs := fmt.Sprintf("Acct-Session-Id=%s", acctSessionID)
-	if username != "" {
-		attrs += fmt.Sprintf(",User-Name=%s", username)
-	}
-
-	cmd := exec.Command("radclient", "-x", fmt.Sprintf("%s:%s", nasIP, port), "disconnect", secret)
-	cmd.Stdin = strings.NewReader(attrs + "\n")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("radclient failed: %w, output: %s", err, string(output))
-	}
-	return nil
+	nasAddr := fmt.Sprintf("%s:%s", nasIP, port)
+	return radius.SendDisconnect(context.Background(), nasAddr, secret, acctSessionID, username)
 }
 
 func parseUint64Ptr(s string) *uint64 {

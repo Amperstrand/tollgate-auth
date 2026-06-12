@@ -230,8 +230,8 @@ func TestGetSession_Success(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
 		}
-		if r.URL.Path != "/v1/session" {
-			t.Errorf("expected path /v1/session, got %s", r.URL.Path)
+		if r.URL.Path != "/v1/sessions/aa:bb:cc:dd:ee:ff" {
+			t.Errorf("expected path /v1/sessions/aa:bb:cc:dd:ee:ff, got %s", r.URL.Path)
 		}
 		if r.Header.Get("X-TollGate-MAC") != "aa-bb-cc-dd-ee-ff" {
 			t.Errorf("expected MAC header aa-bb-cc-dd-ee-ff, got %s", r.Header.Get("X-TollGate-MAC"))
@@ -292,11 +292,11 @@ func TestReportUsage_Success(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
-		if r.URL.Path != "/v1/session/usage" {
-			t.Errorf("expected path /v1/session/usage, got %s", r.URL.Path)
+		if r.URL.Path != "/v1/sessions/aa:bb:cc:dd:ee:ff/usage" {
+			t.Errorf("expected path /v1/sessions/aa:bb:cc:dd:ee:ff/usage, got %s", r.URL.Path)
 		}
-		if r.Header.Get("X-TollGate-MAC") != "aa-bb-cc-dd-ee-ff" {
-			t.Errorf("expected MAC header, got %s", r.Header.Get("X-TollGate-MAC"))
+		if r.Header.Get("X-API-Key") != "test-api-key" {
+			t.Errorf("expected X-API-Key test-api-key, got %s", r.Header.Get("X-API-Key"))
 		}
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("expected Content-Type application/json, got %s", r.Header.Get("Content-Type"))
@@ -331,7 +331,7 @@ func TestReportUsage_Success(t *testing.T) {
 		Timestamp:   "2025-01-01T00:00:00Z",
 	}
 
-	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report)
+	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report, "test-api-key")
 	if err != nil {
 		t.Fatalf("ReportUsage failed: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestReportUsage_Suspended(t *testing.T) {
 		Source:      "radius-accounting",
 	}
 
-	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report)
+	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report, "test-api-key")
 	if err != nil {
 		t.Fatalf("ReportUsage failed: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestReportUsage_ErrorResponse(t *testing.T) {
 
 	client := NewClient(server.URL)
 	report := UsageReport{Source: "radius-accounting"}
-	_, err := client.ReportUsage("test-mac", report)
+	_, err := client.ReportUsage("test-mac", report, "test-api-key")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
