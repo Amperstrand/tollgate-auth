@@ -1,0 +1,26 @@
+# /etc/freeradius/3.0/mods-available/tollgate-acct
+# FreeRADIUS exec module that calls tollgate-auth-radius for accounting forwarding.
+#
+# FreeRADIUS passes:
+#   %{Acct-Status-Type}      = Start, Interim-Update, or Stop
+#   %{Acct-Session-Id}        = NAS-generated session identifier
+#   %{Calling-Station-Id}     = client MAC address (e.g. "aa-bb-cc-dd-ee-ff")
+#   %{User-Name}              = username from original Access-Request
+#   %{Acct-Session-Time}      = session duration in seconds
+#   %{Acct-Input-Octets}      = bytes received by NAS
+#   %{Acct-Output-Octets}     = bytes sent by NAS
+#   %{Acct-Terminate-Cause}   = reason for session end (Stop only)
+#   %{NAS-IP-Address}         = NAS IP address (for CoA/disconnect)
+#
+# The binary forwards usage to the tollgate-rs session daemon API.
+# If the session daemon reports access_level="suspended", the binary
+# sends a RADIUS Disconnect-Request to the NAS via radclient.
+#
+# Requires: TOLLGATE_AUTH_MODE=delegated and TOLLGATE_SESSIOND_URL set.
+
+exec tollgate-acct {
+    wait = yes
+    program = "/usr/local/bin/tollgate-auth-radius --accounting '%{Acct-Status-Type}' '%{Acct-Session-Id}' '%{Calling-Station-Id}' '%{User-Name}' '%{Acct-Session-Time}' '%{Acct-Input-Octets}' '%{Acct-Output-Octets}' '%{Acct-Terminate-Cause}' '%{NAS-IP-Address}'"
+    output_pairs = reply
+    timeout = 15
+}

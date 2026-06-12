@@ -13,7 +13,7 @@
   - **Cashu tokens** (`cashuA...` / `cashuB...`) — full decode → verify → redeem
   - **LNURL-withdraw** (`lnurlw...` / `LNURLW...`) — pass-through accept (TODO: claim payment)
 - **EAP methods**:
-  - **EAP-TTLS+PAP** (recommended) — token split: first 200b in password, remaining 178b in username (both under FreeRADIUS's 253-byte diameter2vp limit)
+  - **EAP-TTLS+PAP** (recommended) — no-DLEQ token (230b) in password field, identity = "anonymous". Validated end-to-end on real Android hardware. Fallback: split full DLEQ token (378b) across password (200b) + username (178b).
   - **PEAP+MSCHAPv2** (legacy) — payment in username field only, <253 byte limit
 - Payment accepted from **username OR password** — whichever starts with `cashu` or `lnurlw`
 - Session tracking: MAC-based reconnection (skip payment check for active sessions)

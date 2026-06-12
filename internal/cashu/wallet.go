@@ -18,6 +18,14 @@ import (
 //
 // We check output for both "compensated" and "Received:" indicators.
 func RedeemToken(tokenStr string, walletDir string) error {
+	// Defense-in-depth: validate token before passing to subprocess
+	if len(tokenStr) > 4096 {
+		return fmt.Errorf("token too long (%d bytes)", len(tokenStr))
+	}
+	if !strings.HasPrefix(tokenStr, "cashuA") && !strings.HasPrefix(tokenStr, "cashuB") {
+		return fmt.Errorf("invalid token prefix")
+	}
+
 	cmd := exec.Command(
 		"/usr/local/bin/cdk-cli",
 		"--work-dir", walletDir,
@@ -64,7 +72,7 @@ func StoreInWallet(tokenStr string, tokenData *TokenData, walletFile string) {
 		"unit":   tokenData.Unit,
 		"token":  tokenStr,
 	}
-	f, err := os.OpenFile(walletFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(walletFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return
 	}

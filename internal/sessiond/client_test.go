@@ -224,3 +224,181 @@ func containsMiddle(s, substr string) bool {
 	}
 	return false
 }
+
+func TestGetSession_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/session" {
+			t.Errorf("expected path /v1/session, got %s", r.URL.Path)
+		}
+		if r.Header.Get("X-TollGate-MAC") != "aa-bb-cc-dd-ee-ff" {
+			t.Errorf("expected MAC header aa-bb-cc-dd-ee-ff, got %s", r.Header.Get("X-TollGate-MAC"))
+		}
+		resp := SessionResponse{
+			SessionID:      "test-session-1",
+			AccessLevel:    "active",
+			Allotment:      480000,
+			RemainingQuota: 360000,
+			Metric:         "milliseconds",
+			NextCheckinMs:  60000,
+			IsFinal:        false,
+			CreatedAt:      1700000000,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	state, err := client.GetSession("aa-bb-cc-dd-ee-ff")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	if state.SessionID != "test-session-1" {
+		t.Errorf("expected SessionID test-session-1, got %s", state.SessionID)
+	}
+	if state.AccessLevel != "active" {
+		t.Errorf("expected AccessLevel active, got %s", state.AccessLevel)
+	}
+	if state.RemainingQuota != 360000 {
+		t.Errorf("expected RemainingQuota 360000, got %d", state.RemainingQuota)
+	}
+}
+
+func TestGetSession_ErrorResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("session not found"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.GetSession("unknown-mac")
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	errStr := err.Error()
+	if !contains(errStr, "404") {
+		t.Errorf("expected error to contain '404', got: %s", errStr)
+	}
+}
+
+func TestReportUsage_Success(t *testing.T) {
+	var receivedBody UsageReport
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/session/usage" {
+			t.Errorf("expected path /v1/session/usage, got %s", r.URL.Path)
+		}
+		if r.Header.Get("X-TollGate-MAC") != "aa-bb-cc-dd-ee-ff" {
+			t.Errorf("expected MAC header, got %s", r.Header.Get("X-TollGate-MAC"))
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("expected Content-Type application/json, got %s", r.Header.Get("Content-Type"))
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Errorf("failed to decode request body: %v", err)
+		}
+
+		resp := SessionResponse{
+			SessionID:      "test-session-1",
+			AccessLevel:    "active",
+			RemainingQuota: 240000,
+			Metric:         "milliseconds",
+			IsFinal:        false,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	inputOctets := uint64(1048576)
+	outputOctets := uint64(524288)
+	sessionTime := uint64(120)
+
+	client := NewClient(server.URL)
+	report := UsageReport{
+		InputOctets: &inputOctets,
+		OutputOctets: &outputOctets,
+		SessionTime: &sessionTime,
+		Source:      "radius-accounting",
+		Timestamp:   "2025-01-01T00:00:00Z",
+	}
+
+	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report)
+	if err != nil {
+		t.Fatalf("ReportUsage failed: %v", err)
+	}
+	if state.AccessLevel != "active" {
+		t.Errorf("expected AccessLevel active, got %s", state.AccessLevel)
+	}
+	if state.RemainingQuota != 240000 {
+		t.Errorf("expected RemainingQuota 240000, got %d", state.RemainingQuota)
+	}
+	if receivedBody.Source != "radius-accounting" {
+		t.Errorf("expected source radius-accounting, got %s", receivedBody.Source)
+	}
+	if receivedBody.InputOctets == nil || *receivedBody.InputOctets != 1048576 {
+		t.Errorf("expected InputOctets 1048576, got %v", receivedBody.InputOctets)
+	}
+	if receivedBody.SessionTime == nil || *receivedBody.SessionTime != 120 {
+		t.Errorf("expected SessionTime 120, got %v", receivedBody.SessionTime)
+	}
+}
+
+func TestReportUsage_Suspended(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := SessionResponse{
+			SessionID:      "test-session-1",
+			AccessLevel:    "suspended",
+			RemainingQuota: 0,
+			IsFinal:        true,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	sessionTime := uint64(480)
+	report := UsageReport{
+		SessionTime: &sessionTime,
+		Source:      "radius-accounting",
+	}
+
+	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report)
+	if err != nil {
+		t.Fatalf("ReportUsage failed: %v", err)
+	}
+	if state.AccessLevel != "suspended" {
+		t.Errorf("expected AccessLevel suspended, got %s", state.AccessLevel)
+	}
+	if !state.IsFinal {
+		t.Error("expected IsFinal true")
+	}
+}
+
+func TestReportUsage_ErrorResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	report := UsageReport{Source: "radius-accounting"}
+	_, err := client.ReportUsage("test-mac", report)
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	errStr := err.Error()
+	if !contains(errStr, "500") {
+		t.Errorf("expected error to contain '500', got: %s", errStr)
+	}
+}

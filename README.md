@@ -349,6 +349,27 @@ The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `
 
 Cashu V4 tokens with DLEQ proofs are 378 bytes, exceeding FreeRADIUS's `diameter2vp` 253-byte limit inside EAP-TTLS tunnels. Two solutions work: (1) strip the optional DLEQ proof to produce 230-byte tokens that fit in a single RADIUS attribute, or (2) split the 378-byte token across password (200b) and identity (178b) fields. DLEQ is a client-side verification feature (NUT-12) — not required for mint checkstate or token redemption. See [docs/radius-token-size.md](docs/radius-token-size.md) for details.
 
+## Security Audit
+
+A security audit was completed on the FreeRADIUS config and Go binary layers. 6 vulnerabilities were found and fixed:
+
+| Finding | Severity | Status |
+|---------|----------|--------|
+| Token replay race condition (non-atomic check+mark) | HIGH | **Fixed** — `CheckAndMark()` with `flock(LOCK_EX)` |
+| Command injection surface (loose input validation) | HIGH | **Fixed** — strict allowlist validators (`isValidCashuToken`, `isValidLNURLw`) |
+| SSRF via attacker-controlled mint URL | HIGH | **Fixed** — `isSafeMintURL()` blocks private/local IPs |
+| Legacy `users` file `Exec-Program-Wait` shell injection | HIGH | **Fixed** — removed, replaced with reject-all fallback |
+| File permissions too permissive (0644) | MEDIUM | **Fixed** — changed to 0600 (owner-only) |
+| BlastRADIUS (CVE-2024-3596) mitigations disabled | INFO | **Not vulnerable** — EAP-TTLS forces Message-Authenticator per RFC 2869 |
+
+**Key finding**: Both FreeRADIUS's exec module and Go's `exec.Command` use `execve()` directly (no shell). Arguments cannot escape their argv slot. The original `users` file `Exec-Program-Wait` entries DID go through shell interpretation — those have been removed.
+
+**Remaining items** (not yet production-blocking):
+- `clients.conf` accepts RADIUS from `0.0.0.0/0` — should restrict to AP's IP
+- Self-signed TLS certificates for RadSec — should use Let's Encrypt or proper CA
+- No inner-tunnel input format/length validation in FreeRADIUS config
+- No rate limiting on auth attempts
+
 ## Security Disclaimer
 
 **This software creates ephemeral user accounts with shell access on your server.**
@@ -401,6 +422,19 @@ FreeRADIUS exec module runs external programs as the `freerad` system user. This
 ### Cleartext-Password vs User-Password in inner tunnel
 
 Inside EAP-TTLS, the PAP password arrives as `Cleartext-Password` (not `User-Password`). The FreeRADIUS inner-tunnel config needed explicit handling to copy `Cleartext-Password` to `User-Password` for the exec module to receive it as a command-line argument.
+
+### Auth-Type := Accept is required in inner-tunnel
+
+The default inner-tunnel config uses `Response-Packet-Type := Access-Accept` after a successful exec module call. This does **NOT** work — FreeRADIUS logs `No Auth-Type found: rejecting the user via Post-Auth-Type = Reject` even after the exec module returns success.
+
+Two changes are required in `sites-available/inner-tunnel`:
+
+1. In `authorize{}`: Use `update control { Auth-Type := Accept }` instead of `update reply { Response-Packet-Type := Access-Accept }`
+2. In `authenticate{}`: Add an explicit handler: `Auth-Type Accept { ok }`
+
+Without the handler, FreeRADIUS has no module to process the `Accept` auth type and falls through to rejection. The `ok` module simply returns `RLM_MODULE_OK` which maps to Access-Accept.
+
+See `config/freeradius/sites-available/inner-tunnel` for the full annotated config with inline comments.
 
 ## How It Works
 
@@ -475,6 +509,25 @@ The Cashu-over-RADIUS approach works for single-proof tokens (230 bytes, no DLEQ
 Ark wallets use BIP39 12-word seed phrases (~160 chars) — these fit in a RADIUS attribute. But Ark doesn't have portable "tokens" like Cashu. Ark payments require cooperative rounds with an Ark Service Provider. A VTXO "proof" (V-PACK) with tree path + signatures exceeds 253 bytes for any non-trivial tree.
 
 A practical path: use Ark for backend settlement (fast Bitcoin transactions) but present Cashu-like UX at the RADIUS layer. The Ark wallet holds funds, mints Cashu tokens on demand, and those tokens flow through RADIUS as we've built here. See [docs/radius-token-size.md](docs/radius-token-size.md) for the full analysis.
+
+## Known Unknowns
+
+The core concept is validated — Cashu tokens work as RADIUS credentials. Security audit completed with 6 fixes applied. Remaining production gaps. See [docs/known-unknowns.md](docs/known-unknowns.md) for the full catalog, including:
+
+- **Fresh token e2e on real hardware** — CI passes (16/16), but no complete phone test with an unspent token + internet
+- **Certificate validation** — "Do not validate CA" is vulnerable to rogue AP / MITM
+- **No RADIUS accounting** — `Acct-Interim-Interval` set but reports discarded
+- **Token acquisition UX** — chicken-and-egg problem: need internet to get tokens, need tokens to get internet
+- **Multi-proof token sizes** — unknown whether no-DLEQ scales past 64 sat
+- **clients.conf accepts 0.0.0.0/0** — should restrict to AP's IP address
+
+**Resolved in security audit** (2025-06-12):
+- ~~BlastRADIUS mitigations disabled~~ — **NOT vulnerable** (EAP-TTLS forces Message-Authenticator)
+- ~~Token replay race condition~~ — **FIXED** (`CheckAndMark()` with flock)
+- ~~Command injection surface~~ — **FIXED** (strict allowlist validators, execve confirmed safe)
+- ~~SSRF via mint URL~~ — **FIXED** (`isSafeMintURL()` blocks private IPs)
+- ~~Legacy users file shell injection~~ — **FIXED** (removed Exec-Program-Wait)
+- ~~File permissions 0644~~ — **FIXED** (changed to 0600)
 
 ## Related
 

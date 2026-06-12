@@ -26,6 +26,11 @@ echo ">>> Installing exec module (cashu-auth)..."
 cp "$SCRIPT_DIR/../config/freeradius/mods-available/cashu-exec" "$CONF_DIR/mods-available/cashu-exec"
 ln -sf ../mods-available/cashu-exec "$CONF_DIR/mods-enabled/cashu-exec"
 
+# --- accounting exec module ---
+echo ">>> Installing accounting exec module (tollgate-acct)..."
+cp "$SCRIPT_DIR/../config/freeradius/mods-available/tollgate-acct" "$CONF_DIR/mods-available/tollgate-acct"
+ln -sf ../mods-available/tollgate-acct "$CONF_DIR/mods-enabled/tollgate-acct"
+
 # --- EAP config (TTLS+PAP + PEAP+MSCHAPv2 with self-signed cert) ---
 echo ">>> Generating self-signed TLS certificate for radius.nodns.shop..."
 CERT_DIR="$CONF_DIR/certs"
@@ -61,6 +66,13 @@ ln -sf ../sites-available/inner-tunnel "$CONF_DIR/sites-enabled/inner-tunnel"
 # --- Enable the default server for outer EAP handling ---
 echo ">>> Ensuring default site is enabled..."
 ln -sf ../sites-available/default "$CONF_DIR/sites-enabled/default" 2>/dev/null || true
+
+# --- Configure accounting in default site ---
+echo ">>> Adding accounting forwarding to default site..."
+if ! grep -q "tollgate-acct" "$CONF_DIR/sites-available/default" 2>/dev/null; then
+    sed -i '/^[[:space:]]*accounting[[:space:]]*{/a\\ttollgate-acct' "$CONF_DIR/sites-available/default" 2>/dev/null || \
+    echo "WARN: Could not add tollgate-acct to default site accounting section. Add manually: accounting { tollgate-acct }"
+fi
 
 # --- Data directory with correct permissions ---
 echo ">>> Setting up data directory..."
@@ -168,6 +180,7 @@ echo ">>> Listen ports: 1812 (auth UDP), 1813 (acct UDP), 2083 (RadSec TCP/TLS)"
 echo ">>> EAP methods:"
 echo ">>>   EAP-TTLS+PAP    (recommended — token in password field, no length limit)"
 echo ">>>   PEAP+MSCHAPv2   (legacy — token in username field, <253 bytes)"
+echo ">>> Accounting: forwarded to session daemon via tollgate-acct exec module"
 echo ">>> RadSec: TCP 2083 with Let's Encrypt cert (encrypts entire RADIUS conversation)"
 echo ">>> Validation: /usr/local/bin/tollgate-auth-radius"
 echo ""

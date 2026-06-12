@@ -1,6 +1,7 @@
 package sessiond
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -123,4 +124,95 @@ func (c *Client) GetUsage(mac string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(body)), nil
+}
+
+// SessionResponse represents session state returned by the session daemon.
+type SessionResponse struct {
+	SessionID       string `json:"session_id"`
+	AccessLevel     string `json:"access_level"`   // "active", "suspended", "restricted"
+	Allotment       int64  `json:"allotment"`       // total allotment in metric units
+	RemainingQuota  int64  `json:"remaining_quota"` // remaining quota in metric units
+	Metric          string `json:"metric"`          // "milliseconds" or "bytes"
+	NextCheckinMs   int64  `json:"next_checkin_ms"`
+	IsFinal         bool   `json:"is_final"`
+	CreatedAt       int64  `json:"created_at"`      // unix timestamp
+	LastUsageUpdate string `json:"last_usage_update,omitempty"`
+}
+
+// UsageReport represents a normalized usage event from RADIUS accounting.
+type UsageReport struct {
+	InputOctets *uint64 `json:"input_octets,omitempty"`
+	OutputOctets *uint64 `json:"output_octets,omitempty"`
+	SessionTime *uint64 `json:"session_time,omitempty"`
+	Source      string  `json:"source"`              // e.g. "radius-accounting"
+	Timestamp   string  `json:"timestamp,omitempty"` // RFC 3339
+}
+
+// GetSession retrieves session state from the session daemon via
+// GET /v1/session with X-TollGate-MAC header.
+func (c *Client) GetSession(mac string) (*SessionResponse, error) {
+	req, err := http.NewRequest("GET", c.BaseURL+"/v1/session", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("X-TollGate-MAC", mac)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("session daemon returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var state SessionResponse
+	if err := json.Unmarshal(body, &state); err != nil {
+		return nil, fmt.Errorf("parsing session response: %w", err)
+	}
+	return &state, nil
+}
+
+// ReportUsage sends a usage report to the session daemon via
+// POST /v1/session/usage with JSON body and X-TollGate-MAC header.
+// Returns updated session state for CoA enforcement decisions.
+func (c *Client) ReportUsage(mac string, report UsageReport) (*SessionResponse, error) {
+	payload, err := json.Marshal(report)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling usage report: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.BaseURL+"/v1/session/usage", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-TollGate-MAC", mac)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("session daemon returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var state SessionResponse
+	if err := json.Unmarshal(body, &state); err != nil {
+		return nil, fmt.Errorf("parsing session response: %w", err)
+	}
+	return &state, nil
 }

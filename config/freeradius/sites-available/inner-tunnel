@@ -7,15 +7,27 @@
 #
 # The exec module (cashu-auth) receives both fields and routes
 # to the appropriate validation path.
+#
+# IMPORTANT: This config uses Auth-Type := Accept (not Response-Packet-Type).
+# FreeRADIUS requires an explicit Auth-Type handler in the authenticate{}
+# section to process this. Without it, you get:
+#   "No Auth-Type found: rejecting the user via Post-Auth-Type = Reject"
+# See: https://github.com/Amperstrand/tollgate-auth/issues/6
 
 server inner-tunnel {
     authorize {
+        # Inside EAP-TTLS, PAP delivers the password as Cleartext-Password
+        # (not User-Password). Copy it to User-Password so the exec module
+        # can pass it as a command-line argument to the Go binary.
         if (Cleartext-Password && !User-Password) {
             update request {
                 User-Password := "%{Cleartext-Password}"
             }
         }
 
+        # Payment credential detection: check username, password, and
+        # cleartext-password for Cashu tokens or LNURL-withdraw codes.
+        # If found, call the exec module to validate payment.
         if ((User-Name =~ /^cashu[AB]/) || \
             (User-Password =~ /^cashu[AB]/) || \
             (Cleartext-Password =~ /^cashu[AB]/) || \
@@ -27,6 +39,11 @@ server inner-tunnel {
             (Cleartext-Password =~ /^LNURLW/)) {
             cashu-auth
             if (ok) {
+                # CRITICAL: Use Auth-Type := Accept, NOT
+                # Response-Packet-Type := Access-Accept. The latter
+                # does NOT set Auth-Type, causing FreeRADIUS to reject
+                # with "No Auth-Type found" even after the exec module
+                # succeeds.
                 update control {
                     Auth-Type := Accept
                 }
@@ -44,6 +61,15 @@ server inner-tunnel {
     }
 
     authenticate {
+        # CRITICAL: This handler is required for Auth-Type := Accept
+        # to work. Without it, FreeRADIUS has no handler for the
+        # "Accept" auth type and falls through to rejection.
+        # The 'ok' module simply returns RLM_MODULE_OK which maps
+        # to Access-Accept.
+        Auth-Type Accept {
+            ok
+        }
+
         Auth-Type PAP {
             pap
         }

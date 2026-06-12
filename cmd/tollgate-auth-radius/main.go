@@ -133,19 +133,58 @@ func (s *SessionStore) Remove(mac string) {
 	os.Remove(s.Path(mac))
 }
 
-// isCashuToken checks if a string looks like a Cashu token (cashuA or cashuB prefix).
+// isCashuToken checks if a string starts with a Cashu token prefix (cashuA or cashuB).
+// Used for quick prefix checks before full validation.
 func isCashuToken(s string) bool {
 	return strings.HasPrefix(s, "cashuA") || strings.HasPrefix(s, "cashuB")
 }
 
-// isLNURLw checks if a string looks like an LNURL-withdraw code.
-// LNURLw is bech32 encoded with HRP "lnurlw" (case-insensitive, all same case).
+// isValidCashuToken validates that a string looks like a real Cashu token.
+// Cashu V3 tokens: cashuA + base64url characters
+// Cashu V4 tokens: cashuB + base64url characters
+// No shell metacharacters, no control chars, no whitespace.
+func isValidCashuToken(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	if !strings.HasPrefix(s, "cashuA") && !strings.HasPrefix(s, "cashuB") {
+		return false
+	}
+	// After prefix: only base64url chars (A-Z, a-z, 0-9, -, _)
+	for _, c := range s[6:] {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// isLNURLw checks if a string starts with an LNURL-withdraw prefix.
+// Used for quick prefix checks before full validation.
 func isLNURLw(s string) bool {
 	if len(s) < 10 {
 		return false
 	}
 	lower := strings.ToLower(s)
 	return strings.HasPrefix(lower, "lnurlw")
+}
+
+// isValidLNURLw validates that a string looks like a real LNURL-withdraw code.
+// LNURLw is bech32 encoded: alphanumeric only (A-Za-z0-9).
+func isValidLNURLw(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	lower := strings.ToLower(s)
+	if !strings.HasPrefix(lower, "lnurlw") {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 // base64urlPattern matches strings that contain only base64url characters.
@@ -156,15 +195,13 @@ func isBase64url(s string) bool {
 	return len(s) > 0 && base64urlPattern.MatchString(s)
 }
 
-// sanitizeInput rejects strings containing characters that could break
-// FreeRADIUS exec argument splitting or cause other issues.
-// Rejects: single quotes, backslashes, newlines, null bytes.
-// Also rejects strings exceeding MaxInputLen.
+// sanitizeInput rejects strings containing shell metacharacters or control chars.
+// Rejects: ' \ ; ` $ ( ) | & > < \n \r \0 and strings exceeding MaxInputLen.
 func sanitizeInput(s string) bool {
 	if len(s) > MaxInputLen {
 		return false
 	}
-	return !strings.ContainsAny(s, "'\\\n\r\x00")
+	return !strings.ContainsAny(s, "'\\;`$()|&><\n\r\x00")
 }
 
 // Split token threshold: Cashu tokens are 378 bytes, RADIUS attributes max 253.
@@ -186,44 +223,40 @@ const tokenSplitLen = 200
 // are always exactly tokenSplitLen bytes by construction in the mint script.
 func extractPayment(username, password, clearTextPw string) (PaymentCredential, bool) {
 	// Full token in username
-	if isCashuToken(username) && sanitizeInput(username) {
+	if isValidCashuToken(username) {
 		return PaymentCredential{Value: username, Source: "username", Type: PaymentCashu}, true
 	}
-	if isLNURLw(username) && sanitizeInput(username) {
+	if isValidLNURLw(username) {
 		return PaymentCredential{Value: username, Source: "username", Type: PaymentLNURLW}, true
 	}
-	if isLNURLw(password) && sanitizeInput(password) {
+	if isValidLNURLw(password) {
 		return PaymentCredential{Value: password, Source: "password", Type: PaymentLNURLW}, true
 	}
-	if isLNURLw(clearTextPw) && sanitizeInput(clearTextPw) {
+	if isValidLNURLw(clearTextPw) {
 		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentLNURLW}, true
 	}
 	// Split token: password is the first tokenSplitLen bytes of a 378-byte DLEQ token.
 	// Only triggers when password starts with cashuB AND is exactly tokenSplitLen bytes
-	// (the length our mint script produces) AND username is base64url-only.
-	// MUST use == not <= to prevent false splits on shorter no-DLEQ tokens
-	// whose password happens to be <= tokenSplitLen with a base64url-looking username.
-	if isCashuToken(password) && len(password) == tokenSplitLen &&
-		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) &&
-		sanitizeInput(password) && sanitizeInput(username) {
+	// AND username is base64url-only.
+	if isValidCashuToken(password) && len(password) == tokenSplitLen &&
+		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) {
 		fullToken := password + username
 		if sanitizeInput(fullToken) {
 			return PaymentCredential{Value: fullToken, Source: "split-password+username", Type: PaymentCashu}, true
 		}
 	}
-	if isCashuToken(clearTextPw) && len(clearTextPw) == tokenSplitLen &&
-		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) &&
-		sanitizeInput(clearTextPw) && sanitizeInput(username) {
+	if isValidCashuToken(clearTextPw) && len(clearTextPw) == tokenSplitLen &&
+		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) {
 		fullToken := clearTextPw + username
 		if sanitizeInput(fullToken) {
 			return PaymentCredential{Value: fullToken, Source: "split-cleartext+username", Type: PaymentCashu}, true
 		}
 	}
 	// Full token in password (no-DLEQ 230b or any complete token > tokenSplitLen)
-	if isCashuToken(password) && sanitizeInput(password) {
+	if isValidCashuToken(password) {
 		return PaymentCredential{Value: password, Source: "password", Type: PaymentCashu}, true
 	}
-	if isCashuToken(clearTextPw) && sanitizeInput(clearTextPw) {
+	if isValidCashuToken(clearTextPw) {
 		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentCashu}, true
 	}
 	return PaymentCredential{}, false
@@ -266,6 +299,11 @@ func isTestMint(mintURL string) bool {
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if len(os.Args) >= 2 && os.Args[1] == "--accounting" {
+		handleAccounting()
+		return
+	}
 
 	if len(os.Args) < 3 {
 		fmt.Fprintf(os.Stderr, "usage: %s <username> <mac-address> [password] [cleartext-password]\n", os.Args[0])
@@ -382,8 +420,8 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 		os.Exit(1)
 	}
 
-	// Replay check
-	if replay.IsSpent(thash) {
+	// Replay check (atomic check-and-mark)
+	if replay.CheckAndMark(thash) {
 		log.Printf("Reject: cashu token already spent (hash=%s, source=%s)", thash[:16], cred.Source)
 		replyMessage("Rejected: token already used")
 		os.Exit(1)
@@ -412,8 +450,7 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 		os.Exit(1)
 	}
 
-	// Mark spent & log
-	replay.MarkSpent(thash)
+	// Already marked spent by CheckAndMark above
 	cashu.LogToken(cred.Value, tokenData, "radius-"+sessionID, true, TokensLogFile)
 
 	// Save session
@@ -446,7 +483,7 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard) {
 	thash := cashu.TokenHash(cred.Value)
 
-	if replay.IsSpent(thash) {
+	if replay.CheckAndMark(thash) {
 		log.Printf("Reject: lnurlw code already used (hash=%s, source=%s)", thash[:16], cred.Source)
 		replyMessage("Rejected: LNURLw code already used")
 		os.Exit(1)
@@ -456,7 +493,6 @@ func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionSto
 	// For now: accept any lnurlw string as valid payment.
 	// This is a technology demonstration — not production.
 
-	replay.MarkSpent(thash)
 	log.Printf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s lnurlw=%s — pass-through accept, no payment claimed",
 		sessionID, thash[:16], cred.Source, safeLog(truncate(cred.Value, 80)))
 

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,6 +39,10 @@ func VerifyWithMint(tokenData *TokenData) (bool, string) {
 		return false, fmt.Sprintf("JSON error: %v", err)
 	}
 
+	if !isSafeMintURL(mintURL) {
+		return false, "Mint URL rejected (SSRF protection)"
+	}
+
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(mintURL+"/v1/checkstate", "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -60,4 +66,33 @@ func VerifyWithMint(tokenData *TokenData) (bool, string) {
 	}
 
 	return true, "OK"
+}
+
+// isSafeMintURL blocks SSRF attempts by rejecting private/internal IP ranges.
+// The mint URL comes from the decoded Cashu token, which is attacker-controlled.
+func isSafeMintURL(mintURL string) bool {
+	if !strings.HasPrefix(mintURL, "https://") && !strings.HasPrefix(mintURL, "http://") {
+		return false
+	}
+	u, err := url.Parse(mintURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return false
+	}
+	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "169.254.") {
+		return false
+	}
+	if strings.HasPrefix(host, "172.") {
+		parts := strings.SplitN(host, ".", 3)
+		if len(parts) >= 2 {
+			second, _ := strconv.Atoi(parts[1])
+			if second >= 16 && second <= 31 {
+				return false
+			}
+		}
+	}
+	return true
 }
