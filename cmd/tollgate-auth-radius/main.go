@@ -309,28 +309,41 @@ func main() {
 	os.MkdirAll(BaseDir, 0755)
 
 	// --- Check for existing active session (reconnection) ---
-	if rec, found := sessions.Get(sessionID); found {
-		if sessions.IsActive(rec) {
-			remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
-			log.Printf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes()))
-			replyMessage("Session resumed: %dm remaining (type=%s, amount=%d sat)",
-				int(remaining.Minutes()), rec.PayType, rec.Amount)
-			radiusAttr("Session-Timeout", max(1, int(remaining.Seconds())))
-			radiusAttr("Acct-Interim-Interval", 60)
-			os.Exit(0)
-		}
-		log.Printf("Reconnection: session=%s expired, removing", sessionID)
-		sessions.Remove(sessionID)
-	}
-
-	if authMode == "delegated" {
-		if handleDelegatedReconnection(sessionID) {
-			os.Exit(0)
+	// In delegated mode, skip the local session check entirely — the v1 server
+	// owns session state. If there's a new token, we must forward it to the
+	// server for additive top-up, not short-circuit on a local session file.
+	if authMode != "delegated" {
+		if rec, found := sessions.Get(sessionID); found {
+			if sessions.IsActive(rec) {
+				remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
+				log.Printf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes()))
+				replyMessage("Session resumed: %dm remaining (type=%s, amount=%d sat)",
+					int(remaining.Minutes()), rec.PayType, rec.Amount)
+				radiusAttr("Session-Timeout", max(1, int(remaining.Seconds())))
+				radiusAttr("Acct-Interim-Interval", 60)
+				os.Exit(0)
+			}
+			log.Printf("Reconnection: session=%s expired, removing", sessionID)
+			sessions.Remove(sessionID)
 		}
 	}
 
 	// --- Extract payment credential from username or password ---
 	cred, found := extractPayment(username, password, clearTextPw)
+
+	// In delegated mode, if no new payment credential was provided, check the
+	// v1 server for an existing session (reconnection via GET /usage).
+	// If a credential IS present, always forward it to the v1 server via
+	// POST / — the server handles additive top-up for existing sessions.
+	if authMode == "delegated" && !found {
+		if handleDelegatedReconnection(sessionID) {
+			os.Exit(0)
+		}
+		log.Printf("Reject: no payment credential and no active session (delegated, mac=%s)", sessionID)
+		replyMessage("Rejected: no valid payment credential found")
+		os.Exit(1)
+	}
+
 	if !found {
 		log.Printf("Reject: no payment credential found in username or password (user=%q)", safeLog(truncate(username, 32)))
 		replyMessage("Rejected: no valid payment credential found")
