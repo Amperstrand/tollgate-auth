@@ -12,6 +12,11 @@ import (
 	"time"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/ledger"
+	"tollgate-auth/internal/operator"
+	"tollgate-auth/internal/radius"
+	"tollgate-auth/internal/radiusauth"
+	"tollgate-auth/internal/redact"
 	"tollgate-auth/internal/sessiond"
 )
 
@@ -23,7 +28,6 @@ const (
 	TokensLogFile    = BaseDir + "/radius-tokens.log"
 	RateSecPerSat    = 60
 	LNURLWDefaultSec = 3600 // 1 hour default for lnurlw (until we claim and know the amount)
-	MaxInputLen      = 8192 // Maximum length for username/password fields
 )
 
 // macPattern validates Calling-Station-Id: hex digits, colons, dashes, or empty.
@@ -46,21 +50,46 @@ func getEnv(key, fallback string) string {
 var (
 	authMode    = getEnv("TOLLGATE_AUTH_MODE", "local")       // "local" or "delegated"
 	sessiondURL = getEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
+	opResolver  *operator.Resolver
 )
 
-// PaymentType identifies the kind of payment credential.
-type PaymentType string
+type LedgerConfig struct {
+	Path    string
+	Enabled bool
+}
 
-const (
-	PaymentCashu  PaymentType = "cashu"
-	PaymentLNURLW PaymentType = "lnurlw"
-)
+var ledgerInstance *ledger.Ledger
 
-// PaymentCredential holds an extracted payment string and its type.
-type PaymentCredential struct {
-	Value  string
-	Source string // "username" or "password"
-	Type   PaymentType
+func initLedger() LedgerConfig {
+	path := getEnv("TOLLGATE_LEDGER_PATH", "")
+	if path == "" {
+		return LedgerConfig{Enabled: false}
+	}
+	l, err := ledger.OpenLedger(path)
+	if err != nil {
+		log.Printf("Warning: failed to open ledger at %s: %v (ledger disabled)", path, err)
+		return LedgerConfig{Enabled: false}
+	}
+	ledgerInstance = l
+	return LedgerConfig{Path: path, Enabled: true}
+}
+
+func recordLedgerAuth(entry ledger.LedgerEntry) {
+	if ledgerInstance == nil {
+		return
+	}
+	if err := ledgerInstance.RecordAuth(entry); err != nil {
+		log.Printf("Warning: ledger RecordAuth failed: %v", err)
+	}
+}
+
+func recordLedgerAccounting(entry ledger.LedgerEntry) {
+	if ledgerInstance == nil {
+		return
+	}
+	if err := ledgerInstance.RecordAccounting(entry); err != nil {
+		log.Printf("Warning: ledger RecordAccounting failed: %v", err)
+	}
 }
 
 // SessionStore tracks active RADIUS sessions by MAC address.
@@ -71,34 +100,21 @@ type SessionStore struct {
 }
 
 type SessionRecord struct {
-	MAC      string      `json:"mac"`
-	Token    string      `json:"token_hash"`
-	Guest    string      `json:"guest"`
-	Mint     string      `json:"mint"`
-	Amount   int         `json:"amount"`
-	Started  time.Time   `json:"started"`
-	Duration int         `json:"duration"` // seconds
-	Source   string      `json:"source"`   // "username" or "password"
-	PayType  PaymentType `json:"pay_type"` // "cashu" or "lnurlw"
-}
-
-// sanitizeMAC strips separators and validates format.
-// Returns the clean hex-only MAC and whether it's valid.
-// Rejects path traversal attempts (e.g. "../").
-func sanitizeMAC(mac string) (string, bool) {
-	if !macPattern.MatchString(mac) {
-		return "", false
-	}
-	clean := strings.ToLower(mac)
-	clean = strings.ReplaceAll(clean, ":", "")
-	clean = strings.ReplaceAll(clean, "-", "")
-	return clean, true
+	MAC      string                  `json:"mac"`
+	Token    string                  `json:"token_hash"`
+	Guest    string                  `json:"guest"`
+	Mint     string                  `json:"mint"`
+	Amount   int                     `json:"amount"`
+	Started  time.Time               `json:"started"`
+	Duration int                     `json:"duration"` // seconds
+	Source   string                  `json:"source"`   // "username" or "password"
+	PayType  radiusauth.PaymentType  `json:"pay_type"` // "cashu" or "lnurlw"
+	Class    string                  `json:"class"`
 }
 
 func (s *SessionStore) Path(mac string) string {
-	clean, ok := sanitizeMAC(mac)
+	clean, ok := radiusauth.SanitizeMAC(mac)
 	if !ok {
-		// Fallback: hash the input to prevent path traversal
 		clean = cashu.TokenHash(mac)[:16]
 	}
 	return filepath.Join(s.Dir, clean+".json")
@@ -133,142 +149,6 @@ func (s *SessionStore) Remove(mac string) {
 	os.Remove(s.Path(mac))
 }
 
-// isCashuToken checks if a string starts with a Cashu token prefix (cashuA or cashuB).
-// Used for quick prefix checks before full validation.
-func isCashuToken(s string) bool {
-	return strings.HasPrefix(s, "cashuA") || strings.HasPrefix(s, "cashuB")
-}
-
-// isValidCashuToken validates that a string looks like a real Cashu token.
-// Cashu V3 tokens: cashuA + base64url characters
-// Cashu V4 tokens: cashuB + base64url characters
-// No shell metacharacters, no control chars, no whitespace.
-func isValidCashuToken(s string) bool {
-	if len(s) < 10 {
-		return false
-	}
-	if !strings.HasPrefix(s, "cashuA") && !strings.HasPrefix(s, "cashuB") {
-		return false
-	}
-	// After prefix: only base64url chars (A-Z, a-z, 0-9, -, _)
-	for _, c := range s[6:] {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
-}
-
-// isLNURLw checks if a string starts with an LNURL-withdraw prefix.
-// Used for quick prefix checks before full validation.
-func isLNURLw(s string) bool {
-	if len(s) < 10 {
-		return false
-	}
-	lower := strings.ToLower(s)
-	return strings.HasPrefix(lower, "lnurlw")
-}
-
-// isValidLNURLw validates that a string looks like a real LNURL-withdraw code.
-// LNURLw is bech32 encoded: alphanumeric only (A-Za-z0-9).
-func isValidLNURLw(s string) bool {
-	if len(s) < 10 {
-		return false
-	}
-	lower := strings.ToLower(s)
-	if !strings.HasPrefix(lower, "lnurlw") {
-		return false
-	}
-	for _, c := range s {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-			return false
-		}
-	}
-	return true
-}
-
-// base64urlPattern matches strings that contain only base64url characters.
-// Used to detect the tail portion of a split Cashu token in the username field.
-var base64urlPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-
-func isBase64url(s string) bool {
-	return len(s) > 0 && base64urlPattern.MatchString(s)
-}
-
-// sanitizeInput rejects strings containing shell metacharacters or control chars.
-// Rejects: ' \ ; ` $ ( ) | & > < \n \r \0 and strings exceeding MaxInputLen.
-func sanitizeInput(s string) bool {
-	if len(s) > MaxInputLen {
-		return false
-	}
-	return !strings.ContainsAny(s, "'\\;`$()|&><\n\r\x00")
-}
-
-// Split token threshold: Cashu tokens are 378 bytes, RADIUS attributes max 253.
-// We split at 200 bytes — first part goes in password (starts with cashuB prefix),
-// second part goes in username (base64url tail). Both under 253 bytes.
-// No-DLEQ tokens are ~230 bytes and fit in a single field — no split needed.
-const tokenSplitLen = 200
-
-// extractPayment finds a payment credential (Cashu token or LNURLw) in username or password.
-//
-// Detection order:
-// 1. Full token in username (cashuA/B prefix in username field)
-// 2. LNURLw in any field
-// 3. Split token (password <= tokenSplitLen starts with cashuB, username is base64url tail)
-// 4. Full token in password/cleartext-password (cashuA/B prefix, must be > tokenSplitLen)
-//
-// The length guard on step 3 prevents misinterpreting a valid 230-byte no-DLEQ token
-// (which starts with "cashuB" just like a split password) as a split. Split passwords
-// are always exactly tokenSplitLen bytes by construction in the mint script.
-func extractPayment(username, password, clearTextPw string) (PaymentCredential, bool) {
-	// Full token in username
-	if isValidCashuToken(username) {
-		return PaymentCredential{Value: username, Source: "username", Type: PaymentCashu}, true
-	}
-	if isValidLNURLw(username) {
-		return PaymentCredential{Value: username, Source: "username", Type: PaymentLNURLW}, true
-	}
-	if isValidLNURLw(password) {
-		return PaymentCredential{Value: password, Source: "password", Type: PaymentLNURLW}, true
-	}
-	if isValidLNURLw(clearTextPw) {
-		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentLNURLW}, true
-	}
-	// Split token: password is the first tokenSplitLen bytes of a 378-byte DLEQ token.
-	// Only triggers when password starts with cashuB AND is exactly tokenSplitLen bytes
-	// AND username is base64url-only.
-	if isValidCashuToken(password) && len(password) == tokenSplitLen &&
-		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) {
-		fullToken := password + username
-		if sanitizeInput(fullToken) {
-			return PaymentCredential{Value: fullToken, Source: "split-password+username", Type: PaymentCashu}, true
-		}
-	}
-	if isValidCashuToken(clearTextPw) && len(clearTextPw) == tokenSplitLen &&
-		isBase64url(username) && !isCashuToken(username) && !isLNURLw(username) {
-		fullToken := clearTextPw + username
-		if sanitizeInput(fullToken) {
-			return PaymentCredential{Value: fullToken, Source: "split-cleartext+username", Type: PaymentCashu}, true
-		}
-	}
-	// Full token in password (no-DLEQ 230b or any complete token > tokenSplitLen)
-	if isValidCashuToken(password) {
-		return PaymentCredential{Value: password, Source: "password", Type: PaymentCashu}, true
-	}
-	if isValidCashuToken(clearTextPw) {
-		return PaymentCredential{Value: clearTextPw, Source: "cleartext-password", Type: PaymentCashu}, true
-	}
-	return PaymentCredential{}, false
-}
-
-// safeLog sanitizes a string for log output by stripping newlines.
-func safeLog(s string) string {
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	return s
-}
-
 // replyMessage outputs a Reply-Message attribute to stdout.
 // FreeRADIUS exec module with output=reply parses stdout as RADIUS attribute pairs.
 // Format: Reply-Message = "value"
@@ -290,6 +170,20 @@ func radiusAttr(name string, value int) {
 	fmt.Printf("%s = %d\n", name, value)
 }
 
+// emitClass creates an HMAC-signed Class attribute for the session and outputs it.
+// The Class attribute ties the session to the operator for accounting (RFC 2865 §5.5).
+// tokenHash is the first 16 chars of the SHA256 hash of the payment token.
+func emitClass(operatorID, sessionID, tokenHash string, hmacKey []byte) string {
+	sc := radius.NewSessionClass(operatorID, sessionID, tokenHash)
+	signed, err := sc.HMACSign(hmacKey)
+	if err != nil {
+		log.Printf("Warning: failed to sign Class: %v", err)
+		return ""
+	}
+	fmt.Printf("Class = \"%s\"\n", signed)
+	return signed
+}
+
 // isTestMint checks if a mint URL matches the allowed test mint pattern.
 func isTestMint(mintURL string) bool {
 	return testMintPattern.MatchString(mintURL)
@@ -299,6 +193,20 @@ func isTestMint(mintURL string) bool {
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	defer func() {
+		if ledgerInstance != nil {
+			ledgerInstance.Close()
+		}
+	}()
+
+	lcfg := initLedger()
+	_ = lcfg
+
+	var resolverErr error
+	opResolver, resolverErr = operator.NewResolver("")
+	if resolverErr != nil {
+		log.Fatalf("Fatal: failed to initialize operator resolver: %v", resolverErr)
+	}
 
 	if len(os.Args) >= 2 && os.Args[1] == "--accounting" {
 		handleAccounting()
@@ -327,7 +235,7 @@ func main() {
 
 	// Validate MAC format (prevents path traversal)
 	if !macPattern.MatchString(mac) {
-		log.Printf("Reject: invalid MAC format: %q", safeLog(truncate(mac, 32)))
+		log.Printf("Reject: invalid MAC format: %q", redact.LogSafe(redact.Truncate(mac, 32)))
 		replyMessage("Rejected: invalid session identifier")
 		os.Exit(1)
 	}
@@ -337,7 +245,7 @@ func main() {
 	sessionID := mac
 	if sessionID == "" {
 		sessionID = "user:" + username
-		log.Printf("Info: no Calling-Station-Id, using username-based session: %q", safeLog(truncate(sessionID, 64)))
+		log.Printf("Info: no Calling-Station-Id, using username-based session: %q", redact.LogSafe(redact.Truncate(sessionID, 64)))
 	}
 
 	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
@@ -345,6 +253,10 @@ func main() {
 
 	replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
 	os.MkdirAll(BaseDir, 0755)
+
+	clientIP := getEnv("TOLLGATE_CLIENT_IP", "")
+	nasID := getEnv("TOLLGATE_NAS_ID", "")
+	opCtx := opResolver.Resolve(clientIP, nasID)
 
 	// --- Check for existing active session (reconnection) ---
 	// In delegated mode, skip the local session check entirely — the v1 server
@@ -359,6 +271,9 @@ func main() {
 					int(remaining.Minutes()), rec.PayType, rec.Amount)
 				radiusAttr("Session-Timeout", max(1, int(remaining.Seconds())))
 				radiusAttr("Acct-Interim-Interval", 60)
+				if rec.Class != "" {
+					fmt.Printf("Class = \"%s\"\n", rec.Class)
+				}
 				os.Exit(0)
 			}
 			log.Printf("Reconnection: session=%s expired, removing", sessionID)
@@ -367,7 +282,7 @@ func main() {
 	}
 
 	// --- Extract payment credential from username or password ---
-	cred, found := extractPayment(username, password, clearTextPw)
+	cred, found := radiusauth.ExtractPayment(username, password, clearTextPw)
 
 	// In delegated mode, if no new payment credential was provided, check the
 	// v1 server for an existing session (reconnection via GET /usage).
@@ -379,29 +294,40 @@ func main() {
 		}
 		log.Printf("Reject: no payment credential and no active session (delegated, mac=%s)", sessionID)
 		replyMessage("Rejected: no valid payment credential found")
+		recordLedgerAuth(ledger.LedgerEntry{
+			EventType:   ledger.EventAuthReject,
+			MAC:         sessionID,
+			ReplyMessage: "Rejected: no valid payment credential found",
+		})
 		os.Exit(1)
 	}
 
 	if !found {
-		log.Printf("Reject: no payment credential found in username or password (user=%q)", safeLog(truncate(username, 32)))
+		log.Printf("Reject: no payment credential found in username or password (user=%q)", redact.LogSafe(redact.Truncate(username, 32)))
 		replyMessage("Rejected: no valid payment credential found")
+		recordLedgerAuth(ledger.LedgerEntry{
+			EventType:   ledger.EventAuthReject,
+			MAC:         sessionID,
+			ReplyMessage: "Rejected: no valid payment credential found",
+		})
 		os.Exit(1)
 	}
 
 	// --- Route by payment type ---
+	operatorID := opCtx.Account.ID
 	switch cred.Type {
-	case PaymentCashu:
+	case radiusauth.PaymentCashu:
 		if authMode == "delegated" {
-			handleCashuDelegated(cred, sessionID, sessions)
+			handleCashuDelegated(cred, sessionID, sessions, operatorID)
 		} else {
-			handleCashu(cred, sessionID, sessions, replay)
+			handleCashu(cred, sessionID, sessions, replay, operatorID)
 		}
-	case PaymentLNURLW:
-		handleLNURLw(cred, sessionID, sessions, replay)
+	case radiusauth.PaymentLNURLW:
+		handleLNURLw(cred, sessionID, sessions, replay, operatorID)
 	}
 }
 
-func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard) {
+func handleCashu(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard, operatorID string) {
 	tokenData, err := cashu.DecodeToken(cred.Value)
 	if err != nil {
 		log.Printf("Reject: cashu decode failed (%s): %v", cred.Source, err)
@@ -454,6 +380,7 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 	cashu.LogToken(cred.Value, tokenData, "radius-"+sessionID, true, TokensLogFile)
 
 	// Save session
+	classStr := emitClass(operatorID, sessionID, thash[:16], opResolver.HMACKey())
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
@@ -463,7 +390,8 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 		Started:  time.Now(),
 		Duration: seconds,
 		Source:   cred.Source,
-		PayType:  PaymentCashu,
+		PayType:  radiusauth.PaymentCashu,
+		Class:    classStr,
 	}
 	if err := sessions.Save(rec); err != nil {
 		log.Printf("Warning: failed to save session record: %v", err)
@@ -471,6 +399,18 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 
 	log.Printf("Accept: session=%s type=cashu amount=%d sat duration=%ds mint=%s source=%s",
 		sessionID, tokenData.Amount, seconds, tokenData.Mint, cred.Source)
+
+	recordLedgerAuth(ledger.LedgerEntry{
+		EventType:   ledger.EventAuthAccept,
+		MAC:         sessionID,
+		PaymentType: "cashu",
+		AmountSat:   tokenData.Amount,
+		DurationSec: seconds,
+		MintURL:     tokenData.Mint,
+		TokenHash:   thash,
+		ReplyMessage: fmt.Sprintf("Valid Cashu token: %d sat = %dm access from %s",
+			tokenData.Amount, minutes, tokenData.Mint),
+	})
 
 	replyMessage("Valid Cashu token: %d sat = %dm access from %s",
 		tokenData.Amount, minutes, tokenData.Mint)
@@ -480,7 +420,7 @@ func handleCashu(cred PaymentCredential, sessionID string, sessions *SessionStor
 }
 
 // handleLNURLw processes an LNURL-withdraw code.
-func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard) {
+func handleLNURLw(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard, operatorID string) {
 	thash := cashu.TokenHash(cred.Value)
 
 	if replay.CheckAndMark(thash) {
@@ -494,8 +434,19 @@ func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionSto
 	// This is a technology demonstration — not production.
 
 	log.Printf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s lnurlw=%s — pass-through accept, no payment claimed",
-		sessionID, thash[:16], cred.Source, safeLog(truncate(cred.Value, 80)))
+		sessionID, thash[:16], cred.Source, redact.LogSafe(redact.Truncate(cred.Value, 80)))
 
+	recordLedgerAuth(ledger.LedgerEntry{
+		EventType:   ledger.EventAuthAccept,
+		MAC:         sessionID,
+		PaymentType: "lnurlw",
+		AmountSat:   LNURLWDefaultSec / RateSecPerSat,
+		DurationSec: LNURLWDefaultSec,
+		TokenHash:   thash,
+		ReplyMessage: fmt.Sprintf("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60),
+	})
+
+	classStr := emitClass(operatorID, sessionID, thash[:16], opResolver.HMACKey())
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
@@ -505,7 +456,8 @@ func handleLNURLw(cred PaymentCredential, sessionID string, sessions *SessionSto
 		Started:  time.Now(),
 		Duration: LNURLWDefaultSec,
 		Source:   cred.Source,
-		PayType:  PaymentLNURLW,
+		PayType:  radiusauth.PaymentLNURLW,
+		Class:    classStr,
 	}
 	if err := sessions.Save(rec); err != nil {
 		log.Printf("Warning: failed to save session record: %v", err)
@@ -557,7 +509,7 @@ func handleDelegatedReconnection(sessionID string) bool {
 	return true
 }
 
-func handleCashuDelegated(cred PaymentCredential, sessionID string, sessions *SessionStore) {
+func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, operatorID string) {
 	client := sessiond.NewClient(sessiondURL)
 	state, err := client.Bootstrap(cred.Value, sessionID)
 	if err != nil {
@@ -585,6 +537,7 @@ func handleCashuDelegated(cred PaymentCredential, sessionID string, sessions *Se
 
 	thash := cashu.TokenHash(cred.Value)
 
+	classStr := emitClass(operatorID, sessionID, thash[:16], opResolver.HMACKey())
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
@@ -594,7 +547,8 @@ func handleCashuDelegated(cred PaymentCredential, sessionID string, sessions *Se
 		Started:  time.Now(),
 		Duration: seconds,
 		Source:   cred.Source,
-		PayType:  PaymentCashu,
+		PayType:  radiusauth.PaymentCashu,
+		Class:    classStr,
 	}
 	if err := sessions.Save(rec); err != nil {
 		log.Printf("Warning: failed to save session record: %v", err)
@@ -603,15 +557,18 @@ func handleCashuDelegated(cred PaymentCredential, sessionID string, sessions *Se
 	log.Printf("Accept: session=%s type=delegated duration=%ds source=%s",
 		sessionID, seconds, cred.Source)
 
+	recordLedgerAuth(ledger.LedgerEntry{
+		EventType:   ledger.EventAuthAccept,
+		MAC:         sessionID,
+		PaymentType: "delegated",
+		AmountSat:   minutes,
+		DurationSec: seconds,
+		TokenHash:   thash,
+		ReplyMessage: fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes),
+	})
+
 	replyMessage("Valid Cashu token: %dm access (delegated)", minutes)
 	radiusAttr("Session-Timeout", seconds)
 	radiusAttr("Acct-Interim-Interval", 60)
 	os.Exit(0)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

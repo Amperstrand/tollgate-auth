@@ -1,0 +1,9 @@
+{
+  "operators": [
+    {
+      "id": "op-test",
+      "payout_npub": "npub1test00000000000000000000000000000000000000000000000000000000",
+      "match": { "nas_id": "test-ap", "default": true }
+    }
+  ]
+}

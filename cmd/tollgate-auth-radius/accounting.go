@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/radius"
 	"tollgate-auth/internal/sessiond"
 )
@@ -32,6 +33,16 @@ func handleAccounting() {
 
 	log.Printf("Accounting: status=%s session=%s mac=%s user=%s time=%s in=%s out=%s cause=%s nas=%s",
 		statusType, acctSessionID, mac, username, sessionTimeStr, inputOctetsStr, outputOctetsStr, terminateCause, nasIP)
+
+	// Best-effort: record to local ledger before forwarding to sessiond.
+	entry, _ := ledger.ParseAccountingEvent(
+		statusType, acctSessionID, mac, username,
+		sessionTimeStr, inputOctetsStr, outputOctetsStr,
+		terminateCause, nasIP,
+	)
+	if entry != nil {
+		recordLedgerAccounting(*entry)
+	}
 
 	if authMode != "delegated" {
 		log.Printf("Accounting: skipping (auth mode = %s, need delegated)", authMode)

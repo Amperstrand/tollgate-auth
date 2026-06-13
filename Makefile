@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config deploy-certs test-e2e clean
+.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
@@ -75,6 +75,25 @@ deploy-faucet:
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
 		'mkdir -p /var/www/tollgate && \
 		 cp /tmp/tollage-faucet.html /var/www/tollgate/index.html'
+
+test: ## Run all unit tests (safe, local, deterministic)
+	go test ./...
+
+test-unit: ## Run unit tests with verbose output
+	go test -v ./...
+
+test-race: ## Run tests with race detector
+	go test -race ./...
+
+test-accounting: ## Run only accounting-related tests
+	go test -v -run "TestAccounting|TestRecordAccounting|TestParse" ./...
+
+test-radius-local: ## Run local RADIUS tests (no live server needed)
+	go test -v ./internal/radius/...
+
+test-all-available: ## Run all tests that can run locally
+	go test -race ./...
+	@echo "All local tests passed. For live tests: make test-e2e"
 
 test-e2e:
 	scp -P $(REMOTE_PORT) scripts/test-radius-e2e.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/test-radius-e2e.sh

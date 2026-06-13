@@ -2,8 +2,8 @@
 
 A catalog of unresolved questions, untested assumptions, and identified risks. Organized by severity and category.
 
-**Last updated**: 2025-06-12
-**Status**: Security audit completed. 6 vulnerabilities found and fixed. Core concept validated end-to-end on real hardware.
+**Last updated**: 2026-06-13
+**Status**: Security audit completed. 6 vulnerabilities found and fixed. Core concept validated end-to-end on real hardware. Refactoring for testability in progress.
 
 ---
 
