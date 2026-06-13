@@ -1,4 +1,6 @@
-.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius deploy deploy-radius deploy-all deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+
+TOLLGATE_RS_DIR := /Users/macbook/src/tollgate-rs
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
@@ -33,6 +35,22 @@ deploy-radius: build-radius
 		'systemctl restart freeradius && \
 		 sleep 2 && \
 		 systemctl status freeradius --no-pager | tail -5'
+
+deploy-all: deploy-radius deploy-rs
+	@echo "=== Both binaries deployed ==="
+	@echo "Go (RADIUS):   $(REMOTE_HOST):/usr/local/bin/$(RADIUS_BINARY)"
+	@echo "Rust (session): $(REMOTE_HOST):/usr/local/bin/tollgate-net"
+
+deploy-rs:
+	cd $(TOLLGATE_RS_DIR) && cargo zigbuild --release --target x86_64-unknown-linux-gnu -p tollgate-net
+	scp -P $(REMOTE_PORT) $(TOLLGATE_RS_DIR)/target/x86_64-unknown-linux-gnu/release/tollgate-net $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/tollgate-net.new
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'cp /usr/local/bin/tollgate-net /usr/local/bin/tollgate-net.bak && \
+		 mv /usr/local/bin/tollgate-net.new /usr/local/bin/tollgate-net && \
+		 chmod +x /usr/local/bin/tollgate-net && \
+		 systemctl restart tollgate-net && \
+		 sleep 2 && \
+		 systemctl is-active tollgate-net'
 
 deploy-radius-config:
 	scp -P $(REMOTE_PORT) config/freeradius/mods-available/cashu-exec $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/cashu-exec
@@ -103,10 +121,12 @@ test-e2e:
 clean:
 	rm -f $(SSH_BINARY) $(RADIUS_BINARY)
 
-install-hooks: ## Install git pre-commit and commit-msg hooks
+install-hooks: ## Install git pre-commit, commit-msg, and pre-push hooks
 	ln -sf ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
 	ln -sf ../../scripts/git-hooks/commit-msg .git/hooks/commit-msg
-	chmod +x scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg
+	ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
+	chmod +x scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg scripts/git-hooks/pre-push
 	@echo "Git hooks installed:"
 	@echo "  pre-commit: gofmt + go vet + secret scan"
+	@echo "  pre-push:   go test -race ./..."
 	@echo "  commit-msg: ASCII-only, conventional commit format"
