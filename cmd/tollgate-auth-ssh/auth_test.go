@@ -11,6 +11,7 @@ import (
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/sessiond"
+	"tollgate-auth/internal/testtoken"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -317,7 +318,7 @@ func TestProcessSSHAuth_Local_VerifyFails_Reject(t *testing.T) {
 	deps, fv, _, _ := setupTestSSHDeps(t)
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "proofs already spent at mint"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
@@ -332,7 +333,7 @@ func TestProcessSSHAuth_Local_RedeemFails_Reject(t *testing.T) {
 	deps, fv, _, _ := setupTestSSHDeps(t)
 	fv.RedeemErr = errors.New("cdk-cli crashed")
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
@@ -362,7 +363,7 @@ func TestProcessSSHAuth_RedeemNotCalledOnVerifyFailure(t *testing.T) {
 	deps, fv, _, _ := setupTestSSHDeps(t)
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "spent"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	processSSHAuth(deps, token, testRemoteAddr)
 
 	if fv.VerifyCalled != 1 {
@@ -390,7 +391,7 @@ func TestProcessSSHAuth_VerifyNotCalledOnZeroAmount(t *testing.T) {
 
 func TestProcessSSHAuth_ReplayCheckedBeforeVerify(t *testing.T) {
 	deps, _, rg, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	thash := cashu.TokenHash(token)
 	rg.Spent[thash] = true
@@ -415,7 +416,7 @@ func TestProcessSSHAuth_Delegated_ValidToken_Accept(t *testing.T) {
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 300000, Metric: "milliseconds"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if !decision.Accept {
@@ -431,7 +432,7 @@ func TestProcessSSHAuth_Delegated_BootstrapCalledWithCorrectArgs(t *testing.T) {
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 480000, Metric: "milliseconds"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	processSSHAuth(deps, token, testRemoteAddr)
 
 	if fb.Called != 1 {
@@ -450,7 +451,7 @@ func TestProcessSSHAuth_Delegated_MOTDRendered(t *testing.T) {
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 480000, Metric: "milliseconds"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if !decision.Accept {
@@ -468,7 +469,7 @@ func TestProcessSSHAuth_Delegated_BootstrapError_Reject(t *testing.T) {
 	deps.AuthMode = "delegated"
 	fb.Err = errors.New("server unreachable")
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
@@ -484,7 +485,7 @@ func TestProcessSSHAuth_Delegated_ZeroAllotment_Reject(t *testing.T) {
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 0}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
@@ -500,7 +501,7 @@ func TestProcessSSHAuth_Delegated_AlreadySpent_Reject(t *testing.T) {
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 480000}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	thash := cashu.TokenHash(token)
 	rg.Spent[thash] = true
 
@@ -531,7 +532,7 @@ func TestProcessSSHAuth_Local_MultipleAmounts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("amount_%d_sat", tc.amount), func(t *testing.T) {
 			deps, _, _, _ := setupTestSSHDeps(t)
-			token := makeTestV4Token(tc.amount)
+			token := testtoken.V4Token(tc.amount)
 
 			decision := processSSHAuth(deps, token, testRemoteAddr)
 

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -14,76 +12,8 @@ import (
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/radiusauth"
-
-	"github.com/fxamacker/cbor/v2"
+	"tollgate-auth/internal/testtoken"
 )
-
-type testV4Token struct {
-	Mint  string         `cbor:"m"`
-	Unit  string         `cbor:"u"`
-	Memo  string         `cbor:"d"`
-	Token []testV4Entry  `cbor:"t"`
-}
-type testV4Entry struct {
-	KeysetID []byte        `cbor:"i"`
-	Proofs   []testV4Proof `cbor:"p"`
-}
-type testV4Proof struct {
-	Amount int    `cbor:"a"`
-	Secret string `cbor:"s"`
-	C      []byte `cbor:"c"`
-}
-
-func encodeV4Token(v4 testV4Token) string {
-	cborBytes, _ := cbor.Marshal(v4)
-	encoded := base64.RawURLEncoding.EncodeToString(cborBytes)
-	return "cashuB" + encoded
-}
-
-func makeTestV4Token(amount int) string {
-	keysetID, _ := hex.DecodeString("00deadbeef")
-	c33, _ := hex.DecodeString("02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d")
-
-	return encodeV4Token(testV4Token{
-		Mint: "https://testnut.cashu.space",
-		Unit: "sat",
-		Token: []testV4Entry{
-			{
-				KeysetID: keysetID,
-				Proofs: []testV4Proof{
-					{Amount: amount, Secret: "test_secret_12345", C: c33},
-				},
-			},
-		},
-	})
-}
-
-func make378ByteToken() string {
-	keysetID, _ := hex.DecodeString("00deadbeef")
-	c33, _ := hex.DecodeString("02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d")
-
-	secret := make([]byte, 178)
-	for i := range secret {
-		secret[i] = 'a' + byte(i%26)
-	}
-
-	token := encodeV4Token(testV4Token{
-		Mint: "https://testnut.cashu.space",
-		Unit: "sat",
-		Token: []testV4Entry{
-			{
-				KeysetID: keysetID,
-				Proofs: []testV4Proof{
-					{Amount: 8, Secret: string(secret), C: c33},
-				},
-			},
-		},
-	})
-	if len(token) != 378 {
-		panic(fmt.Sprintf("make378ByteToken: token is %d bytes, not 378", len(token)))
-	}
-	return token
-}
 
 func setupTestDeps(t *testing.T) (*Dependencies, string) {
 	t.Helper()
@@ -107,7 +37,7 @@ func setupTestDeps(t *testing.T) (*Dependencies, string) {
 
 func TestProcessAuth_CashuTokenInUsername_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
@@ -133,7 +63,7 @@ func TestProcessAuth_CashuTokenInUsername_Accept(t *testing.T) {
 
 func TestProcessAuth_CashuTokenInPassword_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(16)
+	token := testtoken.V4Token(16)
 
 	result := processAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", token, "")
 
@@ -147,7 +77,7 @@ func TestProcessAuth_CashuTokenInPassword_Accept(t *testing.T) {
 
 func TestProcessAuth_CashuTokenInCleartextPassword_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(4)
+	token := testtoken.V4Token(4)
 
 	result := processAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", "", token)
 
@@ -190,9 +120,8 @@ func TestProcessAuth_LNURLwInPassword_Accept(t *testing.T) {
 
 func TestProcessAuth_SplitToken_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	fullToken := make378ByteToken()
-	splitPW := fullToken[:200]
-	splitUN := fullToken[200:]
+	fullToken := testtoken.V4TokenDLEQ()
+	splitPW, splitUN := testtoken.V4TokenDLEQSplit()
 
 	result := processAuth(deps, splitUN, "aa:bb:cc:dd:ee:ff", splitPW, "")
 
@@ -219,7 +148,7 @@ func TestProcessAuth_NoPaymentCredential_Reject(t *testing.T) {
 
 func TestProcessAuth_InvalidMAC_Reject(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, "../etc/passwd", "", "")
 
@@ -266,7 +195,7 @@ func TestProcessAuth_ZeroAmountToken_Reject(t *testing.T) {
 
 func TestProcessAuth_ReplayedToken_Reject(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	thash := cashu.TokenHash(token)
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
@@ -304,7 +233,7 @@ func TestProcessAuth_MintVerificationFails_Reject(t *testing.T) {
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "Token already spent"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
@@ -320,7 +249,7 @@ func TestProcessAuth_RedeemFails_Reject(t *testing.T) {
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.RedeemErr = errors.New("cdk-cli crashed")
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
@@ -364,7 +293,7 @@ func TestProcessAuth_Reconnection_ActiveSession_Accept(t *testing.T) {
 func TestProcessAuth_Reconnection_ExpiredSession_FullAuth(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	mac := "aa:bb:cc:dd:ee:ff"
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	rec := &SessionRecord{
 		MAC:      mac,
@@ -388,7 +317,7 @@ func TestProcessAuth_Reconnection_ExpiredSession_FullAuth(t *testing.T) {
 func TestProcessAuth_Reconnection_NewToken_Topup(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	mac := "aa:bb:cc:dd:ee:ff"
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	rec := &SessionRecord{
 		MAC:      mac,
@@ -411,7 +340,7 @@ func TestProcessAuth_Reconnection_NewToken_Topup(t *testing.T) {
 
 func TestProcessAuth_EmptyMAC_UsernameSession(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, "", "", "")
 
@@ -453,7 +382,7 @@ func TestProcessAuth_LNURLwReplay_Reject(t *testing.T) {
 func TestProcessAuth_SessionSavedOnAccept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	mac := "aa:bb:cc:dd:ee:ff"
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, mac, "", "")
 	if !result.Accept {
@@ -499,7 +428,7 @@ func TestProcessAuth_LNURLwSessionSavedOnAccept(t *testing.T) {
 
 func TestProcessAuth_ClassAttribute_PresentOnAccept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
@@ -528,7 +457,7 @@ func TestProcessAuth_DelegatedMode_NoCredential_Reject(t *testing.T) {
 func TestProcessAuth_DelegatedMode_CashuToken_Rejects(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	deps.AuthMode = "delegated"
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
@@ -552,7 +481,7 @@ func TestProcessAuth_MultipleAmounts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("amount_%d_sat", tc.amount), func(t *testing.T) {
 			deps, _ := setupTestDeps(t)
-			token := makeTestV4Token(tc.amount)
+			token := testtoken.V4Token(tc.amount)
 
 			result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
@@ -607,7 +536,7 @@ func TestProcessAuth_RedemptionNotCalledOnVerifyFailure(t *testing.T) {
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "spent"}
 
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 	processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if fv.VerifyCalled != 1 {
