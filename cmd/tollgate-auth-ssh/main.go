@@ -41,6 +41,21 @@ var (
 	sshSessiondURL = config.GetEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
 )
 
+var safeTerms = map[string]bool{
+	"vt100": true, "vt102": true, "vt220": true, "vt320": true,
+	"xterm": true, "xterm-256color": true, "xterm-color": true,
+	"linux": true, "screen": true, "screen-256color": true,
+	"dumb": true, "ansi": true, "rxvt": true, "rxvt-unicode": true,
+	"tmux": true, "tmux-256color": true,
+}
+
+func isSafeTerm(term string) bool {
+	if len(term) > 32 {
+		return false
+	}
+	return safeTerms[term]
+}
+
 // --- Session Metadata ---
 
 type SessionMeta struct {
@@ -158,7 +173,11 @@ func main() {
 			"PATH=/bin",
 		}
 		if isPty {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("TERM=%s", ptyReq.Term))
+			term := ptyReq.Term
+			if !isSafeTerm(term) {
+				term = "vt100"
+			}
+			cmd.Env = append(cmd.Env, fmt.Sprintf("TERM=%s", term))
 		}
 
 		ptmx, err := pty.Start(cmd)

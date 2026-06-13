@@ -25,10 +25,10 @@ mkdir -p "$JAIL"/{bin,dev,etc,home/nobody,tmp,proc,sys}
 cp "$BBOX" "$JAIL/bin/busybox"
 chmod 755 "$JAIL/bin/busybox"
 
-# Create applet symlinks (only safe ones)
+# Minimal applet set — no file manipulation tools (rm, mv, cp, ln, chmod, chown)
 APPLETS="sh ash ls cat echo grep head tail wc date pwd clear
          printf tr cut sort uniq sed awk sleep true false test expr
-         mkdir rmdir rm mv cp ln chmod chown touch du df free
+         mkdir rmdir du df free
          hostname whoami id env printenv set tty
          more less yes tee"
 
@@ -73,6 +73,7 @@ echo "  Paid for:       ${TOTAL_MINS} minutes"
 echo "  [${BAR}]"
 TIMELEFT
 chmod 755 "$JAIL/bin/timeleft"
+chown root:root "$JAIL/bin/timeleft"
 
 # Minimal /etc/passwd and /etc/group
 echo "root:x:0:0:root:/root:/bin/sh" > "$JAIL/etc/passwd"

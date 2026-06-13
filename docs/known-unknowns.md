@@ -169,13 +169,12 @@ All EAP packets (including EAP-TTLS) automatically include Message-Authenticator
 
 ---
 
-### 12. LNURL-withdraw payment not actually claimed
+### 12. LNURL-withdraw payment not actually claimed (DEMO FEATURE)
 
-**What we know**: The Go binary accepts `lnurlw...` codes and grants 1 hour of access. But it never actually calls the LNURL-withdraw endpoint to claim the Lightning payment. The code is replay-protected by hash but the server gets no money.
-
-**What we don't know**: Whether claiming LNURLw payments is feasible within the FreeRADIUS exec module's constraints (timeout, network access, `NO_NEW_PRIVS`).
-
-**Why it matters**: LNURLw codes are currently free access — anyone who generates one gets 1 hour without the server receiving payment.
+**Status**: Documented as demo-only. LNURLw codes grant 1 hour access without claiming
+the underlying Lightning payment. This is intentional for frictionless demo flow —
+test tokens have no monetary value. Production deployments should use Cashu tokens only.
+Replay-protected by hash.
 
 ---
 

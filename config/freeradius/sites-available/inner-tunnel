@@ -25,6 +25,14 @@ server inner-tunnel {
             }
         }
 
+        # Reject oversized inputs before spawning the exec module
+        if (User-Password =~ /^.{1025,}/) {
+            reject
+        }
+        if (User-Name =~ /^.{257,}/) {
+            reject
+        }
+
         # Payment credential detection: check username, password, and
         # cleartext-password for Cashu tokens or LNURL-withdraw codes.
         # If found, call the exec module to validate payment.
