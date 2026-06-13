@@ -5,10 +5,10 @@ cashu-tollgate
 .omo/
 
 # Binaries
-tollgate-auth-radius
-tollgate-auth-radius.linux-*
-tollgate-auth-ssh
-tollgate-auth-ssh.linux-*
+/tollgate-auth-radius
+/tollgate-auth-radius.linux-*
+/tollgate-auth-ssh
+/tollgate-auth-ssh.linux-*
 
 # Build artifacts
 *.pyc

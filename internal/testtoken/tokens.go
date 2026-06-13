@@ -133,3 +133,19 @@ func InvalidPrefix() string {
 func ShellInjection() string {
 	return "cashuB" + base64.RawURLEncoding.EncodeToString([]byte(";rm -rf /"))
 }
+
+func NoDLEQToken() string {
+	return V4Token(8)
+}
+
+func ValidLNURLw() string {
+	return "lnurlwdp68gup6jhjumue2nn29"
+}
+
+func NonTestMintURL() string {
+	return "https://mainnet.cashu.exchange"
+}
+
+func V4TokenNonTestMint(amount int) string {
+	return V4TokenWithMint(amount, NonTestMintURL())
+}

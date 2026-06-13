@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,55 +10,7 @@ import (
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/sessiond"
 	"tollgate-auth/internal/testtoken"
-
-	"github.com/fxamacker/cbor/v2"
 )
-
-// --- Token fixtures (same pattern as cmd/tollgate-auth-radius/auth_test.go) ---
-
-type testV4Token struct {
-	Mint  string         `cbor:"m"`
-	Unit  string         `cbor:"u"`
-	Memo  string         `cbor:"d"`
-	Token []testV4Entry  `cbor:"t"`
-}
-type testV4Entry struct {
-	KeysetID []byte        `cbor:"i"`
-	Proofs   []testV4Proof `cbor:"p"`
-}
-type testV4Proof struct {
-	Amount int    `cbor:"a"`
-	Secret string `cbor:"s"`
-	C      []byte `cbor:"c"`
-}
-
-func encodeV4Token(v4 testV4Token) string {
-	cborBytes, _ := cbor.Marshal(v4)
-	encoded := base64.RawURLEncoding.EncodeToString(cborBytes)
-	return "cashuB" + encoded
-}
-
-func makeTestV4Token(amount int) string {
-	return makeTestV4TokenWithMint(amount, "https://testnut.cashu.space")
-}
-
-func makeTestV4TokenWithMint(amount int, mint string) string {
-	keysetID, _ := hex.DecodeString("00deadbeef")
-	c33, _ := hex.DecodeString("02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d")
-
-	return encodeV4Token(testV4Token{
-		Mint: mint,
-		Unit: "sat",
-		Token: []testV4Entry{
-			{
-				KeysetID: keysetID,
-				Proofs: []testV4Proof{
-					{Amount: amount, Secret: "test_secret_12345", C: c33},
-				},
-			},
-		},
-	})
-}
 
 // --- Fake Bootstrapper ---
 
@@ -104,7 +54,7 @@ const testRemoteAddr = "192.168.1.50:54321"
 
 func TestProcessSSHAuth_Local_ValidToken_Accept(t *testing.T) {
 	deps, _, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -124,7 +74,7 @@ func TestProcessSSHAuth_Local_ValidToken_Accept(t *testing.T) {
 
 func TestProcessSSHAuth_Local_MOTD_ContainsFields(t *testing.T) {
 	deps, _, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -147,7 +97,7 @@ func TestProcessSSHAuth_Local_MOTD_ContainsFields(t *testing.T) {
 
 func TestProcessSSHAuth_Local_TokenHash_Set(t *testing.T) {
 	deps, _, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -162,7 +112,7 @@ func TestProcessSSHAuth_Local_TokenHash_Set(t *testing.T) {
 
 func TestProcessSSHAuth_Local_GuestFormat(t *testing.T) {
 	deps, _, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -179,7 +129,7 @@ func TestProcessSSHAuth_Local_GuestFormat(t *testing.T) {
 
 func TestProcessSSHAuth_Local_VerifyCalledWithTokenData(t *testing.T) {
 	deps, fv, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(16)
+	token := testtoken.V4Token(16)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -196,7 +146,7 @@ func TestProcessSSHAuth_Local_VerifyCalledWithTokenData(t *testing.T) {
 
 func TestProcessSSHAuth_Local_RedeemCalledWithToken(t *testing.T) {
 	deps, fv, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -213,7 +163,7 @@ func TestProcessSSHAuth_Local_RedeemCalledWithToken(t *testing.T) {
 
 func TestProcessSSHAuth_Local_MOTD_TestMintFlag(t *testing.T) {
 	deps, _, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -227,7 +177,7 @@ func TestProcessSSHAuth_Local_MOTD_TestMintFlag(t *testing.T) {
 
 func TestProcessSSHAuth_Local_MOTD_NonTestMintFlag(t *testing.T) {
 	deps, _, _, _ := setupTestSSHDeps(t)
-	token := makeTestV4TokenWithMint(8, "https://real-mint.example.com")
+	token := testtoken.V4TokenWithMint(8, "https://real-mint.example.com")
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
@@ -299,7 +249,7 @@ func TestProcessSSHAuth_Local_NegativeAmount_Reject(t *testing.T) {
 
 func TestProcessSSHAuth_Local_AlreadySpent_Reject(t *testing.T) {
 	deps, _, rg, _ := setupTestSSHDeps(t)
-	token := makeTestV4Token(8)
+	token := testtoken.V4Token(8)
 
 	thash := cashu.TokenHash(token)
 	rg.Spent[thash] = true
@@ -562,7 +512,7 @@ func TestProcessSSHAuth_Delegated_MultipleAllotments(t *testing.T) {
 			deps.AuthMode = "delegated"
 			fb.Result = &sessiond.SessionState{AllotmentMs: tc.allotmentMs, Metric: "milliseconds"}
 
-			token := makeTestV4Token(8)
+			token := testtoken.V4Token(8)
 			decision := processSSHAuth(deps, token, testRemoteAddr)
 
 			if !decision.Accept {

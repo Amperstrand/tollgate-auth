@@ -1,99 +1,18 @@
 package radiusauth
 
 import (
-	"encoding/base64"
-	"encoding/hex"
 	"strings"
 	"testing"
 
-	"github.com/fxamacker/cbor/v2"
+	"tollgate-auth/internal/testtoken"
 )
-
-// --- Helpers for constructing realistic V4 tokens ---
-
-// v4Token types (mirrors internal/cashu for self-contained test construction).
-type testV4Token struct {
-	Mint  string         `cbor:"m"`
-	Unit  string         `cbor:"u"`
-	Memo  string         `cbor:"d"`
-	Token []testV4Entry  `cbor:"t"`
-}
-type testV4Entry struct {
-	KeysetID []byte        `cbor:"i"`
-	Proofs   []testV4Proof `cbor:"p"`
-}
-type testV4Proof struct {
-	Amount int    `cbor:"a"`
-	Secret string `cbor:"s"`
-	C      []byte `cbor:"c"`
-}
-
-// encodeV4Token creates a cashuB-prefixed V4 token.
-func encodeV4Token(v4 testV4Token) string {
-	cborBytes, _ := cbor.Marshal(v4)
-	encoded := base64.RawURLEncoding.EncodeToString(cborBytes)
-	return "cashuB" + encoded
-}
-
-// make378ByteToken builds a realistic 378-byte DLEQ V4 token.
-// The secret is 178 bytes of repeating lowercase alpha, producing
-// a token whose base64url encoding is exactly 378 bytes.
-func make378ByteToken() string {
-	keysetID, _ := hex.DecodeString("00deadbeef")
-	c33, _ := hex.DecodeString("02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d")
-
-	secret := make([]byte, 178)
-	for i := range secret {
-		secret[i] = 'a' + byte(i%26)
-	}
-
-	token := encodeV4Token(testV4Token{
-		Mint: "https://testnut.cashu.space",
-		Unit: "sat",
-		Memo: "",
-		Token: []testV4Entry{
-			{
-				KeysetID: keysetID,
-				Proofs: []testV4Proof{
-					{Amount: 8, Secret: string(secret), C: c33},
-				},
-			},
-		},
-	})
-	if len(token) != 378 {
-		panic("make378ByteToken: token is not 378 bytes")
-	}
-	return token
-}
-
-// make230ByteToken builds a no-DLEQ V4 token (~230 bytes).
-func make230ByteToken() string {
-	keysetID, _ := hex.DecodeString("00deadbeef")
-	c33, _ := hex.DecodeString("02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d")
-
-	token := encodeV4Token(testV4Token{
-		Mint: "https://testnut.cashu.space",
-		Unit: "sat",
-		Memo: "",
-		Token: []testV4Entry{
-			{
-				KeysetID: keysetID,
-				Proofs: []testV4Proof{
-					{Amount: 8, Secret: "short_secret", C: c33},
-				},
-			},
-		},
-	})
-	return token
-}
 
 // --- ExtractPayment exhaustive tests ---
 
 func TestExtractPayment(t *testing.T) {
-	fullToken378 := make378ByteToken()
-	noDLEQToken := make230ByteToken()
+	fullToken378 := testtoken.V4TokenDLEQ()
+	noDLEQToken := testtoken.NoDLEQToken()
 
-	// Verify our test tokens have expected properties
 	if !IsValidCashuToken(fullToken378) {
 		t.Fatal("378-byte token should be a valid cashu token")
 	}
@@ -104,12 +23,9 @@ func TestExtractPayment(t *testing.T) {
 		t.Fatalf("378-byte token is %d bytes", len(fullToken378))
 	}
 
-	// Pre-compute split token parts
-	splitPW := fullToken378[:TokenSplitLen]   // first 200 bytes
-	splitUN := fullToken378[TokenSplitLen:]    // remaining 178 bytes
+	splitPW, splitUN := testtoken.V4TokenDLEQSplit()
 
-	// A valid LNURLw code (bech32 alphanumeric, starts with lnurlw)
-	validLNURLw := "lnurlwdp68gup6jhjumue2nn29"
+	validLNURLw := testtoken.ValidLNURLw()
 
 	// A V3 token for testing cashuA prefix
 	v3Token := "cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vdGVzdG51dC5jYXNodS5zcGFjZSIsInByb29mcyI6W3siYW1vdW50Ijo4LCJpZCI6ImsiLCJzZWNyZXQiOiJzIiwiQyI6ImMifV19XSwidW5pdCI6InNhdCJ9"
