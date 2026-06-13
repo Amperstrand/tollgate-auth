@@ -17,6 +17,15 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "FAIL: gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 
