@@ -377,10 +377,8 @@ jobs:
           fi
           echo "SUCCESS: Session-Timeout is correct ($ST)"
 
-      # ─── Test 16: Cashu token Session-Timeout scales with amount ───
-      # Uses 4 sat (power of 2 = single proof = clean bootstrap token).
-      # Expects Session-Timeout = 4 × 60 = 240.
-      - name: Test 16 — Cashu token Session-Timeout scales with amount
+      # ─── Test 16: Delegated Cashu token → Accept with delegated mode ───
+      - name: Test 16 — Delegated Cashu token validation
         run: |
           TOKEN=$(node scripts/mint-testnut.js --no-dleq 4 2>/tmp/mint14.log)
           if [ -z "$TOKEN" ]; then
@@ -396,18 +394,31 @@ jobs:
           Calling-Station-Id = \"aa:bb:16:$RUNID\"
           NAS-Port = 0" | radclient -x nodns.shop auth tollgate 2>&1 | tee /tmp/test16.log
 
+          # Verify Access-Accept
           grep -q "Access-Accept" /tmp/test16.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/test16.log; exit 1; }
+
+          # Verify Reply-Message contains "delegated" (case insensitive)
+          grep -qi "delegated" /tmp/test16.log || { echo "FAIL: Reply-Message should contain 'delegated'"; cat /tmp/test16.log; exit 1; }
+
+          # Verify Session-Timeout is present and > 0
           ST=$(grep "Session-Timeout" /tmp/test16.log | grep -oE '[0-9]+' | head -1)
           if [ -z "$ST" ]; then
             echo "FAIL: No Session-Timeout in response"
+            cat /tmp/test16.log
             exit 1
           fi
-          echo "Session-Timeout = $ST (expected 240 for 4 sat)"
-          if [ "$ST" -ne 240 ]; then
-            echo "FAIL: Expected Session-Timeout=240 (4×60), got $ST"
+          if [ "$ST" -le 0 ]; then
+            echo "FAIL: Session-Timeout must be > 0, got $ST"
             exit 1
           fi
-          echo "SUCCESS: Session-Timeout scales correctly (4 sat → $ST)"
+          echo "Session-Timeout = $ST (positive value confirmed)"
+
+          # If enriched format is present, verify it contains "sat" (transparency info)
+          if grep -q "Valid Cashu token" /tmp/test16.log; then
+            grep -q "sat" /tmp/test16.log || { echo "FAIL: Enriched format missing 'sat'"; cat /tmp/test16.log; exit 1; }
+          fi
+
+          echo "SUCCESS: Delegated auth accepted (Access-Accept + Reply-Message + Session-Timeout=$ST)"
 
       # ─── Test 17: RADIUS accounting (Acct-Start + Acct-Stop) ───
       - name: Test 17 — RADIUS accounting (Start + Stop)

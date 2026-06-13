@@ -508,6 +508,16 @@ func handleDelegatedReconnection(sessionID string) bool {
 	return true
 }
 
+// buildDelegatedReplyMessage formats the Reply-Message for delegated mode,
+// showing transparency (sats + effective rate) when enriched fields are available.
+func buildDelegatedReplyMessage(state *sessiond.SessionState, minutes int) string {
+	if state.AmountSat > 0 && state.EffectiveRateSecPerSat > 0 {
+		return fmt.Sprintf("Valid Cashu token: %d sat → %dm access (%ds/sat)",
+			state.AmountSat, minutes, state.EffectiveRateSecPerSat)
+	}
+	return fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes)
+}
+
 func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, operatorID string) {
 	client := sessiond.NewClient(sessiondURL)
 	state, err := client.Bootstrap(cred.Value, sessionID)
@@ -535,14 +545,25 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 	}
 
 	thash := cashu.TokenHash(cred.Value)
-
 	classStr := emitClass(operatorID, sessionID, thash[:16], opResolver.HMACKey())
+
+	// Use enriched fields when available, fall back gracefully for legacy servers
+	var displayAmount int
+	var ledgerAmountSat int
+	if state.AmountSat > 0 {
+		displayAmount = int(state.AmountSat)
+		ledgerAmountSat = int(state.AmountSat)
+	} else {
+		displayAmount = minutes
+		ledgerAmountSat = 0
+	}
+
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
 		Guest:    "radius-delegated-" + thash[:8],
 		Mint:     "delegated",
-		Amount:   minutes,
+		Amount:   displayAmount,
 		Started:  time.Now(),
 		Duration: seconds,
 		Source:   cred.Source,
@@ -553,20 +574,20 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 		log.Printf("Warning: failed to save session record: %v", err)
 	}
 
-	log.Printf("Accept: session=%s type=delegated duration=%ds source=%s",
-		sessionID, seconds, cred.Source)
+	log.Printf("Accept: session=%s type=delegated duration=%ds sats=%d source=%s",
+		sessionID, seconds, ledgerAmountSat, cred.Source)
 
 	recordLedgerAuth(ledger.LedgerEntry{
 		EventType:    ledger.EventAuthAccept,
 		MAC:          sessionID,
 		PaymentType:  "delegated",
-		AmountSat:    minutes,
+		AmountSat:    ledgerAmountSat,
 		DurationSec:  seconds,
 		TokenHash:    thash,
-		ReplyMessage: fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes),
+		ReplyMessage: buildDelegatedReplyMessage(state, minutes),
 	})
 
-	replyMessage("Valid Cashu token: %dm access (delegated)", minutes)
+	replyMessage("%s", buildDelegatedReplyMessage(state, minutes))
 	radiusAttr("Session-Timeout", seconds)
 	radiusAttr("Acct-Interim-Interval", 60)
 	os.Exit(0)
