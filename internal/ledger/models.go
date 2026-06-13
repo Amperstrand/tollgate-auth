@@ -13,6 +13,8 @@ const (
 	EventAcctStop   EventType = "accounting_stop"
 	EventCoA        EventType = "coa"
 	EventDisconnect EventType = "disconnect"
+	EventAcctOn     EventType = "accounting_on"
+	EventAcctOff    EventType = "accounting_off"
 )
 
 // LedgerEntry represents a single recorded event in the ledger.
