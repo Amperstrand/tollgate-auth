@@ -120,7 +120,6 @@ func TestProcessAuth_LNURLwInPassword_Accept(t *testing.T) {
 
 func TestProcessAuth_SplitToken_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
-	fullToken := testtoken.V4TokenDLEQ()
 	splitPW, splitUN := testtoken.V4TokenDLEQSplit()
 
 	result := processAuth(deps, splitUN, "aa:bb:cc:dd:ee:ff", splitPW, "")
