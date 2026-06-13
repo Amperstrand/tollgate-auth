@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
 
       - name: Vet
         run: go vet ./...
@@ -40,7 +40,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
 
       - name: Install tools
         run: |
@@ -326,33 +326,26 @@ jobs:
           echo "SUCCESS: RadSec accepted with verified Let's Encrypt certificate"
 
       # ─── Test 13: RadSec with eapol_test (full EAP-TTLS over TLS) ───
-      # The most realistic test: eapol_test → RadSec TLS → FreeRADIUS → EAP-TTLS → token validation.
-      # This proves the entire chain works: TLS transport + EAP inner auth + Cashu payment.
-      - name: Test 13 — RadSec eapol_test (EAP-TTLS over TLS) → Accept
+      # KNOWN LIMITATION: eapol_test uses UDP RADIUS transport only (hostapd's
+      # RADIUS client). RadSec (RFC 6613) requires TCP+TLS with a 4-byte Length
+      # prefix that UDP RADIUS doesn't have. A socat TCP-LISTEN→SSL bridge can't
+      # work because eapol_test sends UDP packets to a TCP port.
+      #
+      # eapol_test has no native TLS/TCP support. To test EAP-TTLS+PAP with
+      # payment tokens, use Test 7-10 (eapol_test over plain UDP RADIUS).
+      # RadSec transport is validated separately by Test 12 (radclient -P tcp).
+      #
+      # This step is non-blocking (continue-on-error). If a future version of
+      # eapol_test adds RadSec support, remove continue-on-error and the exit 0.
+      - name: Test 13 — RadSec eapol_test (known limitation, non-blocking)
+        continue-on-error: true
         run: |
-          TOKEN=$(node scripts/mint-testnut.js --no-dleq --write-eapol-config /tmp/eapol-radsec.conf 2>/tmp/mint-radsec.log)
-          if [ -z "$TOKEN" ]; then
-            echo "FAIL: Could not mint Cashu token"
-            cat /tmp/mint-radsec.log
-            exit 1
-          fi
-          echo "Minted: ${TOKEN:0:40}... (${#TOKEN} bytes)"
-
-          # Patch eapol_test config to use RadSec (TCP 2083, secret=radsec)
-          sed -i 's/^key_mgmt=.*/key_mgmt=WPA-EAP/' /tmp/eapol-radsec.conf
-          # eapol_test doesn't speak TLS natively — use socat tunnel
-          socat TCP-LISTEN:11813,reuseaddr,fork SSL:nodns.shop:2083,verify=1,cafile=/etc/ssl/certs/ca-certificates.crt &
-          SOCAT_PID=$!
-          sleep 1
-
-          echo "--- EAP-TTLS+PAP via RadSec TLS tunnel (127.0.0.1:11813 → nodns.shop:2083) ---"
-          eapol_test -c /tmp/eapol-radsec.conf -a 127.0.0.1 -p 11813 -s radsec \
-            -M ff:77:88:99:aa:bb -r 1 -t 30 2>&1 | tee /tmp/eapol-radsec.log
-
-          kill $SOCAT_PID 2>/dev/null
-
-          grep -q "Access-Accept" /tmp/eapol-radsec.log || { echo "FAIL: Expected Access-Accept via RadSec EAP-TTLS"; cat /tmp/eapol-radsec.log; exit 1; }
-          echo "SUCCESS: Full EAP-TTLS over RadSec TLS validated"
+          echo "KNOWN LIMITATION: eapol_test cannot test RadSec (UDP-only, no TLS support)"
+          echo "RadSec transport is validated by Test 12 (radclient -P tcp over socat TLS bridge)"
+          echo "EAP-TTLS+PAP with payment tokens is validated by Tests 7-10 (plain UDP RADIUS)"
+          echo ""
+          echo "Skipping Test 13 — see docs/known-unknowns.md for details"
+          exit 0
 
       # ─── Test 14: SSH tollgate responds on port 2222 ───
       - name: Test 14 — SSH tollgate responds on port 2222

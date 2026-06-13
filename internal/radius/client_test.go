@@ -47,10 +47,15 @@ func startTestServer(t *testing.T, handler radius.HandlerFunc) (string, func()) 
 }
 
 func TestCoA_Success(t *testing.T) {
-	var receivedPacket *radius.Packet
+	// Use a buffered channel to avoid data race between server goroutine
+	// (writes packet) and test goroutine (reads assertions).
+	packetCh := make(chan *radius.Packet, 1)
 
 	addr, shutdown := startTestServer(t, func(w radius.ResponseWriter, r *radius.Request) {
-		receivedPacket = r.Packet
+		select {
+		case packetCh <- r.Packet:
+		default:
+		}
 
 		switch r.Code {
 		case radius.CodeCoARequest:
@@ -70,7 +75,10 @@ func TestCoA_Success(t *testing.T) {
 	}
 
 	// Verify received packet attributes
-	if receivedPacket == nil {
+	var receivedPacket *radius.Packet
+	select {
+	case receivedPacket = <-packetCh:
+	case <-time.After(2 * time.Second):
 		t.Fatal("server did not receive a packet")
 	}
 	if receivedPacket.Code != radius.CodeCoARequest {
@@ -127,10 +135,14 @@ func TestCoA_Timeout(t *testing.T) {
 }
 
 func TestDisconnect_Success(t *testing.T) {
-	var receivedPacket *radius.Packet
+	// Use a buffered channel to avoid data race (see TestCoA_Success).
+	packetCh := make(chan *radius.Packet, 1)
 
 	addr, shutdown := startTestServer(t, func(w radius.ResponseWriter, r *radius.Request) {
-		receivedPacket = r.Packet
+		select {
+		case packetCh <- r.Packet:
+		default:
+		}
 
 		switch r.Code {
 		case radius.CodeDisconnectRequest:
@@ -150,7 +162,10 @@ func TestDisconnect_Success(t *testing.T) {
 	}
 
 	// Verify received packet attributes
-	if receivedPacket == nil {
+	var receivedPacket *radius.Packet
+	select {
+	case receivedPacket = <-packetCh:
+	case <-time.After(2 * time.Second):
 		t.Fatal("server did not receive a packet")
 	}
 	if receivedPacket.Code != radius.CodeDisconnectRequest {
@@ -230,10 +245,14 @@ func TestSendDisconnect_EmptySecret(t *testing.T) {
 }
 
 func TestSendCoA_OptionalFields(t *testing.T) {
-	var receivedPacket *radius.Packet
+	// Use a buffered channel to avoid data race (see TestCoA_Success).
+	packetCh := make(chan *radius.Packet, 1)
 
 	addr, shutdown := startTestServer(t, func(w radius.ResponseWriter, r *radius.Request) {
-		receivedPacket = r.Packet
+		select {
+		case packetCh <- r.Packet:
+		default:
+		}
 		if r.Code == radius.CodeCoARequest {
 			w.Write(r.Response(radius.CodeCoAACK))
 		}
@@ -247,6 +266,13 @@ func TestSendCoA_OptionalFields(t *testing.T) {
 	err := SendCoA(ctx, addr, testSecret, 120, "", "")
 	if err != nil {
 		t.Fatalf("SendCoA with empty optional fields returned error: %v", err)
+	}
+
+	var receivedPacket *radius.Packet
+	select {
+	case receivedPacket = <-packetCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not receive a packet")
 	}
 
 	// Session-Timeout should be set
