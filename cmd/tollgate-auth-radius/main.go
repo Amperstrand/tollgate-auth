@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/operator"
 	"tollgate-auth/internal/radius"
@@ -233,19 +234,9 @@ func main() {
 		clearTextPw = os.Args[4]
 	}
 
-	// Validate MAC format (prevents path traversal)
-	if !macPattern.MatchString(mac) {
-		log.Printf("Reject: invalid MAC format: %q", redact.LogSafe(redact.Truncate(mac, 32)))
-		replyMessage("Rejected: invalid session identifier")
-		os.Exit(1)
-	}
-
-	// Fall back to username as session identifier when no MAC is provided
-	// (e.g. OpenVPN/PAM-RADIUS clients don't send Calling-Station-Id)
-	sessionID := mac
-	if sessionID == "" {
-		sessionID = "user:" + username
-		log.Printf("Info: no Calling-Station-Id, using username-based session: %q", redact.LogSafe(redact.Truncate(sessionID, 64)))
+	if authMode == "delegated" {
+		handleDelegated(username, mac, password, clearTextPw)
+		return
 	}
 
 	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
@@ -258,73 +249,81 @@ func main() {
 	nasID := getEnv("TOLLGATE_NAS_ID", "")
 	opCtx := opResolver.Resolve(clientIP, nasID)
 
-	// --- Check for existing active session (reconnection) ---
-	// In delegated mode, skip the local session check entirely — the v1 server
-	// owns session state. If there's a new token, we must forward it to the
-	// server for additive top-up, not short-circuit on a local session file.
-	if authMode != "delegated" {
-		if rec, found := sessions.Get(sessionID); found {
-			if sessions.IsActive(rec) {
-				remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
-				log.Printf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes()))
-				replyMessage("Session resumed: %dm remaining (type=%s, amount=%d sat)",
-					int(remaining.Minutes()), rec.PayType, rec.Amount)
-				radiusAttr("Session-Timeout", max(1, int(remaining.Seconds())))
-				radiusAttr("Acct-Interim-Interval", 60)
-				if rec.Class != "" {
-					fmt.Printf("Class = \"%s\"\n", rec.Class)
-				}
-				os.Exit(0)
-			}
-			log.Printf("Reconnection: session=%s expired, removing", sessionID)
-			sessions.Remove(sessionID)
-		}
+	deps := &Dependencies{
+		Sessions:   sessions,
+		Replay:     replay,
+		Verifier:   fakeverity.NewProductionVerifier(WalletDir),
+		OperatorID: opCtx.Account.ID,
+		HMACKey:    opResolver.HMACKey(),
+		AuthMode:   "local",
 	}
 
-	// --- Extract payment credential from username or password ---
+	result := processAuth(deps, username, mac, password, clearTextPw)
+	emitResult(result)
+}
+
+func handleDelegated(username, mac, password, clearTextPw string) {
+	if !macPattern.MatchString(mac) {
+		log.Printf("Reject: invalid MAC format: %q", redact.LogSafe(redact.Truncate(mac, 32)))
+		replyMessage("Rejected: invalid session identifier")
+		os.Exit(1)
+	}
+
+	sessionID := mac
+	if sessionID == "" {
+		sessionID = "user:" + username
+		log.Printf("Info: no Calling-Station-Id, using username-based session: %q", redact.LogSafe(redact.Truncate(sessionID, 64)))
+	}
+
+	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
+	os.MkdirAll(sessions.Dir, 0700)
+
+	clientIP := getEnv("TOLLGATE_CLIENT_IP", "")
+	nasID := getEnv("TOLLGATE_NAS_ID", "")
+	opCtx := opResolver.Resolve(clientIP, nasID)
+	operatorID := opCtx.Account.ID
+
 	cred, found := radiusauth.ExtractPayment(username, password, clearTextPw)
 
-	// In delegated mode, if no new payment credential was provided, check the
-	// v1 server for an existing session (reconnection via GET /usage).
-	// If a credential IS present, always forward it to the v1 server via
-	// POST / — the server handles additive top-up for existing sessions.
-	if authMode == "delegated" && !found {
+	if !found {
 		if handleDelegatedReconnection(sessionID) {
 			os.Exit(0)
 		}
 		log.Printf("Reject: no payment credential and no active session (delegated, mac=%s)", sessionID)
 		replyMessage("Rejected: no valid payment credential found")
 		recordLedgerAuth(ledger.LedgerEntry{
-			EventType:   ledger.EventAuthReject,
-			MAC:         sessionID,
+			EventType:    ledger.EventAuthReject,
+			MAC:          sessionID,
 			ReplyMessage: "Rejected: no valid payment credential found",
 		})
 		os.Exit(1)
 	}
 
-	if !found {
-		log.Printf("Reject: no payment credential found in username or password (user=%q)", redact.LogSafe(redact.Truncate(username, 32)))
-		replyMessage("Rejected: no valid payment credential found")
-		recordLedgerAuth(ledger.LedgerEntry{
-			EventType:   ledger.EventAuthReject,
-			MAC:         sessionID,
-			ReplyMessage: "Rejected: no valid payment credential found",
-		})
-		os.Exit(1)
-	}
-
-	// --- Route by payment type ---
-	operatorID := opCtx.Account.ID
 	switch cred.Type {
 	case radiusauth.PaymentCashu:
-		if authMode == "delegated" {
-			handleCashuDelegated(cred, sessionID, sessions, operatorID)
-		} else {
-			handleCashu(cred, sessionID, sessions, replay, operatorID)
-		}
+		handleCashuDelegated(cred, sessionID, sessions, operatorID)
 	case radiusauth.PaymentLNURLW:
+		replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
+		os.MkdirAll(BaseDir, 0755)
 		handleLNURLw(cred, sessionID, sessions, replay, operatorID)
 	}
+}
+
+func emitResult(r AuthResult) {
+	if r.LogMessage != "" {
+		log.Print(r.LogMessage)
+	}
+	if r.Accept {
+		replyMessage("%s", r.ReplyMessage)
+		radiusAttr("Session-Timeout", r.SessionTimeout)
+		radiusAttr("Acct-Interim-Interval", r.AcctInterval)
+		if r.Class != "" {
+			fmt.Printf("Class = \"%s\"\n", r.Class)
+		}
+		os.Exit(0)
+	}
+	replyMessage("%s", r.ReplyMessage)
+	os.Exit(1)
 }
 
 func handleCashu(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard, operatorID string) {
