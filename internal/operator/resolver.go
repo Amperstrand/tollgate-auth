@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -38,10 +40,15 @@ func NewResolver(configPath string) (*Resolver, error) {
 		return nil, fmt.Errorf("operator resolver: TOLLGATE_OPERATOR_NSEC not set — HMAC key derivation requires operator nsec. Set TOLLGATE_OPERATOR_NSEC to your Nostr private key (nsec1...)")
 	}
 
-	nsecBytes, err := decodeNsec(nsec)
+	_, value, err := nip19.Decode(nsec)
 	if err != nil {
 		return nil, fmt.Errorf("operator resolver: invalid TOLLGATE_OPERATOR_NSEC: %w", err)
 	}
+	sk, ok := value.(nostr.SecretKey)
+	if !ok {
+		return nil, fmt.Errorf("operator resolver: TOLLGATE_OPERATOR_NSEC did not decode to a secret key")
+	}
+	nsecBytes := sk[:]
 
 	// Derive HMAC key from nsec via HKDF with domain separation
 	hkdfReader := hkdf.New(sha256.New, nsecBytes, []byte("tollgate"), []byte("radius-class-hmac-v1"))

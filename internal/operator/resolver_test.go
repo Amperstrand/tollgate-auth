@@ -6,23 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"fiatjaf.com/nostr/nip19"
 )
 
 // validTestNsec is a valid nsec for testing (generated from known key bytes).
-var validTestNsec = mustEncodeTestNsec([32]byte{
+var validTestNsec = nip19.EncodeNsec([32]byte{
 	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 })
-
-func mustEncodeTestNsec(key [32]byte) string {
-	s, err := encodeNsecForTest(key[:])
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
 
 func writeTestRegistry(t *testing.T, entries []registryOperatorEntry) string {
 	t.Helper()

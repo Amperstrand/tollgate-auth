@@ -37,3 +37,6 @@ jobs:
 
       - name: Build RADIUS binary
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/tollgate-auth-radius/
+
+      - name: Build settle binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/tollgate-settle/

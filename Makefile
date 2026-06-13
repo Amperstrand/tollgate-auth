@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius deploy deploy-radius deploy-all deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius build-settle deploy deploy-radius deploy-all deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
 TOLLGATE_RS_DIR := /Users/macbook/src/tollgate-rs
 
@@ -17,6 +17,9 @@ build-linux:
 
 build-radius:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(RADIUS_BINARY) ./cmd/tollgate-auth-radius/
+
+build-settle:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o tollgate-settle ./cmd/tollgate-settle/
 
 deploy: build-linux
 	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY)
