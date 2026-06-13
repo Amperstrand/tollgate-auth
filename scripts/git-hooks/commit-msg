@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Commit-msg hook: enforce ASCII-only commit messages
+# Install: make install-hooks
+#
+# Rejects non-ASCII characters that break tooling or violate project policy.
+# Common offenders: em dash (U+2014), arrows (U+2192), smart quotes (U+201C/U+201D).
+# Suggests ASCII replacements so the fix is obvious.
+set -euo pipefail
+
+msg_file="$1"
+msg=$(cat "$msg_file")
+
+# Check for non-ASCII characters.
+if echo "$msg" | LC_ALL=C grep -q '[^[:print:][:space:]]' 2>/dev/null; then
+    echo "FAIL: Commit message contains non-ASCII characters."
+    echo ""
+    echo "Offending lines:"
+    echo "$msg" | grep -n '[^[:print:][:space:]]' | LC_ALL=C sed 's/\t/    /g' | head -10
+    echo ""
+    echo "Common replacements:"
+    echo "  -- (em dash U+2014)    -> -- (double hyphen)"
+    echo "  -> (arrow U+2192)      -> -> (hyphen + greater-than)"
+    echo "  \" (smart quotes)        -> \" (straight quotes)"
+    echo "  ' (smart apostrophe)   -> ' (straight apostrophe)"
+    echo ""
+    echo "To bypass: git commit --no-verify"
+    exit 1
+fi
+
+# Enforce conventional commit prefix in first line.
+first_line=$(echo "$msg" | head -1)
+if ! echo "$first_line" | grep -qE '^(feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert|security)(\(.+\))?: .{1,}$'; then
+    echo "WARNING: First line does not follow conventional commit format."
+    echo "  Expected: type(scope): description"
+    echo "  Got:      $first_line"
+    echo ""
+    echo "Types: feat, fix, docs, style, refactor, test, chore, ci, build, perf, revert, security"
+    echo "To bypass: git commit --no-verify"
+    exit 1
+fi
+
+echo "OK: ASCII-only, conventional commit format."

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Pre-commit hook: gofmt + go vet + secret scan
+# Install: make install-hooks
+set -euo pipefail
+
+staged_go=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' ':!*_test.go')
+
+# ─── 1. gofmt check ──────────────────────────────────────────────
+# Check ALL staged .go files (including tests) for formatting issues.
+fmt_issues=$(gofmt -l $(git diff --cached --name-only --diff-filter=ACM -- '*.go' 2>/dev/null) 2>/dev/null || true)
+if [ -n "$fmt_issues" ]; then
+    echo "FAIL: gofmt found unformatted files. Run 'gofmt -w .' and re-stage."
+    echo "$fmt_issues" | sed 's/^/  /'
+    exit 1
+fi
+
+# ─── 2. go vet ───────────────────────────────────────────────────
+# Fast static analysis on the whole module.
+if ! go vet ./... 2>&1; then
+    echo "FAIL: go vet found issues. Fix above errors before committing."
+    exit 1
+fi
+
+# ─── 3. Secret scan ──────────────────────────────────────────────
+# Quick check for real-looking secrets in staged Go files.
+# Allows test fixtures (test_, fake, dummy, example values under 12 chars).
+secrets=$(git diff --cached -- '*.go' ':!*_test.go' ':!internal/testtoken/' | grep -iE '^\+' \
+    | grep -ioE '(api[_-]?key|secret|password|nsec|priv[_-]?key|token)\s*[:=]\s*["'"'"'][A-Za-z0-9+/=_-]{16,}' \
+    | grep -viE '(test_|fake|dummy|example|placeholder|xxx|your_|REPLACE|CHANGE)' \
+    2>/dev/null || true)
+if [ -n "$secrets" ]; then
+    echo "WARNING: Possible hardcoded secret detected:"
+    echo "$secrets" | sed 's/^/  /'
+    echo "If this is a false positive (test fixture), add it to the exclusion list."
+    echo "To bypass: git commit --no-verify"
+    exit 1
+fi
+
+echo "OK: gofmt clean, go vet clean, no secrets detected."

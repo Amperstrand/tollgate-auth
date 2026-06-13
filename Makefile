@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean
+.PHONY: build build-linux build-radius deploy deploy-radius deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
@@ -102,3 +102,11 @@ test-e2e:
 
 clean:
 	rm -f $(SSH_BINARY) $(RADIUS_BINARY)
+
+install-hooks: ## Install git pre-commit and commit-msg hooks
+	ln -sf ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
+	ln -sf ../../scripts/git-hooks/commit-msg .git/hooks/commit-msg
+	chmod +x scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg
+	@echo "Git hooks installed:"
+	@echo "  pre-commit: gofmt + go vet + secret scan"
+	@echo "  commit-msg: ASCII-only, conventional commit format"
