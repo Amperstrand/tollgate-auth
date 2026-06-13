@@ -64,8 +64,8 @@ func TestParseOperatorNpub_InvalidPrefix(t *testing.T) {
 
 func TestParseOperatorNpub_InvalidLength(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  string
+		name    string
+		input   string
 		wantLen int
 	}{
 		{"too short", "npub1" + strings.Repeat("a", 10), 14},

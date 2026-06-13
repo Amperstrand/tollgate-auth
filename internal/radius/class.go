@@ -15,7 +15,7 @@ import (
 // Sent in Access-Accept, echoed back in accounting packets (RFC 2865 §5.5).
 // HMAC-signed for tamper detection.
 type SessionClass struct {
-	OperatorID string `json:"op"` // operator identifier
+	OperatorID string `json:"op"`  // operator identifier
 	MAC        string `json:"mac"` // session identifier (Calling-Station-Id)
 	TokenHash  string `json:"th"`  // first 16 chars of token hash
 	Timestamp  int64  `json:"ts"`  // unix seconds

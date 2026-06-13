@@ -467,9 +467,9 @@ func TestProcessAuth_DelegatedMode_CashuToken_Rejects(t *testing.T) {
 
 func TestProcessAuth_MultipleAmounts(t *testing.T) {
 	tests := []struct {
-		amount     int
-		wantSec    int
-		wantMin    int
+		amount  int
+		wantSec int
+		wantMin int
 	}{
 		{1, 60, 1},
 		{8, 480, 8},

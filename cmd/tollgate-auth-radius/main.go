@@ -49,7 +49,7 @@ func getEnv(key, fallback string) string {
 
 // Delegated mode configuration (read once at startup).
 var (
-	authMode    = getEnv("TOLLGATE_AUTH_MODE", "local")       // "local" or "delegated"
+	authMode    = getEnv("TOLLGATE_AUTH_MODE", "local") // "local" or "delegated"
 	sessiondURL = getEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
 	opResolver  *operator.Resolver
 )
@@ -101,16 +101,16 @@ type SessionStore struct {
 }
 
 type SessionRecord struct {
-	MAC      string                  `json:"mac"`
-	Token    string                  `json:"token_hash"`
-	Guest    string                  `json:"guest"`
-	Mint     string                  `json:"mint"`
-	Amount   int                     `json:"amount"`
-	Started  time.Time               `json:"started"`
-	Duration int                     `json:"duration"` // seconds
-	Source   string                  `json:"source"`   // "username" or "password"
-	PayType  radiusauth.PaymentType  `json:"pay_type"` // "cashu" or "lnurlw"
-	Class    string                  `json:"class"`
+	MAC      string                 `json:"mac"`
+	Token    string                 `json:"token_hash"`
+	Guest    string                 `json:"guest"`
+	Mint     string                 `json:"mint"`
+	Amount   int                    `json:"amount"`
+	Started  time.Time              `json:"started"`
+	Duration int                    `json:"duration"` // seconds
+	Source   string                 `json:"source"`   // "username" or "password"
+	PayType  radiusauth.PaymentType `json:"pay_type"` // "cashu" or "lnurlw"
+	Class    string                 `json:"class"`
 }
 
 func (s *SessionStore) Path(mac string) string {
@@ -436,12 +436,12 @@ func handleLNURLw(cred radiusauth.PaymentCredential, sessionID string, sessions 
 		sessionID, thash[:16], cred.Source, redact.LogSafe(redact.Truncate(cred.Value, 80)))
 
 	recordLedgerAuth(ledger.LedgerEntry{
-		EventType:   ledger.EventAuthAccept,
-		MAC:         sessionID,
-		PaymentType: "lnurlw",
-		AmountSat:   LNURLWDefaultSec / RateSecPerSat,
-		DurationSec: LNURLWDefaultSec,
-		TokenHash:   thash,
+		EventType:    ledger.EventAuthAccept,
+		MAC:          sessionID,
+		PaymentType:  "lnurlw",
+		AmountSat:    LNURLWDefaultSec / RateSecPerSat,
+		DurationSec:  LNURLWDefaultSec,
+		TokenHash:    thash,
 		ReplyMessage: fmt.Sprintf("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60),
 	})
 
@@ -557,12 +557,12 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 		sessionID, seconds, cred.Source)
 
 	recordLedgerAuth(ledger.LedgerEntry{
-		EventType:   ledger.EventAuthAccept,
-		MAC:         sessionID,
-		PaymentType: "delegated",
-		AmountSat:   minutes,
-		DurationSec: seconds,
-		TokenHash:   thash,
+		EventType:    ledger.EventAuthAccept,
+		MAC:          sessionID,
+		PaymentType:  "delegated",
+		AmountSat:    minutes,
+		DurationSec:  seconds,
+		TokenHash:    thash,
 		ReplyMessage: fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes),
 	})
 

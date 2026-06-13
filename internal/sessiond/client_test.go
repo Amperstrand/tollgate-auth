@@ -324,11 +324,11 @@ func TestReportUsage_Success(t *testing.T) {
 
 	client := NewClient(server.URL)
 	report := UsageReport{
-		InputOctets: &inputOctets,
+		InputOctets:  &inputOctets,
 		OutputOctets: &outputOctets,
-		SessionTime: &sessionTime,
-		Source:      "radius-accounting",
-		Timestamp:   "2025-01-01T00:00:00Z",
+		SessionTime:  &sessionTime,
+		Source:       "radius-accounting",
+		Timestamp:    "2025-01-01T00:00:00Z",
 	}
 
 	state, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report, "test-api-key")

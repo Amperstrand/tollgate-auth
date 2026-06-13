@@ -10,10 +10,10 @@ import (
 
 // OperatorAccount identifies the gateway operator (the person collecting payments).
 type OperatorAccount struct {
-	ID            string    // stable identifier (e.g. "op-abc123")
-	PayoutNpub    string    // Nostr npub for payout (public identifier, NOT a secret)
-	PayoutLNURL   string    // optional LNURL-pay for Lightning payout
-	PayoutAddress string    // optional on-chain address
+	ID            string // stable identifier (e.g. "op-abc123")
+	PayoutNpub    string // Nostr npub for payout (public identifier, NOT a secret)
+	PayoutLNURL   string // optional LNURL-pay for Lightning payout
+	PayoutAddress string // optional on-chain address
 	CreatedAt     time.Time
 }
 

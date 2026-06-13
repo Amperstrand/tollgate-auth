@@ -20,7 +20,7 @@ type SessionState struct {
 
 // nostrEvent represents a minimal Nostr event for parsing the session response.
 type nostrEvent struct {
-	Kind int      `json:"kind"`
+	Kind int        `json:"kind"`
 	Tags [][]string `json:"tags"`
 }
 
@@ -129,23 +129,23 @@ func (c *Client) GetUsage(mac string) (string, error) {
 // SessionResponse represents session state returned by the session daemon.
 type SessionResponse struct {
 	SessionID       string `json:"session_id"`
-	AccessLevel     string `json:"access_level"`   // "active", "suspended", "restricted"
+	AccessLevel     string `json:"access_level"`    // "active", "suspended", "restricted"
 	Allotment       int64  `json:"allotment"`       // total allotment in metric units
 	RemainingQuota  int64  `json:"remaining_quota"` // remaining quota in metric units
 	Metric          string `json:"metric"`          // "milliseconds" or "bytes"
 	NextCheckinMs   int64  `json:"next_checkin_ms"`
 	IsFinal         bool   `json:"is_final"`
-	CreatedAt       int64  `json:"created_at"`      // unix timestamp
+	CreatedAt       int64  `json:"created_at"` // unix timestamp
 	LastUsageUpdate string `json:"last_usage_update,omitempty"`
 }
 
 // UsageReport represents a normalized usage event from RADIUS accounting.
 type UsageReport struct {
-	InputOctets *uint64 `json:"input_octets,omitempty"`
+	InputOctets  *uint64 `json:"input_octets,omitempty"`
 	OutputOctets *uint64 `json:"output_octets,omitempty"`
-	SessionTime *uint64 `json:"session_time,omitempty"`
-	Source      string  `json:"source"`              // e.g. "radius-accounting"
-	Timestamp   string  `json:"timestamp,omitempty"` // RFC 3339
+	SessionTime  *uint64 `json:"session_time,omitempty"`
+	Source       string  `json:"source"`              // e.g. "radius-accounting"
+	Timestamp    string  `json:"timestamp,omitempty"` // RFC 3339
 }
 
 // GetSession retrieves session state from the session daemon via

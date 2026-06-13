@@ -31,15 +31,15 @@ func TestExtractPayment(t *testing.T) {
 	v3Token := "cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vdGVzdG51dC5jYXNodS5zcGFjZSIsInByb29mcyI6W3siYW1vdW50Ijo4LCJpZCI6ImsiLCJzZWNyZXQiOiJzIiwiQyI6ImMifV19XSwidW5pdCI6InNhdCJ9"
 
 	tests := []struct {
-		name        string
-		username    string
-		password    string
-		clearTextPw string
-		wantFound   bool
-		wantSource  string // expected Source field
-		wantType    PaymentType
-		wantValueLen int   // expected len of Value (0 means check exact match with input)
-		wantValue   string // if non-empty, exact expected Value
+		name         string
+		username     string
+		password     string
+		clearTextPw  string
+		wantFound    bool
+		wantSource   string // expected Source field
+		wantType     PaymentType
+		wantValueLen int    // expected len of Value (0 means check exact match with input)
+		wantValue    string // if non-empty, exact expected Value
 	}{
 		// --- Cashu token in username ---
 		{

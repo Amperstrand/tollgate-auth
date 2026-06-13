@@ -219,8 +219,12 @@ func TestIsSafeMintURL_Boundary172Range(t *testing.T) {
 func TestCheckStateRequest_Serialization(t *testing.T) {
 	req := CheckStateRequest{}
 	req.Proofs = append(req.Proofs,
-		struct{ Secret string `json:"secret"` }{Secret: "secret1"},
-		struct{ Secret string `json:"secret"` }{Secret: "secret2"})
+		struct {
+			Secret string `json:"secret"`
+		}{Secret: "secret1"},
+		struct {
+			Secret string `json:"secret"`
+		}{Secret: "secret2"})
 
 	data, err := json.Marshal(req)
 	if err != nil {
