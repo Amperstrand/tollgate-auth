@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/radius"
 	"tollgate-auth/internal/sessiond"
@@ -73,7 +74,7 @@ func handleAccounting() {
 	}
 
 	client := sessiond.NewClient(sessiondURL)
-	apiKey := getEnv("TOLLGATE_API_KEY", "")
+	apiKey := config.GetEnv("TOLLGATE_API_KEY", "")
 	resp, err := client.ReportUsage(mac, report, apiKey)
 	if err != nil {
 		log.Printf("Accounting: ReportUsage failed for mac=%s: %v", mac, err)
@@ -85,8 +86,8 @@ func handleAccounting() {
 		mac, statusType, resp.AccessLevel, resp.RemainingQuota, resp.IsFinal)
 
 	if resp.AccessLevel == "suspended" && nasIP != "" {
-		coaSecret := getEnv("TOLLGATE_COA_SECRET", "tollgate")
-		coaPort := getEnv("TOLLGATE_COA_PORT", "3799")
+		coaSecret := config.GetEnv("TOLLGATE_COA_SECRET", "tollgate")
+		coaPort := config.GetEnv("TOLLGATE_COA_PORT", "3799")
 		log.Printf("CoA: session suspended for mac=%s, sending disconnect to %s:%s", mac, nasIP, coaPort)
 		if err := sendDisconnect(nasIP, coaPort, acctSessionID, username, coaSecret); err != nil {
 			log.Printf("CoA: disconnect failed for mac=%s nas=%s: %v", mac, nasIP, err)

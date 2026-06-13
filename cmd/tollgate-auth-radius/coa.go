@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/radius"
 )
 
@@ -19,8 +20,8 @@ func sendCoA(nasIP string, port string, sessionTimeout int, sessionID string, us
 // If CoA fails, falls back to Disconnect-Request so the user reconnects with
 // the extended allotment.
 func sendCoAOrDisconnect(nasIP string, sessionTimeout int, sessionID string, username string) {
-	coaSecret := getEnv("TOLLGATE_COA_SECRET", "tollgate")
-	coaPort := getEnv("TOLLGATE_COA_PORT", "3799")
+	coaSecret := config.GetEnv("TOLLGATE_COA_SECRET", "tollgate")
+	coaPort := config.GetEnv("TOLLGATE_COA_PORT", "3799")
 
 	if nasIP == "" {
 		log.Printf("CoA: no NAS IP, skipping")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/operator"
@@ -40,17 +41,10 @@ var macPattern = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 // Customize this regex to allow additional mints.
 var testMintPattern = regexp.MustCompile(`(?i)test`)
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 // Delegated mode configuration (read once at startup).
 var (
-	authMode    = getEnv("TOLLGATE_AUTH_MODE", "local") // "local" or "delegated"
-	sessiondURL = getEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
+	authMode    = config.GetEnv("TOLLGATE_AUTH_MODE", "local") // "local" or "delegated"
+	sessiondURL = config.GetEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
 	opResolver  *operator.Resolver
 )
 
@@ -62,7 +56,7 @@ type LedgerConfig struct {
 var ledgerInstance *ledger.Ledger
 
 func initLedger() LedgerConfig {
-	path := getEnv("TOLLGATE_LEDGER_PATH", "")
+	path := config.GetEnv("TOLLGATE_LEDGER_PATH", "")
 	if path == "" {
 		return LedgerConfig{Enabled: false}
 	}
@@ -245,8 +239,8 @@ func main() {
 	replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
 	os.MkdirAll(BaseDir, 0755)
 
-	clientIP := getEnv("TOLLGATE_CLIENT_IP", "")
-	nasID := getEnv("TOLLGATE_NAS_ID", "")
+	clientIP := config.GetEnv("TOLLGATE_CLIENT_IP", "")
+	nasID := config.GetEnv("TOLLGATE_NAS_ID", "")
 	opCtx := opResolver.Resolve(clientIP, nasID)
 
 	deps := &Dependencies{
@@ -278,8 +272,8 @@ func handleDelegated(username, mac, password, clearTextPw string) {
 	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
 	os.MkdirAll(sessions.Dir, 0700)
 
-	clientIP := getEnv("TOLLGATE_CLIENT_IP", "")
-	nasID := getEnv("TOLLGATE_NAS_ID", "")
+	clientIP := config.GetEnv("TOLLGATE_CLIENT_IP", "")
+	nasID := config.GetEnv("TOLLGATE_NAS_ID", "")
 	opCtx := opResolver.Resolve(clientIP, nasID)
 	operatorID := opCtx.Account.ID
 
@@ -538,7 +532,7 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 
 	// Top-up (RFC 5176 CoA): extend NAS Session-Timeout without disconnect
 	if existingRec, hasExisting := sessions.Get(sessionID); hasExisting && sessions.IsActive(existingRec) {
-		if nasIP := getEnv("TOLLGATE_NAS_IP", ""); nasIP != "" {
+		if nasIP := config.GetEnv("TOLLGATE_NAS_IP", ""); nasIP != "" {
 			log.Printf("CoA: top-up detected for session=%s, sending CoA to nas=%s", sessionID, nasIP)
 			sendCoAOrDisconnect(nasIP, seconds, "", sessionID)
 		}

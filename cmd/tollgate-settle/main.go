@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/ledger"
 
 	"fiatjaf.com/nostr"
@@ -20,13 +21,6 @@ import (
 
 // Default relay list used when TOLLGATE_RELAYS is unset.
 var defaultRelays = []string{"wss://relay.damus.io", "wss://nos.lol"}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
 
 // parseRelays splits a comma-separated relay list, trimming whitespace and
 // dropping empties. Returns the default list when the input is empty.
@@ -105,10 +99,10 @@ func sendSettlementDM(ctx context.Context, relays []string, kr nostr.Keyer, reci
 
 func main() {
 	ledgerPath := flag.String("ledger", "/opt/tollgate-auth/ledger.jsonl", "path to the JSONL ledger")
-	operatorID := flag.String("operator", getEnv("TOLLGATE_OPERATOR_ID", "default"), "operator ID to summarize")
+	operatorID := flag.String("operator", config.GetEnv("TOLLGATE_OPERATOR_ID", "default"), "operator ID to summarize")
 	sinceStr := flag.String("since", time.Now().UTC().Add(-7*24*time.Hour).Format(time.RFC3339), "period start (RFC3339)")
 	untilStr := flag.String("until", time.Now().UTC().Format(time.RFC3339), "period end (RFC3339)")
-	relaysFlag := flag.String("relays", getEnv("TOLLGATE_RELAYS", ""), "comma-separated Nostr relay URLs")
+	relaysFlag := flag.String("relays", config.GetEnv("TOLLGATE_RELAYS", ""), "comma-separated Nostr relay URLs")
 	dryRun := flag.Bool("dry-run", false, "print the settlement report to stdout without sending a Nostr DM")
 	flag.Parse()
 

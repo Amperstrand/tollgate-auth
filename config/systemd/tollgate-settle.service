@@ -1,0 +1,16 @@
+[Unit]
+Description=Tollgate Settlement (weekly revenue notification)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/run-settle.sh
+EnvironmentFile=-/etc/tollgate/settle.env
+
+# Hardening
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/cashu-tollgate
+ProtectHome=true

@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius build-settle deploy deploy-radius deploy-all deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius build-settle deploy deploy-radius deploy-all deploy-settle deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
 TOLLGATE_RS_DIR := /Users/macbook/src/tollgate-rs
 
@@ -31,6 +31,22 @@ deploy: build-linux
 		 systemctl start tollgate-auth-ssh && \
 		 sleep 2 && \
 		 systemctl status tollgate-auth-ssh --no-pager | tail -5'
+
+deploy-settle: build-settle
+	scp -P $(REMOTE_PORT) tollgate-settle $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-settle
+	scp -P $(REMOTE_PORT) scripts/run-settle.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/run-settle.sh
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-settle.service $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-settle.service
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-settle.timer $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-settle.timer
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'cp /tmp/tollgate-settle $(REMOTE_DIR)/tollgate-settle && \
+		 chmod +x $(REMOTE_DIR)/tollgate-settle && \
+		 cp /tmp/run-settle.sh /usr/local/sbin/run-settle.sh && \
+		 chmod +x /usr/local/sbin/run-settle.sh && \
+		 mkdir -p /etc/tollgate && \
+		 systemctl daemon-reload && \
+		 systemctl enable tollgate-settle.timer && \
+		 systemctl start tollgate-settle.timer && \
+		 systemctl list-timers tollgate-settle.timer --no-pager'
 
 deploy-radius: build-radius
 	scp -P $(REMOTE_PORT) $(RADIUS_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/$(RADIUS_BINARY)

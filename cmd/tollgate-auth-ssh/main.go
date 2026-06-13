@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/sessiond"
 
@@ -35,16 +36,9 @@ const (
 	TokensLogFile = BaseDir + "/tokens.log"
 )
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 var (
-	sshAuthMode    = getEnv("TOLLGATE_AUTH_MODE", "local")
-	sshSessiondURL = getEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
+	sshAuthMode    = config.GetEnv("TOLLGATE_AUTH_MODE", "local")
+	sshSessiondURL = config.GetEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
 )
 
 // --- Session Metadata ---
