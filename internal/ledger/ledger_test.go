@@ -12,7 +12,7 @@ import (
 func openTestLedger(t *testing.T) *Ledger {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "test.db")
+	path := filepath.Join(dir, "test.jsonl")
 	l, err := OpenLedger(path)
 	if err != nil {
 		t.Fatalf("OpenLedger: %v", err)
@@ -20,47 +20,19 @@ func openTestLedger(t *testing.T) *Ledger {
 	return l
 }
 
-func TestOpenLedger_CreatesSchema(t *testing.T) {
-	l := openTestLedger(t)
-	defer l.Close()
-
-	var name string
-	err := l.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='ledger_entries'").Scan(&name)
-	if err != nil {
-		t.Fatalf("ledger_entries table not found: %v", err)
-	}
-	if name != "ledger_entries" {
-		t.Fatalf("expected table name 'ledger_entries', got %q", name)
-	}
-}
-
-func TestOpenLedger_WALMode(t *testing.T) {
-	l := openTestLedger(t)
-	defer l.Close()
-
-	var mode string
-	err := l.db.QueryRow("PRAGMA journal_mode").Scan(&mode)
-	if err != nil {
-		t.Fatalf("query journal_mode: %v", err)
-	}
-	if mode != "wal" {
-		t.Fatalf("expected WAL mode, got %q", mode)
-	}
-}
-
 func TestRecordAuth_Accept(t *testing.T) {
 	l := openTestLedger(t)
 	defer l.Close()
 
 	entry := LedgerEntry{
-		EventType:   EventAuthAccept,
-		OperatorID:  "op-test",
-		MAC:         "aa:bb:cc:dd:ee:ff",
-		PaymentType: "cashu",
-		AmountSat:   8,
-		DurationSec: 480,
-		MintURL:     "https://testnut.cashu.space",
-		TokenHash:   "abc123",
+		EventType:    EventAuthAccept,
+		OperatorID:   "op-test",
+		MAC:          "aa:bb:cc:dd:ee:ff",
+		PaymentType:  "cashu",
+		AmountSat:    8,
+		DurationSec:  480,
+		MintURL:      "https://testnut.cashu.space",
+		TokenHash:    "abc123",
 		ReplyMessage: "Valid Cashu token: 8 sat",
 	}
 	if err := l.RecordAuth(entry); err != nil {
@@ -91,10 +63,10 @@ func TestRecordAuth_Reject(t *testing.T) {
 	defer l.Close()
 
 	entry := LedgerEntry{
-		EventType:   EventAuthReject,
-		OperatorID:  "op-test",
-		MAC:         "11:22:33:44:55:66",
-		PaymentType: "cashu",
+		EventType:    EventAuthReject,
+		OperatorID:   "op-test",
+		MAC:          "11:22:33:44:55:66",
+		PaymentType:  "cashu",
 		ReplyMessage: "Replay detected",
 	}
 	if err := l.RecordAuth(entry); err != nil {
@@ -313,10 +285,10 @@ func TestGetActiveSession_Active(t *testing.T) {
 
 	// Insert auth_accept with a token_hash.
 	if err := l.RecordAuth(LedgerEntry{
-		EventType:  EventAuthAccept,
-		MAC:        mac,
-		TokenHash:  tokenHash,
-		AmountSat:  8,
+		EventType:   EventAuthAccept,
+		MAC:         mac,
+		TokenHash:   tokenHash,
+		AmountSat:   8,
 		DurationSec: 480,
 	}); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
@@ -346,10 +318,10 @@ func TestGetActiveSession_Stopped(t *testing.T) {
 
 	// Insert auth_accept.
 	if err := l.RecordAuth(LedgerEntry{
-		EventType:  EventAuthAccept,
-		MAC:        mac,
-		TokenHash:  tokenHash,
-		AmountSat:  8,
+		EventType: EventAuthAccept,
+		MAC:       mac,
+		TokenHash: tokenHash,
+		AmountSat: 8,
 	}); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
 	}
@@ -369,7 +341,7 @@ func TestGetActiveSession_Stopped(t *testing.T) {
 		t.Fatalf("GetActiveSession: %v", err)
 	}
 	if session != nil {
-		t.Errorf("expected nil (stopped session), got entry with id %d", session.ID)
+		t.Errorf("expected nil (stopped session), got entry")
 	}
 }
 
@@ -506,7 +478,7 @@ func TestLedgerConcurrentWrites(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "close-test.db")
+	path := filepath.Join(dir, "close-test.jsonl")
 
 	l, err := OpenLedger(path)
 	if err != nil {
@@ -517,13 +489,46 @@ func TestClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Verify the database file exists.
+	// Verify the ledger file exists.
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("database file not found after close: %v", err)
+		t.Fatalf("ledger file not found after close: %v", err)
 	}
+}
 
-	// Verify db is closed by attempting a query.
-	if err := l.db.Ping(); err == nil {
-		t.Error("expected error pinging closed database")
+func TestLedger_PersistsAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "persist.jsonl")
+
+	// Write an entry.
+	l1, err := OpenLedger(path)
+	if err != nil {
+		t.Fatalf("OpenLedger 1: %v", err)
+	}
+	entry := LedgerEntry{
+		EventType: EventAuthAccept,
+		MAC:       "aa:bb:cc:dd:ee:ff",
+		AmountSat: 5,
+	}
+	if err := l1.RecordAuth(entry); err != nil {
+		t.Fatalf("RecordAuth: %v", err)
+	}
+	l1.Close()
+
+	// Reopen and verify the entry persisted.
+	l2, err := OpenLedger(path)
+	if err != nil {
+		t.Fatalf("OpenLedger 2: %v", err)
+	}
+	defer l2.Close()
+
+	entries, err := l2.QueryByMAC("aa:bb:cc:dd:ee:ff", time.Time{})
+	if err != nil {
+		t.Fatalf("QueryByMAC: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry after reopen, got %d", len(entries))
+	}
+	if entries[0].AmountSat != 5 {
+		t.Errorf("expected amount 5, got %d", entries[0].AmountSat)
 	}
 }

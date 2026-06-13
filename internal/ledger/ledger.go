@@ -1,253 +1,207 @@
 package ledger
 
 import (
-	"database/sql"
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
-// Ledger is a SQLite-backed accounting ledger.
+// Ledger is a JSONL append-only log file backed ledger.
 type Ledger struct {
-	db *sql.DB
+	path string
+	mu   sync.Mutex
 }
 
-const schema = `
-CREATE TABLE IF NOT EXISTS ledger_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    operator_id TEXT NOT NULL DEFAULT 'default',
-    mac TEXT NOT NULL,
-    session_class TEXT,
-    payment_type TEXT,
-    amount_sat INTEGER,
-    duration_sec INTEGER,
-    mint_url TEXT,
-    token_hash TEXT,
-    acct_session_id TEXT,
-    input_octets INTEGER,
-    output_octets INTEGER,
-    session_time INTEGER,
-    nas_ip TEXT,
-    terminate_cause TEXT,
-    reply_message TEXT,
-    metadata TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_ledger_mac ON ledger_entries(mac);
-CREATE INDEX IF NOT EXISTS idx_ledger_operator ON ledger_entries(operator_id);
-CREATE INDEX IF NOT EXISTS idx_ledger_timestamp ON ledger_entries(timestamp);
-CREATE INDEX IF NOT EXISTS idx_ledger_token_hash ON ledger_entries(token_hash);
-CREATE INDEX IF NOT EXISTS idx_ledger_event_type ON ledger_entries(event_type);
-`
-
-// OpenLedger opens (or creates) the SQLite ledger at the given path.
-// Creates the schema if it doesn't exist.
+// OpenLedger opens (or creates) the JSONL ledger at the given path.
+// Creates the parent directory and file if they don't exist.
 func OpenLedger(path string) (*Ledger, error) {
-	db, err := sql.Open("sqlite", path)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("ledger: create directory: %w", err)
+	}
+
+	// Create/touch the file if it doesn't exist.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		return nil, fmt.Errorf("ledger: open database: %w", err)
+		return nil, fmt.Errorf("ledger: create file: %w", err)
 	}
+	f.Close()
 
-	// Single-writer: serialize all access through one connection.
-	db.SetMaxOpenConns(1)
-
-	// Enable WAL mode for concurrent read access.
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ledger: enable WAL: %w", err)
-	}
-
-	// Enable foreign keys.
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ledger: enable foreign keys: %w", err)
-	}
-
-	// Set busy timeout so concurrent writers retry instead of failing immediately.
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ledger: set busy timeout: %w", err)
-	}
-
-	// Create schema.
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("ledger: create schema: %w", err)
-	}
-
-	return &Ledger{db: db}, nil
+	return &Ledger{path: path}, nil
 }
 
-// Close closes the underlying database connection.
+// Close is a no-op for JSONL (no persistent connection).
 func (l *Ledger) Close() error {
-	return l.db.Close()
+	return nil
 }
 
-// insertEntry is the shared INSERT logic for all record methods.
-func (l *Ledger) insertEntry(entry LedgerEntry) error {
+// appendEntry marshals the entry to JSON and appends it as a new line.
+func (l *Ledger) appendEntry(entry LedgerEntry) error {
 	if entry.Timestamp == "" {
 		entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}
 
-	_, err := l.db.Exec(`
-		INSERT INTO ledger_entries (
-			timestamp, event_type, operator_id, mac,
-			session_class, payment_type, amount_sat, duration_sec,
-			mint_url, token_hash, acct_session_id,
-			input_octets, output_octets, session_time,
-			nas_ip, terminate_cause, reply_message, metadata
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.Timestamp, string(entry.EventType), entry.OperatorID, entry.MAC,
-		entry.SessionClass, entry.PaymentType, entry.AmountSat, entry.DurationSec,
-		entry.MintURL, entry.TokenHash, entry.AcctSessionID,
-		entry.InputOctets, entry.OutputOctets, entry.SessionTime,
-		entry.NASIP, entry.TerminateCause, entry.ReplyMessage, entry.Metadata,
-	)
+	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("ledger: insert entry: %w", err)
+		return fmt.Errorf("ledger: marshal entry: %w", err)
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("ledger: open file for append: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("ledger: write entry: %w", err)
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("ledger: write newline: %w", err)
+	}
+
 	return nil
 }
 
 // RecordAuth records an authentication event (accept or reject).
 func (l *Ledger) RecordAuth(entry LedgerEntry) error {
-	return l.insertEntry(entry)
+	return l.appendEntry(entry)
 }
 
 // RecordAccounting records an accounting event (start/update/stop).
 func (l *Ledger) RecordAccounting(entry LedgerEntry) error {
-	return l.insertEntry(entry)
+	return l.appendEntry(entry)
 }
 
 // RecordCoA records a CoA or disconnect event.
 func (l *Ledger) RecordCoA(entry LedgerEntry) error {
-	return l.insertEntry(entry)
+	return l.appendEntry(entry)
 }
 
-// scanEntries scans multiple rows into a slice of LedgerEntry.
-func scanEntries(rows *sql.Rows) ([]LedgerEntry, error) {
+// readAll reads every entry from the JSONL file.
+func (l *Ledger) readAll() ([]LedgerEntry, error) {
+	f, err := os.Open(l.path)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: open file for read: %w", err)
+	}
+	defer f.Close()
+
 	var entries []LedgerEntry
-	for rows.Next() {
-		var e LedgerEntry
-		var eventType string
-		err := rows.Scan(
-			&e.ID, &e.Timestamp, &eventType, &e.OperatorID, &e.MAC,
-			&e.SessionClass, &e.PaymentType, &e.AmountSat, &e.DurationSec,
-			&e.MintURL, &e.TokenHash, &e.AcctSessionID,
-			&e.InputOctets, &e.OutputOctets, &e.SessionTime,
-			&e.NASIP, &e.TerminateCause, &e.ReplyMessage, &e.Metadata,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("ledger: scan entry: %w", err)
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
 		}
-		e.EventType = EventType(eventType)
+		var e LedgerEntry
+		if err := json.Unmarshal(line, &e); err != nil {
+			return nil, fmt.Errorf("ledger: unmarshal entry: %w", err)
+		}
 		entries = append(entries, e)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("ledger: rows error: %w", err)
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("ledger: scan file: %w", err)
 	}
+
 	return entries, nil
 }
 
-// QueryByMAC returns all ledger entries for a MAC address since the given time.
+// QueryByMAC returns all ledger entries for a MAC address since the given time,
+// sorted by timestamp descending (most recent first).
 func (l *Ledger) QueryByMAC(mac string, since time.Time) ([]LedgerEntry, error) {
-	rows, err := l.db.Query(`
-		SELECT id, timestamp, event_type, operator_id, mac,
-			session_class, payment_type, amount_sat, duration_sec,
-			mint_url, token_hash, acct_session_id,
-			input_octets, output_octets, session_time,
-			nas_ip, terminate_cause, reply_message, metadata
-		FROM ledger_entries
-		WHERE mac = ? AND timestamp >= ?
-		ORDER BY timestamp DESC`,
-		mac, since.UTC().Format(time.RFC3339),
-	)
+	entries, err := l.readAll()
 	if err != nil {
 		return nil, fmt.Errorf("ledger: query by MAC: %w", err)
 	}
-	defer rows.Close()
-	return scanEntries(rows)
+
+	var filtered []LedgerEntry
+	for _, e := range entries {
+		if e.MAC != mac {
+			continue
+		}
+		if !since.IsZero() && parseTime(e.Timestamp).Before(since) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	// Reverse for most-recent-first (entries are appended in time order).
+	return reverseEntries(filtered), nil
 }
 
-// QueryByOperator returns all ledger entries for an operator since the given time.
+// QueryByOperator returns all ledger entries for an operator since the given time,
+// sorted by timestamp descending (most recent first).
 func (l *Ledger) QueryByOperator(operatorID string, since time.Time) ([]LedgerEntry, error) {
-	rows, err := l.db.Query(`
-		SELECT id, timestamp, event_type, operator_id, mac,
-			session_class, payment_type, amount_sat, duration_sec,
-			mint_url, token_hash, acct_session_id,
-			input_octets, output_octets, session_time,
-			nas_ip, terminate_cause, reply_message, metadata
-		FROM ledger_entries
-		WHERE operator_id = ? AND timestamp >= ?
-		ORDER BY timestamp DESC`,
-		operatorID, since.UTC().Format(time.RFC3339),
-	)
+	entries, err := l.readAll()
 	if err != nil {
 		return nil, fmt.Errorf("ledger: query by operator: %w", err)
 	}
-	defer rows.Close()
-	return scanEntries(rows)
+
+	var filtered []LedgerEntry
+	for _, e := range entries {
+		if e.OperatorID != operatorID {
+			continue
+		}
+		if !since.IsZero() && parseTime(e.Timestamp).Before(since) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	// Reverse for most-recent-first (entries are appended in time order).
+	return reverseEntries(filtered), nil
 }
 
 // GetActiveSession returns the most recent auth_accept for a MAC that hasn't been stopped.
 // Used for session reconnection checks.
 func (l *Ledger) GetActiveSession(mac string) (*LedgerEntry, error) {
-	row := l.db.QueryRow(`
-		SELECT id, timestamp, event_type, operator_id, mac,
-			session_class, payment_type, amount_sat, duration_sec,
-			mint_url, token_hash, acct_session_id,
-			input_octets, output_octets, session_time,
-			nas_ip, terminate_cause, reply_message, metadata
-		FROM ledger_entries
-		WHERE mac = ? AND event_type = ?
-		ORDER BY timestamp DESC
-		LIMIT 1`,
-		mac, string(EventAuthAccept),
-	)
-
-	var e LedgerEntry
-	var eventType string
-	err := row.Scan(
-		&e.ID, &e.Timestamp, &eventType, &e.OperatorID, &e.MAC,
-		&e.SessionClass, &e.PaymentType, &e.AmountSat, &e.DurationSec,
-		&e.MintURL, &e.TokenHash, &e.AcctSessionID,
-		&e.InputOctets, &e.OutputOctets, &e.SessionTime,
-		&e.NASIP, &e.TerminateCause, &e.ReplyMessage, &e.Metadata,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	entries, err := l.readAll()
 	if err != nil {
 		return nil, fmt.Errorf("ledger: get active session: %w", err)
 	}
-	e.EventType = EventType(eventType)
 
-	// Check for a corresponding accounting_stop with the same token_hash.
-	if e.TokenHash != "" {
-		var stopCount int
-		err = l.db.QueryRow(`
-			SELECT COUNT(*) FROM ledger_entries
-			WHERE mac = ? AND event_type = ? AND token_hash = ?`,
-			mac, string(EventAcctStop), e.TokenHash,
-		).Scan(&stopCount)
-		if err != nil {
-			return nil, fmt.Errorf("ledger: check stop: %w", err)
-		}
-		if stopCount > 0 {
-			return nil, nil // session has been stopped
+	// Find the most recent auth_accept for this MAC (iterate in reverse).
+	var accept *LedgerEntry
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.MAC == mac && e.EventType == EventAuthAccept {
+			accept = &e
+			break
 		}
 	}
 
-	return &e, nil
+	if accept == nil {
+		return nil, nil
+	}
+
+	// Check for a corresponding accounting_stop with the same token_hash.
+	if accept.TokenHash != "" {
+		for _, e := range entries {
+			if e.MAC == mac &&
+				e.EventType == EventAcctStop &&
+				e.TokenHash == accept.TokenHash {
+				return nil, nil // session has been stopped
+			}
+		}
+	}
+
+	return accept, nil
 }
 
 // RevenueSummary returns a revenue report for an operator over a time range.
 func (l *Ledger) RevenueSummary(operatorID string, start, end time.Time) (*RevenueReport, error) {
-	startStr := start.UTC().Format(time.RFC3339)
-	endStr := end.UTC().Format(time.RFC3339)
+	entries, err := l.readAll()
+	if err != nil {
+		return nil, fmt.Errorf("ledger: revenue summary: %w", err)
+	}
 
 	report := &RevenueReport{
 		OperatorID: operatorID,
@@ -255,46 +209,48 @@ func (l *Ledger) RevenueSummary(operatorID string, start, end time.Time) (*Reven
 		EndTime:    end,
 	}
 
-	// Total sessions (auth events).
-	err := l.db.QueryRow(`
-		SELECT COUNT(*) FROM ledger_entries
-		WHERE operator_id = ? AND timestamp >= ? AND timestamp <= ?
-			AND event_type IN (?, ?)`,
-		operatorID, startStr, endStr,
-		string(EventAuthAccept), string(EventAuthReject),
-	).Scan(&report.TotalSessions)
-	if err != nil {
-		return nil, fmt.Errorf("ledger: count total sessions: %w", err)
+	for _, e := range entries {
+		if e.OperatorID != operatorID {
+			continue
+		}
+		t := parseTime(e.Timestamp)
+		if t.Before(start) || t.After(end) {
+			continue
+		}
+
+		switch e.EventType {
+		case EventAuthAccept:
+			report.TotalSessions++
+			report.AcceptedSessions++
+			report.TotalSat += e.AmountSat
+		case EventAuthReject:
+			report.TotalSessions++
+			report.RejectedSessions++
+		}
 	}
 
-	// Accepted sessions and sum.
-	err = l.db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(amount_sat), 0) FROM ledger_entries
-		WHERE operator_id = ? AND timestamp >= ? AND timestamp <= ?
-			AND event_type = ?`,
-		operatorID, startStr, endStr,
-		string(EventAuthAccept),
-	).Scan(&report.AcceptedSessions, &report.TotalSat)
-	if err != nil {
-		return nil, fmt.Errorf("ledger: count accepted: %w", err)
-	}
-
-	// Rejected sessions.
-	err = l.db.QueryRow(`
-		SELECT COUNT(*) FROM ledger_entries
-		WHERE operator_id = ? AND timestamp >= ? AND timestamp <= ?
-			AND event_type = ?`,
-		operatorID, startStr, endStr,
-		string(EventAuthReject),
-	).Scan(&report.RejectedSessions)
-	if err != nil {
-		return nil, fmt.Errorf("ledger: count rejected: %w", err)
-	}
-
-	// Average amount.
 	if report.AcceptedSessions > 0 {
 		report.AverageAmount = float64(report.TotalSat) / float64(report.AcceptedSessions)
 	}
 
 	return report, nil
+}
+
+// parseTime parses an RFC3339 timestamp string, returning zero time on error.
+func parseTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// reverseEntries returns a new slice with entries in reverse order.
+func reverseEntries(entries []LedgerEntry) []LedgerEntry {
+	n := len(entries)
+	reversed := make([]LedgerEntry, n)
+	for i := 0; i < n; i++ {
+		reversed[i] = entries[n-1-i]
+	}
+	return reversed
 }

@@ -19,25 +19,24 @@ const (
 
 // LedgerEntry represents a single recorded event in the ledger.
 type LedgerEntry struct {
-	ID             int64
-	Timestamp      string // ISO 8601
-	EventType      EventType
-	OperatorID     string
-	MAC            string
-	SessionClass   string // RADIUS Class attribute (HMAC-signed)
-	PaymentType    string // "cashu", "lnurlw", "delegated"
-	AmountSat      int
-	DurationSec    int
-	MintURL        string
-	TokenHash      string
-	AcctSessionID  string // NAS-provided Acct-Session-Id
-	InputOctets    int64
-	OutputOctets   int64
-	SessionTime    int64
-	NASIP          string
-	TerminateCause string
-	ReplyMessage   string
-	Metadata       string // JSON blob for extra fields
+	Timestamp      string    `json:"timestamp"`
+	EventType      EventType `json:"event_type"`
+	OperatorID     string    `json:"operator_id"`
+	MAC            string    `json:"mac"`
+	SessionClass   string    `json:"session_class,omitempty"`
+	PaymentType    string    `json:"payment_type,omitempty"`
+	AmountSat      int       `json:"amount_sat,omitempty"`
+	DurationSec    int       `json:"duration_sec,omitempty"`
+	MintURL        string    `json:"mint_url,omitempty"`
+	TokenHash      string    `json:"token_hash,omitempty"`
+	AcctSessionID  string    `json:"acct_session_id,omitempty"`
+	InputOctets    int64     `json:"input_octets,omitempty"`
+	OutputOctets   int64     `json:"output_octets,omitempty"`
+	SessionTime    int64     `json:"session_time,omitempty"`
+	NASIP          string    `json:"nas_ip,omitempty"`
+	TerminateCause string    `json:"terminate_cause,omitempty"`
+	ReplyMessage   string    `json:"reply_message,omitempty"`
+	Metadata       string    `json:"metadata,omitempty"`
 }
 
 // RevenueReport summarizes revenue for an operator over a time range.

@@ -1,12 +1,28 @@
 package operator
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// validTestNsec is a valid nsec for testing (generated from known key bytes).
+var validTestNsec = mustEncodeTestNsec([32]byte{
+	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+})
+
+func mustEncodeTestNsec(key [32]byte) string {
+	s, err := encodeNsecForTest(key[:])
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
 
 func writeTestRegistry(t *testing.T, entries []registryOperatorEntry) string {
 	t.Helper()
@@ -28,7 +44,7 @@ func TestResolver_NoConfigNoEnv(t *testing.T) {
 	// No registry file, no env npub → anonymous operator
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver("")
 	if err != nil {
@@ -54,7 +70,7 @@ func TestResolver_EnvNpubOnly(t *testing.T) {
 	// No registry file, env npub set → resolved from env
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", validNPub)
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver("")
 	if err != nil {
@@ -95,7 +111,7 @@ func TestResolver_ConfigClientIPMatch(t *testing.T) {
 	registryPath := writeTestRegistry(t, entries)
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", registryPath)
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver("")
 	if err != nil {
@@ -133,7 +149,7 @@ func TestResolver_ConfigNASIDMatch(t *testing.T) {
 	registryPath := writeTestRegistry(t, entries)
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", registryPath)
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver("")
 	if err != nil {
@@ -179,7 +195,7 @@ func TestResolver_ConfigDefaultFallback(t *testing.T) {
 	registryPath := writeTestRegistry(t, entries)
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", registryPath)
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver("")
 	if err != nil {
@@ -214,7 +230,7 @@ func TestResolver_NoMatchNoDefault(t *testing.T) {
 	registryPath := writeTestRegistry(t, entries)
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", registryPath)
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver("")
 	if err != nil {
@@ -230,17 +246,15 @@ func TestResolver_NoMatchNoDefault(t *testing.T) {
 	}
 }
 
-func TestResolver_HMACKeyDeterministic(t *testing.T) {
-	// HMAC key is deterministic when set via env
+func TestResolver_HMACKeyFromNsec_Deterministic(t *testing.T) {
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r1, err := NewResolver("")
 	if err != nil {
 		t.Fatalf("NewResolver() error: %v", err)
 	}
-
 	r2, err := NewResolver("")
 	if err != nil {
 		t.Fatalf("NewResolver() error: %v", err)
@@ -249,58 +263,49 @@ func TestResolver_HMACKeyDeterministic(t *testing.T) {
 	key1 := r1.HMACKey()
 	key2 := r2.HMACKey()
 
-	expected, _ := hex.DecodeString("0123456789abcdef0123456789abcdef")
-	if string(key1) != string(expected) {
-		t.Errorf("HMACKey() = %x, want %x", key1, expected)
+	if len(key1) != 32 {
+		t.Errorf("len(HMACKey()) = %d, want 32", len(key1))
 	}
 	if string(key1) != string(key2) {
-		t.Errorf("HMACKey() differs between calls: %x vs %x", key1, key2)
+		t.Errorf("HMACKey() differs between calls with same nsec: %x vs %x", key1, key2)
 	}
 }
 
-func TestResolver_HMACKeyRandom(t *testing.T) {
-	// Without env, random keys are generated (different each time)
+func TestResolver_NoNsec_HardError(t *testing.T) {
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", "")
 
-	r1, err := NewResolver("")
-	if err != nil {
-		t.Fatalf("NewResolver() error: %v", err)
+	_, err := NewResolver("")
+	if err == nil {
+		t.Fatal("NewResolver() without nsec expected error, got nil")
 	}
-
-	r2, err := NewResolver("")
-	if err != nil {
-		t.Fatalf("NewResolver() error: %v", err)
-	}
-
-	if len(r1.HMACKey()) != 32 {
-		t.Errorf("len(HMACKey()) = %d, want 32", len(r1.HMACKey()))
-	}
-	if string(r1.HMACKey()) == string(r2.HMACKey()) {
-		t.Error("two NewResolver calls produced same random key (extremely unlikely)")
+	if !strings.Contains(err.Error(), "TOLLGATE_OPERATOR_NSEC") {
+		t.Errorf("error should mention TOLLGATE_OPERATOR_NSEC, got: %v", err)
 	}
 }
 
-func TestResolver_InvalidHMACKeyHex(t *testing.T) {
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "not-valid-hex!")
+func TestResolver_InvalidNsec(t *testing.T) {
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", "not-a-valid-nsec!")
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
 
 	_, err := NewResolver("")
 	if err == nil {
-		t.Fatal("NewResolver() with invalid hex key expected error, got nil")
+		t.Fatal("NewResolver() with invalid nsec expected error, got nil")
 	}
 }
 
-func TestResolver_HMACKeyTooShort(t *testing.T) {
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "aabb")
+func TestResolver_NsecWithWrongPrefix(t *testing.T) {
+	// Generate a valid bech32 value but with npub prefix instead of nsec
+	npubValue := strings.Replace(validTestNsec, "nsec1", "npub1", 1)
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", npubValue)
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
 
 	_, err := NewResolver("")
 	if err == nil {
-		t.Fatal("NewResolver() with short key expected error, got nil")
+		t.Fatal("NewResolver() with npub prefix expected error, got nil")
 	}
 }
 
@@ -323,7 +328,7 @@ func TestResolver_ConfigPathArgument(t *testing.T) {
 	registryPath := writeTestRegistry(t, entries)
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", "")
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver(registryPath)
 	if err != nil {
@@ -373,7 +378,7 @@ func TestResolver_EnvRegistryOverridesConfigPath(t *testing.T) {
 
 	t.Setenv("TOLLGATE_OPERATOR_REGISTRY", envPath)
 	t.Setenv("TOLLGATE_OPERATOR_NPUB", "")
-	t.Setenv("TOLLGATE_CLASS_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("TOLLGATE_OPERATOR_NSEC", validTestNsec)
 
 	r, err := NewResolver(argPath)
 	if err != nil {

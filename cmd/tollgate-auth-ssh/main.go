@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/sessiond"
 
 	"github.com/creack/pty"
@@ -59,10 +58,6 @@ type SessionMeta struct {
 }
 
 // --- Jail Management ---
-
-func guestUsername(tokenStr string) string {
-	return "g-" + cashu.TokenHash(tokenStr)[:8]
-}
 
 func createJail(guest string, tokenData *cashu.TokenData, seconds int) error {
 	jailPath := SessionDir + "/" + guest
@@ -108,43 +103,6 @@ func setWinsize(f *os.File, w, h int) {
 	)
 }
 
-// --- MOTD ---
-
-func renderMOTD(tokenData *cashu.TokenData, guest string, seconds int) string {
-	minutes := tokenData.Amount
-	isTest := isTestMint(tokenData.Mint)
-	mintDisplay := tokenData.Mint
-	if len(mintDisplay) > 36 {
-		mintDisplay = mintDisplay[:33] + "..."
-	}
-	testStr := "NO"
-	if isTest {
-		testStr = "YES"
-	}
-
-	return fmt.Sprintf(
-		"\r\n"+
-			"  +======================================+\r\n"+
-			"  |        CASHU TOLLGATE                |\r\n"+
-			"  +======================================+\r\n"+
-			"  |  Mint:   %-28s |\r\n"+
-			"  |  Amount: %4d %-23s |\r\n"+
-			"  |  Time:   %4d min (%5d sec)       |\r\n"+
-			"  |  User:   %-28s |\r\n"+
-			"  |  Test:   %-28s |\r\n"+
-			"  +======================================+\r\n"+
-			"  |  Type 'timeleft' to see time left    |\r\n"+
-			"  |  Session ends when time runs out.    |\r\n"+
-			"  +======================================+\r\n"+
-			"\r\n",
-		mintDisplay, minutes, tokenData.Unit, minutes, seconds, guest, testStr,
-	)
-}
-
-func isTestMint(mintURL string) bool {
-	return strings.Contains(strings.ToLower(mintURL), "test")
-}
-
 // --- Main ---
 
 func main() {
@@ -153,87 +111,40 @@ func main() {
 
 	replay := cashu.NewReplayGuard(BaseDir + "/spent.txt")
 
+	deps := &SSHDependencies{
+		Replay:       replay,
+		Verifier:     fakeverity.NewProductionVerifier(WalletDir),
+		Bootstrapper: sessiond.NewClient(sshSessiondURL),
+		AuthMode:     sshAuthMode,
+		SessiondURL:  sshSessiondURL,
+		WalletDir:    WalletDir,
+		TokensLog:    TokensLogFile,
+	}
+
 	ssh.Handle(func(s ssh.Session) {
 		username := s.User()
 		log.Printf("Session request from %s, user=%d chars", s.RemoteAddr(), len(username))
 
-		// 1. Decode token
-		tokenData, err := cashu.DecodeToken(username)
-		if err != nil {
-			io.WriteString(s, fmt.Sprintf("\r\nError: %s\r\n\r\n", err))
+		decision := processSSHAuth(deps, username, s.RemoteAddr().String())
+
+		if !decision.Accept {
+			log.Printf("%s", decision.LogMsg)
+			if decision.TokenData != nil {
+				cashu.LogTokenWithError(username, decision.TokenData, decision.Guest, false, decision.Error, deps.TokensLog)
+			}
+			io.WriteString(s, fmt.Sprintf("\r\nError: %s\r\n\r\n", decision.Error))
 			s.Exit(1)
 			return
 		}
 
-		thash := cashu.TokenHash(username)
-		guest := guestUsername(username)
+		log.Printf("%s", decision.LogMsg)
+		cashu.LogToken(username, decision.TokenData, decision.Guest, true, deps.TokensLog)
 
-		// 2. Check replay
-		if replay.IsSpent(thash) {
-			io.WriteString(s, "\r\nError: token already used\r\n\r\n")
-			s.Exit(1)
-			return
-		}
+		guest := decision.Guest
+		seconds := decision.Seconds
+		tokenData := decision.TokenData
 
-		var seconds int
-		if sshAuthMode == "delegated" {
-			// Delegated mode: post token to v1 server for verification/redemption
-			remoteAddr := s.RemoteAddr().String()
-			mac := remoteAddr
-			if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-				mac = "ssh:" + host
-			}
-
-			client := sessiond.NewClient(sshSessiondURL)
-			state, err := client.Bootstrap(username, mac)
-			if err != nil {
-				log.Printf("Reject: delegated bootstrap failed: %v", err)
-				io.WriteString(s, fmt.Sprintf("\r\nError: delegated session failed — %v\r\n\r\n", err))
-				s.Exit(1)
-				return
-			}
-
-			seconds = int(state.AllotmentMs / 1000)
-			if seconds <= 0 {
-				io.WriteString(s, "\r\nError: zero allotment from server\r\n\r\n")
-				s.Exit(1)
-				return
-			}
-			log.Printf("Delegated accept: guest=%s duration=%ds allotment=%dms", guest, seconds, state.AllotmentMs)
-
-			// Mark as spent for local replay protection
-			replay.MarkSpent(thash)
-			cashu.LogToken(username, tokenData, guest, true, TokensLogFile)
-		} else {
-			// Local mode: verify and redeem token directly
-			seconds = tokenData.Amount * RateSecPerSat
-
-			// 3. Verify with mint
-			ok, msg := cashu.VerifyWithMint(tokenData)
-			if !ok {
-				cashu.LogToken(username, tokenData, guest, false, TokensLogFile)
-				io.WriteString(s, fmt.Sprintf("\r\nError: %s\r\n\r\n", msg))
-				s.Exit(1)
-				return
-			}
-
-			// 4. Redeem token to wallet
-			io.WriteString(s, "  Redeeming token...\r\n")
-			if err := cashu.RedeemToken(username, WalletDir); err != nil {
-				log.Printf("Token redemption failed: %v", err)
-				cashu.LogToken(username, tokenData, guest, false, TokensLogFile)
-				io.WriteString(s, "\r\nError: token redemption failed\r\n\r\n")
-				s.Exit(1)
-				return
-			}
-			log.Printf("Token redeemed to wallet: %d sat from %s", tokenData.Amount, tokenData.Mint)
-
-			// 5. Mark spent & log
-			replay.MarkSpent(thash)
-			cashu.LogToken(username, tokenData, guest, true, TokensLogFile)
-		}
-
-		// 6. Create jail
+		// Create jail
 		if err := createJail(guest, tokenData, seconds); err != nil {
 			log.Printf("Failed to create jail: %v", err)
 			io.WriteString(s, "\r\nError: could not create session\r\n\r\n")
@@ -241,8 +152,8 @@ func main() {
 			return
 		}
 
-		// 7. MOTD
-		io.WriteString(s, renderMOTD(tokenData, guest, seconds))
+		// MOTD
+		io.WriteString(s, decision.MOTD)
 
 		// 8. Spawn chroot shell inside PTY
 		jailPath := SessionDir + "/" + guest
