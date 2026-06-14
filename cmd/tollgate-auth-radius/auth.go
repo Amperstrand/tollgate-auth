@@ -169,7 +169,11 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 			}
 
 		case cashu.StateUnspent:
-			// Token in spent-hashes but mint says UNSPENT — proceed with normal flow
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token already used",
+				LogMessage:   fmt.Sprintf("Reject: token %s in spent-hashes but UNSPENT at mint — possible replay", thash[:16]),
+			}
 
 		default:
 			return AuthResult{

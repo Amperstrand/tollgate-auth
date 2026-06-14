@@ -597,7 +597,7 @@ func TestProcessAuth_SpentToken_Pending_Reject(t *testing.T) {
 	}
 }
 
-func TestProcessAuth_SpentHashes_UnspentAtMint_ProceedsWithRedemption(t *testing.T) {
+func TestProcessAuth_SpentHashes_UnspentAtMint_Reject(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(8)
 
@@ -607,14 +607,14 @@ func TestProcessAuth_SpentHashes_UnspentAtMint_ProceedsWithRedemption(t *testing
 
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
-	if !result.Accept {
-		t.Fatalf("expected Accept when token UNSPENT at mint despite spent-hashes: %s", result.ReplyMessage)
+	if result.Accept {
+		t.Fatal("expected Reject when token in spent-hashes (replay protection)")
 	}
-	if !strings.Contains(result.ReplyMessage, "Valid Cashu token") {
-		t.Errorf("ReplyMessage should show normal accept: %q", result.ReplyMessage)
+	if !strings.Contains(result.ReplyMessage, "already used") {
+		t.Errorf("ReplyMessage should say 'already used': %q", result.ReplyMessage)
 	}
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
-	if fv.RedeemCalled != 1 {
-		t.Errorf("Redeem should be called once, got %d", fv.RedeemCalled)
+	if fv.RedeemCalled != 0 {
+		t.Errorf("Redeem should not be called on replay, got %d calls", fv.RedeemCalled)
 	}
 }

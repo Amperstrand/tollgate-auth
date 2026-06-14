@@ -374,10 +374,9 @@ func handleCashu(cred radiusauth.PaymentCredential, sessionID string, sessions *
 			os.Exit(1)
 
 		case cashu.StateUnspent:
-			// Our spent-hashes has this token but the mint says UNSPENT.
-			// The previous redemption attempt failed (network error, crash before redeem).
-			// The token is still usable — proceed with normal flow without re-marking.
-			log.Printf("Info: token %s in spent-hashes but UNSPENT at mint — proceeding with redemption", thash[:16])
+			log.Printf("Reject: token %s in spent-hashes but UNSPENT at mint — possible replay (hash=%s)", thash[:16], thash[:16])
+			replyMessage("Rejected: token already used")
+			os.Exit(1)
 
 		default:
 			// Mint unreachable or error — can't determine state. Fail safe.
