@@ -32,13 +32,14 @@ type AuthResult struct {
 
 // Dependencies holds all injectable dependencies for auth processing.
 type Dependencies struct {
-	Sessions    *SessionStore
-	Replay      fakeverity.ReplayGuard
-	Verifier    fakeverity.Verifier
-	OperatorID  string
-	HMACKey     []byte
-	AuthMode    string
-	SessiondURL string
+	Sessions     *SessionStore
+	Replay       fakeverity.ReplayGuard
+	Verifier     fakeverity.Verifier
+	Bootstrapper fakeverity.Bootstrapper
+	OperatorID   string
+	HMACKey      []byte
+	AuthMode     string
+	SessiondURL  string
 }
 
 func isTestMintCheck(mintURL string) bool {
@@ -284,10 +285,133 @@ func processLNURLw(deps *Dependencies, cred radiusauth.PaymentCredential, sessio
 }
 
 func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential, sessionID string) AuthResult {
+	tokenData, err := deps.Verifier.Decode(cred.Value)
+	if err != nil {
+		return AuthResult{
+			Accept:       false,
+			ReplyMessage: "Rejected: invalid Cashu token format",
+			LogMessage:   fmt.Sprintf("Reject: cashu decode failed (delegated, %s): %v", cred.Source, err),
+		}
+	}
+
+	thash := cashu.TokenHash(cred.Value)
+
+	alreadyMarked := deps.Replay.IsSpent(thash)
+
+	if alreadyMarked {
+		state, stateMsg := deps.Verifier.CheckState(tokenData)
+
+		switch state {
+		case cashu.StateSpent:
+			if rec, found := deps.Sessions.Get(sessionID); found && deps.Sessions.IsActive(rec) {
+				remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
+				return AuthResult{
+					Accept:         true,
+					ReplyMessage:   fmt.Sprintf("Session resumed: %dm remaining (delegated)", int(remaining.Minutes())),
+					SessionTimeout: max(1, int(remaining.Seconds())),
+					AcctInterval:   60,
+					Class:          rec.Class,
+					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (delegated, spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
+				}
+			}
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token already spent",
+				LogMessage:   fmt.Sprintf("Reject: token %s spent at mint, no active session for %s (delegated)", thash[:16], sessionID),
+			}
+
+		case cashu.StatePending:
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token is being processed, please try again in a few seconds",
+				LogMessage:   fmt.Sprintf("Reject: token %s pending at mint (delegated)", thash[:16]),
+			}
+
+		case cashu.StateUnspent:
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token already used",
+				LogMessage:   fmt.Sprintf("Reject: token %s in spent-hashes but UNSPENT at mint (delegated)", thash[:16]),
+			}
+
+		default:
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: fmt.Sprintf("Rejected: cannot verify token state — %s", stateMsg),
+				LogMessage:   fmt.Sprintf("Reject: cannot determine token state (delegated, %s): %s", thash[:16], stateMsg),
+			}
+		}
+	}
+
+	if !alreadyMarked {
+		if deps.Replay.CheckAndMark(thash) {
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token already used",
+				LogMessage:   fmt.Sprintf("Reject: cashu token race (delegated, hash=%s, source=%s)", thash[:16], cred.Source),
+			}
+		}
+	}
+
+	result, err := deps.Bootstrapper.Bootstrap(cred.Value, sessionID)
+	if err != nil {
+		return AuthResult{
+			Accept:       false,
+			ReplyMessage: "Rejected: delegated session failed",
+			LogMessage:   fmt.Sprintf("Reject: delegated bootstrap failed (%s): %v", cred.Source, err),
+		}
+	}
+
+	seconds := int(result.AllotmentMs / 1000)
+	minutes := seconds / 60
+
+	if seconds <= 0 {
+		return AuthResult{
+			Accept:       false,
+			ReplyMessage: "Rejected: zero allotment from server",
+			LogMessage:   fmt.Sprintf("Reject: delegated bootstrap returned zero allotment for session=%s", sessionID),
+		}
+	}
+
+	classStr := emitClassForTest(deps.OperatorID, sessionID, thash[:16], deps.HMACKey)
+
+	var displayAmount int
+	if result.AmountSat > 0 {
+		displayAmount = int(result.AmountSat)
+	} else {
+		displayAmount = minutes
+	}
+
+	rec := &SessionRecord{
+		MAC:      sessionID,
+		Token:    thash,
+		Guest:    "radius-delegated-" + thash[:8],
+		Mint:     "delegated",
+		Amount:   displayAmount,
+		Started:  time.Now(),
+		Duration: seconds,
+		Source:   cred.Source,
+		PayType:  radiusauth.PaymentCashu,
+		Class:    classStr,
+	}
+	deps.Sessions.Save(rec)
+
+	var replyMsg string
+	if result.AmountSat > 0 && result.EffectiveRateSecPerSat > 0 {
+		replyMsg = fmt.Sprintf("Valid Cashu token: %d sat = %dm access (%ds/sat)",
+			result.AmountSat, minutes, result.EffectiveRateSecPerSat)
+	} else {
+		replyMsg = fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes)
+	}
+
 	return AuthResult{
-		Accept:       false,
-		ReplyMessage: "Rejected: delegated mode requires sessiond client (not available in processAuth)",
-		LogMessage:   "Reject: delegated mode not supported in processAuth — use handleCashuDelegated in main.go",
+		Accept:         true,
+		ReplyMessage:   replyMsg,
+		SessionTimeout: seconds,
+		AcctInterval:   60,
+		Class:          classStr,
+		LogMessage: fmt.Sprintf("Accept: session=%s type=delegated duration=%ds sats=%d source=%s",
+			sessionID, seconds, result.AmountSat, cred.Source),
 	}
 }
 

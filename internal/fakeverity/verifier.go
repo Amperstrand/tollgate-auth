@@ -4,6 +4,7 @@ package fakeverity
 
 import (
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/sessiond"
 )
 
 type Verifier interface {
@@ -16,6 +17,16 @@ type Verifier interface {
 type ReplayGuard interface {
 	CheckAndMark(thash string) bool
 	IsSpent(thash string) bool
+}
+
+type BootstrapResult struct {
+	AllotmentMs            uint64
+	AmountSat              uint64
+	EffectiveRateSecPerSat uint64
+}
+
+type Bootstrapper interface {
+	Bootstrap(token string, sessionID string) (*BootstrapResult, error)
 }
 
 // --- Fake implementations ---
@@ -113,6 +124,29 @@ func (g *FakeReplayGuard) IsSpent(thash string) bool {
 	return g.Spent[thash]
 }
 
+// FakeBootstrapper is a test double for Bootstrapper with configurable behavior
+// and call tracking for assertions.
+type FakeBootstrapper struct {
+	Result      *BootstrapResult
+	Err         error
+	Called      int
+	LastToken   string
+	LastSession string
+}
+
+func NewFakeBootstrapper() *FakeBootstrapper {
+	return &FakeBootstrapper{
+		Result: &BootstrapResult{AllotmentMs: 480000, AmountSat: 8, EffectiveRateSecPerSat: 60},
+	}
+}
+
+func (f *FakeBootstrapper) Bootstrap(token string, sessionID string) (*BootstrapResult, error) {
+	f.Called++
+	f.LastToken = token
+	f.LastSession = sessionID
+	return f.Result, f.Err
+}
+
 // --- Production implementations ---
 
 // ProductionVerifier wraps the real Cashu verification and redemption calls.
@@ -143,4 +177,25 @@ func (p *ProductionVerifier) Redeem(tokenStr string) error {
 
 func (p *ProductionVerifier) CheckState(tokenData *cashu.TokenData) (cashu.ProofState, string) {
 	return cashu.CheckTokenState(tokenData)
+}
+
+type ProductionBootstrapper struct {
+	BaseURL string
+}
+
+func NewProductionBootstrapper(baseURL string) *ProductionBootstrapper {
+	return &ProductionBootstrapper{BaseURL: baseURL}
+}
+
+func (p *ProductionBootstrapper) Bootstrap(token string, sessionID string) (*BootstrapResult, error) {
+	client := sessiond.NewClient(p.BaseURL)
+	state, err := client.Bootstrap(token, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &BootstrapResult{
+		AllotmentMs:            state.AllotmentMs,
+		AmountSat:              state.AmountSat,
+		EffectiveRateSecPerSat: state.EffectiveRateSecPerSat,
+	}, nil
 }

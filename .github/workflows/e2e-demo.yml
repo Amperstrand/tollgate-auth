@@ -379,7 +379,6 @@ jobs:
 
       # ─── Test 16: Delegated Cashu token → Accept with delegated mode ───
       - name: Test 16 — Delegated Cashu token validation
-        continue-on-error: true
         run: |
           TOKEN=$(node scripts/mint-testnut.js --no-dleq 4 2>/tmp/mint14.log)
           if [ -z "$TOKEN" ]; then
@@ -389,7 +388,7 @@ jobs:
           fi
           echo "Minted 4-sat token (${#TOKEN} bytes)"
 
-          echo "User-Name = \"ci-cashu-user\"
+          echo "User-Name = \"ci-delegated-16\"
           User-Password = \"$TOKEN\"
           NAS-IP-Address = 10.0.0.1
           Calling-Station-Id = \"aa:bb:16:$RUNID\"
@@ -398,8 +397,8 @@ jobs:
           # Verify Access-Accept
           grep -q "Access-Accept" /tmp/test16.log || { echo "FAIL: Expected Access-Accept"; cat /tmp/test16.log; exit 1; }
 
-          # Verify Reply-Message contains "delegated" (case insensitive)
-          grep -qi "delegated" /tmp/test16.log || { echo "FAIL: Reply-Message should contain 'delegated'"; cat /tmp/test16.log; exit 1; }
+          # Verify Reply-Message shows delegated mode (enriched "s/sat" or fallback "delegated")
+          grep -q "s/sat" /tmp/test16.log || grep -qi "delegated" /tmp/test16.log || { echo "FAIL: Reply-Message should show delegated mode (enriched or fallback)"; cat /tmp/test16.log; exit 1; }
 
           # Verify Session-Timeout is present and > 0
           ST=$(grep "Session-Timeout" /tmp/test16.log | grep -oE '[0-9]+' | head -1)

@@ -35,7 +35,8 @@ server inner-tunnel {
 
         # Payment credential detection: check username, password, and
         # cleartext-password for Cashu tokens or LNURL-withdraw codes.
-        # If found, call the exec module to validate payment.
+        # Route to delegated module for ci-delegated-* usernames,
+        # local module for everything else.
         if ((User-Name =~ /^cashu[AB]/) || \
             (User-Password =~ /^cashu[AB]/) || \
             (Cleartext-Password =~ /^cashu[AB]/) || \
@@ -45,7 +46,14 @@ server inner-tunnel {
             (User-Password =~ /^LNURLW/) || \
             (Cleartext-Password =~ /^lnurlw/) || \
             (Cleartext-Password =~ /^LNURLW/)) {
-            cashu-auth
+
+            if (User-Name =~ /^ci-delegated/) {
+                cashu-auth-delegated
+            }
+            else {
+                cashu-auth
+            }
+
             if (ok) {
                 # CRITICAL: Use Auth-Type := Accept, NOT
                 # Response-Packet-Type := Access-Accept. The latter

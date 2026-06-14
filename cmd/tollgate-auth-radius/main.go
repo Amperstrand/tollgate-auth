@@ -562,6 +562,54 @@ func buildDelegatedReplyMessage(state *sessiond.SessionState, minutes int) strin
 }
 
 func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, operatorID string) {
+	thash := cashu.TokenHash(cred.Value)
+	replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
+	os.MkdirAll(BaseDir, 0755)
+
+	alreadyMarked := replay.IsSpent(thash)
+
+	if alreadyMarked {
+		tokenData, err := cashu.DecodeToken(cred.Value)
+		if err == nil {
+			proofState, stateMsg := cashu.CheckTokenState(tokenData)
+			switch proofState {
+			case cashu.StateSpent:
+				if rec, exists := sessions.Get(sessionID); exists && sessions.IsActive(rec) {
+					remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
+					remainingSec := max(1, int(remaining.Seconds()))
+					log.Printf("Reconnect: session=%s recovered (delegated, spent token, %ds remaining)", sessionID, remainingSec)
+					replyMessage("Session resumed: %dm remaining (delegated)", remainingSec/60)
+					radiusAttr("Session-Timeout", remainingSec)
+					radiusAttr("Acct-Interim-Interval", 60)
+					os.Exit(0)
+				}
+				log.Printf("Reject: token %s spent at mint, no session for %s (delegated)", thash[:16], sessionID)
+				replyMessage("Rejected: token already spent")
+				os.Exit(1)
+			case cashu.StatePending:
+				log.Printf("Reject: token %s pending at mint (delegated)", thash[:16])
+				replyMessage("Rejected: token is being processed, please try again in a few seconds")
+				os.Exit(1)
+			case cashu.StateUnspent:
+				log.Printf("Reject: token %s in spent-hashes but UNSPENT at mint (delegated)", thash[:16])
+				replyMessage("Rejected: token already used")
+				os.Exit(1)
+			default:
+				log.Printf("Reject: cannot determine token state (delegated, %s): %s", thash[:16], stateMsg)
+				replyMessage("Rejected: cannot verify token state — %s", stateMsg)
+				os.Exit(1)
+			}
+		}
+	}
+
+	if !alreadyMarked {
+		if replay.CheckAndMark(thash) {
+			log.Printf("Reject: cashu token race (delegated, hash=%s)", thash[:16])
+			replyMessage("Rejected: token already used")
+			os.Exit(1)
+		}
+	}
+
 	client := sessiond.NewClient(sessiondURL)
 	state, err := client.Bootstrap(cred.Value, sessionID)
 	if err != nil {
@@ -579,7 +627,6 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 		os.Exit(1)
 	}
 
-	// Top-up (RFC 5176 CoA): extend NAS Session-Timeout without disconnect
 	if existingRec, hasExisting := sessions.Get(sessionID); hasExisting && sessions.IsActive(existingRec) {
 		if nasIP := config.GetEnv("TOLLGATE_NAS_IP", ""); nasIP != "" {
 			log.Printf("CoA: top-up detected for session=%s, sending CoA to nas=%s", sessionID, nasIP)
@@ -587,7 +634,6 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 		}
 	}
 
-	thash := cashu.TokenHash(cred.Value)
 	classStr := emitClass(operatorID, sessionID, thash[:16], opResolver.HMACKey())
 
 	// Use enriched fields when available, fall back gracefully for legacy servers

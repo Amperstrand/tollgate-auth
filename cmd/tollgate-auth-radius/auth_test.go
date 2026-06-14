@@ -35,6 +35,28 @@ func setupTestDeps(t *testing.T) (*Dependencies, string) {
 	return deps, tmpDir
 }
 
+func setupTestDepsDelegated(t *testing.T) (*Dependencies, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	sessions := &SessionStore{Dir: filepath.Join(tmpDir, "sessions")}
+	os.MkdirAll(sessions.Dir, 0700)
+
+	fv := fakeverity.NewFakeVerifier()
+	rg := fakeverity.NewFakeReplayGuard()
+	bs := fakeverity.NewFakeBootstrapper()
+
+	deps := &Dependencies{
+		Sessions:     sessions,
+		Replay:       rg,
+		Verifier:     fv,
+		Bootstrapper: bs,
+		OperatorID:   "test-operator",
+		HMACKey:      []byte("test-hmac-key-16b"),
+		AuthMode:     "delegated",
+	}
+	return deps, tmpDir
+}
+
 func TestProcessAuth_CashuTokenInUsername_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(8)
@@ -454,15 +476,14 @@ func TestProcessAuth_DelegatedMode_NoCredential_Reject(t *testing.T) {
 	}
 }
 
-func TestProcessAuth_DelegatedMode_CashuToken_Rejects(t *testing.T) {
-	deps, _ := setupTestDeps(t)
-	deps.AuthMode = "delegated"
+func TestProcessAuth_DelegatedMode_CashuToken_Accepts(t *testing.T) {
+	deps, _ := setupTestDepsDelegated(t)
 	token := testtoken.V4Token(8)
 
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
-	if result.Accept {
-		t.Fatal("delegated cashu should be rejected by processAuth (needs sessiond)")
+	if !result.Accept {
+		t.Fatalf("delegated cashu should be accepted: %s", result.ReplyMessage)
 	}
 }
 
@@ -616,5 +637,114 @@ func TestProcessAuth_SpentHashes_UnspentAtMint_Reject(t *testing.T) {
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	if fv.RedeemCalled != 0 {
 		t.Errorf("Redeem should not be called on replay, got %d calls", fv.RedeemCalled)
+	}
+}
+
+func TestProcessAuth_DelegatedCashu_Accept(t *testing.T) {
+	deps, _ := setupTestDepsDelegated(t)
+	token := testtoken.V4Token(8)
+
+	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+
+	if !result.Accept {
+		t.Fatalf("expected Accept: %s", result.ReplyMessage)
+	}
+	bs := deps.Bootstrapper.(*fakeverity.FakeBootstrapper)
+	if bs.Called != 1 {
+		t.Errorf("Bootstrap should be called once, got %d", bs.Called)
+	}
+	if result.SessionTimeout != 480 {
+		t.Errorf("SessionTimeout = %d, want 480", result.SessionTimeout)
+	}
+	if !strings.Contains(result.ReplyMessage, "Valid Cashu token") {
+		t.Errorf("ReplyMessage should contain 'Valid Cashu token': %q", result.ReplyMessage)
+	}
+}
+
+func TestProcessAuth_Delegated_SpentToken_ActiveSession_Reconnect(t *testing.T) {
+	deps, _ := setupTestDepsDelegated(t)
+	mac := "aa:bb:cc:dd:ee:ff"
+	token := testtoken.V4Token(8)
+
+	thash := cashu.TokenHash(token)
+	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
+
+	rec := &SessionRecord{
+		MAC:      mac,
+		Amount:   8,
+		Started:  time.Now().Add(-2 * time.Minute),
+		Duration: 8 * 60,
+		PayType:  radiusauth.PaymentCashu,
+		Class:    "test-class",
+	}
+	deps.Sessions.Save(rec)
+
+	result := processAuth(deps, token, mac, "", "")
+
+	if !result.Accept {
+		t.Fatalf("expected Accept for spent token with active session: %s", result.ReplyMessage)
+	}
+	if !strings.Contains(result.ReplyMessage, "resumed") {
+		t.Errorf("ReplyMessage should contain 'resumed': %q", result.ReplyMessage)
+	}
+	if result.SessionTimeout < 1 {
+		t.Errorf("SessionTimeout should be >= 1, got %d", result.SessionTimeout)
+	}
+	bs := deps.Bootstrapper.(*fakeverity.FakeBootstrapper)
+	if bs.Called != 0 {
+		t.Errorf("Bootstrap should not be called on reconnect, got %d", bs.Called)
+	}
+}
+
+func TestProcessAuth_Delegated_SpentToken_Pending_Reject(t *testing.T) {
+	deps, _ := setupTestDepsDelegated(t)
+	token := testtoken.V4Token(8)
+
+	thash := cashu.TokenHash(token)
+	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StatePending
+
+	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+
+	if result.Accept {
+		t.Fatal("expected Reject for PENDING token")
+	}
+	if !strings.Contains(result.ReplyMessage, "processed") {
+		t.Errorf("ReplyMessage should mention processing: %q", result.ReplyMessage)
+	}
+}
+
+func TestProcessAuth_Delegated_SpentHashes_UnspentAtMint_Reject(t *testing.T) {
+	deps, _ := setupTestDepsDelegated(t)
+	token := testtoken.V4Token(8)
+
+	thash := cashu.TokenHash(token)
+	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateUnspent
+
+	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+
+	if result.Accept {
+		t.Fatal("expected Reject when token in spent-hashes (replay protection)")
+	}
+	if !strings.Contains(result.ReplyMessage, "already used") {
+		t.Errorf("ReplyMessage should say 'already used': %q", result.ReplyMessage)
+	}
+}
+
+func TestProcessAuth_Delegated_BootstrapError_Reject(t *testing.T) {
+	deps, _ := setupTestDepsDelegated(t)
+	token := testtoken.V4Token(8)
+
+	deps.Bootstrapper.(*fakeverity.FakeBootstrapper).Err = errors.New("server unreachable")
+
+	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+
+	if result.Accept {
+		t.Fatal("expected Reject on bootstrap error")
+	}
+	if !strings.Contains(result.ReplyMessage, "delegated session failed") {
+		t.Errorf("ReplyMessage should mention delegated session failed: %q", result.ReplyMessage)
 	}
 }
