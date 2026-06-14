@@ -144,6 +144,35 @@ func (s *SessionStore) Remove(mac string) {
 	os.Remove(s.Path(mac))
 }
 
+// Cleanup removes expired session files. Called probabilistically to avoid
+// overhead on every exec invocation (~5% of requests trigger cleanup).
+func (s *SessionStore) Cleanup() {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(s.Dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var rec SessionRecord
+		if err := json.Unmarshal(data, &rec); err != nil {
+			os.Remove(path)
+			continue
+		}
+		deadline := rec.Started.Add(time.Duration(rec.Duration) * time.Second)
+		if now.After(deadline.Add(time.Hour)) {
+			os.Remove(path)
+		}
+	}
+}
+
 // replyMessage outputs a Reply-Message attribute to stdout.
 // FreeRADIUS exec module with output=reply parses stdout as RADIUS attribute pairs.
 // Format: Reply-Message = "value"
@@ -236,6 +265,10 @@ func main() {
 	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
 	os.MkdirAll(sessions.Dir, 0700)
 
+	if time.Now().UnixNano()%20 == 0 {
+		sessions.Cleanup()
+	}
+
 	replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
 	os.MkdirAll(BaseDir, 0755)
 
@@ -271,6 +304,10 @@ func handleDelegated(username, mac, password, clearTextPw string) {
 
 	sessions := &SessionStore{Dir: BaseDir + "/radius-sessions"}
 	os.MkdirAll(sessions.Dir, 0700)
+
+	if time.Now().UnixNano()%20 == 0 {
+		sessions.Cleanup()
+	}
 
 	clientIP := config.GetEnv("TOLLGATE_CLIENT_IP", "")
 	nasID := config.GetEnv("TOLLGATE_NAS_ID", "")

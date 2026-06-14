@@ -22,15 +22,45 @@ if ! go vet ./... 2>&1; then
 fi
 
 # ─── 3. Secret scan ──────────────────────────────────────────────
-# Quick check for real-looking secrets in staged Go files.
-# Allows test fixtures (test_, fake, dummy, example values under 12 chars).
-secrets=$(git diff --cached -- '*.go' ':!*_test.go' ':!internal/testtoken/' | grep -iE '^\+' \
+# Scan ALL staged files for hardcoded secrets (nsec, api keys, etc.)
+# Excludes test files, docs, and known-safe patterns.
+
+# Pattern 1: Nostr nsec (bech32, always starts with nsec1)
+nsec_hits=$(git diff --cached --name-only --diff-filter=ACM | xargs grep -l 'nsec1' 2>/dev/null \
+    | xargs grep -noE 'nsec1[0-9a-z]{20,}' 2>/dev/null \
+    | grep -viE '(test_|fake|dummy|example|placeholder|your_|REPLACE|CHANGE|ROTATE|NEW_NSEC|<nsec)' \
+    2>/dev/null || true)
+if [ -n "$nsec_hits" ]; then
+    echo "FAIL: Hardcoded Nostr nsec detected in staged files:"
+    echo "$nsec_hits" | sed 's/^/  /'
+    echo ""
+    echo "Secrets must go in /etc/tollgate/secrets.env on the server."
+    echo "To bypass: git commit --no-verify (only if this is a test fixture)"
+    exit 1
+fi
+
+# Pattern 2: Generic secrets in non-Go files (configs, YAML, Makefile)
+config_secrets=$(git diff --cached --diff-filter=ACM -- '*.yml' '*.yaml' 'Makefile' '*.conf' '*.sh' '*.env' \
+    | grep -iE '^\+' \
+    | grep -ioE '(TOLLGATE_API_KEY|TOLLGATE_OPERATOR_NSEC)\s*[:=]\s*[A-Za-z0-9+/=_-]{16,}' \
+    | grep -viE '(test_|fake|dummy|example|placeholder|xxx|your_|REPLACE|CHANGE|secrets\.env|\$\$|$$)' \
+    2>/dev/null || true)
+if [ -n "$config_secrets" ]; then
+    echo "FAIL: Hardcoded secret in config/build file:"
+    echo "$config_secrets" | sed 's/^/  /'
+    echo "Move secrets to /etc/tollgate/secrets.env."
+    echo "To bypass: git commit --no-verify"
+    exit 1
+fi
+
+# Pattern 3: Original Go-file secret scan (kept for completeness)
+go_secrets=$(git diff --cached -- '*.go' ':!*_test.go' ':!internal/testtoken/' | grep -iE '^\+' \
     | grep -ioE '(api[_-]?key|secret|password|nsec|priv[_-]?key|token)\s*[:=]\s*["'"'"'][A-Za-z0-9+/=_-]{16,}' \
     | grep -viE '(test_|fake|dummy|example|placeholder|xxx|your_|REPLACE|CHANGE)' \
     2>/dev/null || true)
-if [ -n "$secrets" ]; then
-    echo "WARNING: Possible hardcoded secret detected:"
-    echo "$secrets" | sed 's/^/  /'
+if [ -n "$go_secrets" ]; then
+    echo "WARNING: Possible hardcoded secret in Go file:"
+    echo "$go_secrets" | sed 's/^/  /'
     echo "If this is a false positive (test fixture), add it to the exclusion list."
     echo "To bypass: git commit --no-verify"
     exit 1

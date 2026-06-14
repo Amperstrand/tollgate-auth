@@ -1,6 +1,6 @@
 .PHONY: build build-linux build-radius build-settle deploy deploy-radius deploy-all deploy-settle deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
-TOLLGATE_RS_DIR := /Users/macbook/src/tollgate-rs
+TOLLGATE_RS_DIR ?= $(HOME)/src/tollgate-rs
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
@@ -74,14 +74,27 @@ deploy-rs:
 deploy-radius-config:
 	scp -P $(REMOTE_PORT) config/freeradius/mods-available/cashu-exec $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/cashu-exec
 	scp -P $(REMOTE_PORT) config/freeradius/mods-available/cashu-exec-delegated $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/cashu-exec-delegated
+	scp -P $(REMOTE_PORT) config/freeradius/mods-available/tollgate-acct $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/tollgate-acct
 	scp -P $(REMOTE_PORT) config/freeradius/mods-available/eap $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-available/eap
 	scp -P $(REMOTE_PORT) config/freeradius/users $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/mods-config/files/authorize
 	scp -P $(REMOTE_PORT) config/freeradius/clients.conf $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/clients.conf
 	scp -P $(REMOTE_PORT) config/freeradius/sites-available/inner-tunnel $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/inner-tunnel
 	scp -P $(REMOTE_PORT) config/freeradius/sites-available/radsec $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/radsec
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
-		'ln -sf ../sites-available/radsec /etc/freeradius/3.0/sites-enabled/radsec 2>/dev/null; \
+		'mkdir -p /etc/tollgate && \
+		 if [ ! -f /etc/tollgate/secrets.env ]; then \
+		   echo "# /etc/tollgate/secrets.env - secrets NOT in version control" > /etc/tollgate/secrets.env && \
+		   echo "# Generate a new nsec: see docs/known-unknowns.md" >> /etc/tollgate/secrets.env && \
+		   echo "TOLLGATE_OPERATOR_NSEC=" >> /etc/tollgate/secrets.env && \
+		   echo "TOLLGATE_API_KEY=" >> /etc/tollgate/secrets.env && \
+		   chmod 600 /etc/tollgate/secrets.env && \
+		   echo "WARNING: Created /etc/tollgate/secrets.env with empty values." && \
+		   echo "         Edit it to set TOLLGATE_OPERATOR_NSEC and TOLLGATE_API_KEY."; \
+		 fi && \
+		 ln -sf ../sites-available/radsec /etc/freeradius/3.0/sites-enabled/radsec 2>/dev/null; \
+		 ln -sf ../mods-available/cashu-exec /etc/freeradius/3.0/mods-enabled/cashu-exec 2>/dev/null; \
 		 ln -sf ../mods-available/cashu-exec-delegated /etc/freeradius/3.0/mods-enabled/cashu-exec-delegated 2>/dev/null; \
+		 ln -sf ../mods-available/tollgate-acct /etc/freeradius/3.0/mods-enabled/tollgate-acct 2>/dev/null; \
 		 mkdir -p /etc/freeradius/3.0/certs/radsec && \
 		 CADDY_LE="/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/nodns.shop" && \
 		 cp $$CADDY_LE/nodns.shop.crt /etc/freeradius/3.0/certs/radsec/server.crt && \
@@ -113,7 +126,7 @@ deploy-faucet:
 	scp -P $(REMOTE_PORT) docs/index.html $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-faucet.html
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
 		'mkdir -p /var/www/tollgate && \
-		 cp /tmp/tollage-faucet.html /var/www/tollgate/index.html'
+		 cp /tmp/tollgate-faucet.html /var/www/tollgate/index.html'
 
 test: ## Run all unit tests (safe, local, deterministic)
 	go test ./...

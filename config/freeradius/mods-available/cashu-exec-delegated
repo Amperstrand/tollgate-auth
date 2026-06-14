@@ -2,9 +2,12 @@
 # Delegated mode: forwards token to tollgate-rs (tollgate-net:2121) for redemption.
 # Routes here when User-Name starts with "ci-delegated" (see inner-tunnel routing).
 
+# Secrets (nsec, API key) are sourced from /etc/tollgate/secrets.env
+# which is NOT stored in version control. See Makefile deploy-radius-config.
+
 exec cashu-auth-delegated {
     wait = yes
-    program = "/bin/sh -c 'TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 TOLLGATE_API_KEY=73ecee3aa1ee08c6cf97c388f29081bc TOLLGATE_OPERATOR_NSEC=nsec1lmpkf3t9wdvjf0e9mrr84eh4gyauzu25tffmea3j7drqr7ue49vsxygdgn /usr/local/bin/tollgate-auth-radius \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\"'"
+    program = "/bin/sh -c '. /etc/tollgate/secrets.env && TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 /usr/local/bin/tollgate-auth-radius \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\"'"
     output_pairs = reply
     timeout = 15
 }

@@ -18,12 +18,11 @@
 #
 # Requires: TOLLGATE_AUTH_MODE=delegated and TOLLGATE_SESSIOND_URL set.
 
-# Uses /bin/sh wrapper to inject env vars (FreeRADIUS exec doesn't inherit
-# systemd EnvironmentFile). TOLLGATE_API_KEY is the session daemon write key.
+# Secrets (nsec, API key) sourced from /etc/tollgate/secrets.env (NOT in version control).
 
 exec tollgate-acct {
     wait = yes
-    program = "/bin/sh -c 'TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 TOLLGATE_API_KEY=CHANGE_ME /usr/local/bin/tollgate-auth-radius --accounting \"%{Acct-Status-Type}\" \"%{Acct-Session-Id}\" \"%{Calling-Station-Id}\" \"%{User-Name}\" \"%{Acct-Session-Time}\" \"%{Acct-Input-Octets}\" \"%{Acct-Output-Octets}\" \"%{Acct-Terminate-Cause}\" \"%{NAS-IP-Address}\"'"
+    program = "/bin/sh -c '. /etc/tollgate/secrets.env && TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 /usr/local/bin/tollgate-auth-radius --accounting \"%{Acct-Status-Type}\" \"%{Acct-Session-Id}\" \"%{Calling-Station-Id}\" \"%{User-Name}\" \"%{Acct-Session-Time}\" \"%{Acct-Input-Octets}\" \"%{Acct-Output-Octets}\" \"%{Acct-Terminate-Cause}\" \"%{NAS-IP-Address}\"'"
     output_pairs = reply
     timeout = 15
 }
