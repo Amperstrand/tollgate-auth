@@ -6,26 +6,16 @@ import (
 	"tollgate-auth/internal/cashu"
 )
 
-// Verifier abstracts Cashu token operations that require network or subprocess calls.
 type Verifier interface {
-	// Decode decodes a Cashu token string into TokenData.
-	// Delegates to cashu.DecodeToken (pure function, no network).
 	Decode(tokenStr string) (*cashu.TokenData, error)
-
-	// Verify checks token validity with the mint.
-	// Production: HTTP POST to /v1/checkstate. Fake: return configurable result.
 	Verify(tokenData *cashu.TokenData) (bool, string)
-
-	// Redeem redeems a token into the wallet.
-	// Production: calls cdk-cli subprocess. Fake: no-op or record call.
 	Redeem(tokenStr string) error
+	CheckState(tokenData *cashu.TokenData) (cashu.ProofState, string)
 }
 
-// ReplayGuard abstracts replay protection for payment credentials.
 type ReplayGuard interface {
-	// CheckAndMark atomically checks if a hash is spent and marks it if not.
-	// Returns true if the hash was already spent (caller should reject).
 	CheckAndMark(thash string) bool
+	IsSpent(thash string) bool
 }
 
 // --- Fake implementations ---
@@ -51,14 +41,18 @@ type FakeVerifier struct {
 	DecodeErr error
 	// DecodeResult overrides Decode to return this when non-nil and DecodeErr is nil.
 	DecodeResult *cashu.TokenData
+
+	// CheckStateResult controls what CheckState returns. Defaults to UNSPENT.
+	CheckStateResult cashu.ProofState
 }
 
 // NewFakeVerifier returns a FakeVerifier with sensible defaults:
 // Verify returns (true, "OK"), Redeem returns nil.
 func NewFakeVerifier() *FakeVerifier {
 	return &FakeVerifier{
-		VerifyResult: VerifyResult{OK: true, Msg: "OK"},
-		RedeemErr:    nil,
+		VerifyResult:     VerifyResult{OK: true, Msg: "OK"},
+		RedeemErr:        nil,
+		CheckStateResult: cashu.StateUnspent,
 	}
 }
 
@@ -88,6 +82,13 @@ func (f *FakeVerifier) Redeem(tokenStr string) error {
 	return f.RedeemErr
 }
 
+func (f *FakeVerifier) CheckState(tokenData *cashu.TokenData) (cashu.ProofState, string) {
+	if f.CheckStateResult == "" {
+		return cashu.StateUnspent, "OK"
+	}
+	return f.CheckStateResult, "configured"
+}
+
 // FakeReplayGuard is an in-memory ReplayGuard for testing.
 type FakeReplayGuard struct {
 	Spent map[string]bool
@@ -106,6 +107,10 @@ func (g *FakeReplayGuard) CheckAndMark(thash string) bool {
 	}
 	g.Spent[thash] = true
 	return false
+}
+
+func (g *FakeReplayGuard) IsSpent(thash string) bool {
+	return g.Spent[thash]
 }
 
 // --- Production implementations ---
@@ -134,4 +139,8 @@ func (p *ProductionVerifier) Verify(tokenData *cashu.TokenData) (bool, string) {
 // Redeem delegates to cashu.RedeemToken.
 func (p *ProductionVerifier) Redeem(tokenStr string) error {
 	return cashu.RedeemToken(tokenStr, p.WalletDir)
+}
+
+func (p *ProductionVerifier) CheckState(tokenData *cashu.TokenData) (cashu.ProofState, string) {
+	return cashu.CheckTokenState(tokenData)
 }

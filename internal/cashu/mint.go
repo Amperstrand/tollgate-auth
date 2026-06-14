@@ -12,19 +12,38 @@ import (
 	"time"
 )
 
-// VerifyWithMint checks that all proofs in the token are unspent.
-// For non-test mints, it skips verification (returns true).
-func VerifyWithMint(tokenData *TokenData) (bool, string) {
+// ProofState represents the NUT-07 state of a token's proofs at the mint.
+type ProofState string
+
+const (
+	StateUnspent ProofState = "UNSPENT"
+	StateSpent   ProofState = "SPENT"
+	StatePending ProofState = "PENDING"
+)
+
+// CheckTokenState queries the mint (NUT-07 /v1/checkstate) for the state of
+// all proofs in the token. Returns the aggregate state:
+//   - SPENT if any proof is SPENT
+//   - PENDING if any proof is PENDING (and none SPENT)
+//   - UNSPENT if all proofs are UNSPENT
+//
+// For non-test mints, returns UNSPENT without checking (matching legacy behavior).
+// On error (unreachable mint, parse failure), returns "" + error message.
+func CheckTokenState(tokenData *TokenData) (ProofState, string) {
 	mintURL := strings.TrimRight(tokenData.Mint, "/")
-	isTest := strings.Contains(strings.ToLower(mintURL), "test")
 
 	if !strings.HasPrefix(mintURL, "http") {
-		return false, "Invalid mint URL"
+		return "", "Invalid mint URL"
 	}
 
+	isTest := strings.Contains(strings.ToLower(mintURL), "test")
 	if !isTest {
 		log.Printf("Real-mint token (no enforcement): %s", mintURL)
-		return true, "OK"
+		return StateUnspent, "OK"
+	}
+
+	if !isSafeMintURL(mintURL) {
+		return "", "Mint URL rejected (SSRF protection)"
 	}
 
 	reqBody := CheckStateRequest{}
@@ -36,36 +55,51 @@ func VerifyWithMint(tokenData *TokenData) (bool, string) {
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return false, fmt.Sprintf("JSON error: %v", err)
-	}
-
-	if !isSafeMintURL(mintURL) {
-		return false, "Mint URL rejected (SSRF protection)"
+		return "", fmt.Sprintf("JSON error: %v", err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(mintURL+"/v1/checkstate", "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {
-		return false, fmt.Sprintf("Mint unreachable: %v", err)
+		return "", fmt.Sprintf("Mint unreachable: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return false, fmt.Sprintf("Mint error: HTTP %d", resp.StatusCode)
+		return "", fmt.Sprintf("Mint error: HTTP %d", resp.StatusCode)
 	}
 
 	var result CheckStateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Sprintf("Mint response parse error: %v", err)
+		return "", fmt.Sprintf("Mint response parse error: %v", err)
 	}
 
+	hasSpent := false
+	hasPending := false
 	for _, s := range result.States {
-		if s.State != "UNSPENT" {
-			return false, "Token already spent"
+		switch s.State {
+		case "SPENT":
+			hasSpent = true
+		case "PENDING":
+			hasPending = true
 		}
 	}
 
-	return true, "OK"
+	if hasSpent {
+		return StateSpent, "Token proofs are spent"
+	}
+	if hasPending {
+		return StatePending, "Token proofs are pending (swap in progress)"
+	}
+	return StateUnspent, "OK"
+}
+
+// VerifyWithMint checks that all proofs in the token are unspent.
+// Returns true only if all proofs are UNSPENT.
+// Deprecated: Use CheckTokenState for recovery-aware state machine logic.
+func VerifyWithMint(tokenData *TokenData) (bool, string) {
+	state, msg := CheckTokenState(tokenData)
+	return state == StateUnspent, msg
 }
 
 // isSafeMintURL blocks SSRF attempts by rejecting private/internal IP ranges.

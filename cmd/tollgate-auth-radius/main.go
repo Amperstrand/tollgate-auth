@@ -339,11 +339,61 @@ func handleCashu(cred radiusauth.PaymentCredential, sessionID string, sessions *
 		os.Exit(1)
 	}
 
-	// Replay check (atomic check-and-mark)
-	if replay.CheckAndMark(thash) {
-		log.Printf("Reject: cashu token already spent (hash=%s, source=%s)", thash[:16], cred.Source)
-		replyMessage("Rejected: token already used")
-		os.Exit(1)
+	// --- Idempotent redemption state machine ---
+	// Phase 1: Check if we've seen this token before
+	alreadyMarked := replay.IsSpent(thash)
+
+	if alreadyMarked {
+		state, stateMsg := cashu.CheckTokenState(tokenData)
+
+		switch state {
+		case cashu.StateSpent:
+			// Token IS spent at mint. Check for session recovery.
+			rec, exists := sessions.Get(sessionID)
+			if exists && sessions.IsActive(rec) {
+				remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
+				remainingSec := max(1, int(remaining.Seconds()))
+				log.Printf("Reconnect: session=%s recovered (spent token, active session, %ds remaining)",
+					sessionID, remainingSec)
+				replyMessage("Session resumed: %dm remaining", remainingSec/60)
+				radiusAttr("Session-Timeout", remainingSec)
+				radiusAttr("Acct-Interim-Interval", 60)
+				os.Exit(0)
+			}
+
+			// Token spent at mint, no active session for this MAC.
+			// Could be: spent elsewhere, or crash destroyed the session record.
+			// Fail safe — reject. User needs a new token.
+			log.Printf("Reject: token %s spent at mint, no active session for %s", thash[:16], sessionID)
+			replyMessage("Rejected: token already spent")
+			os.Exit(1)
+
+		case cashu.StatePending:
+			log.Printf("Reject: token %s pending at mint (hash=%s, source=%s)", thash[:16], thash[:16], cred.Source)
+			replyMessage("Rejected: token is being processed, please try again in a few seconds")
+			os.Exit(1)
+
+		case cashu.StateUnspent:
+			// Our spent-hashes has this token but the mint says UNSPENT.
+			// The previous redemption attempt failed (network error, crash before redeem).
+			// The token is still usable — proceed with normal flow without re-marking.
+			log.Printf("Info: token %s in spent-hashes but UNSPENT at mint — proceeding with redemption", thash[:16])
+
+		default:
+			// Mint unreachable or error — can't determine state. Fail safe.
+			log.Printf("Reject: cannot determine token state during recovery (%s): %s", thash[:16], stateMsg)
+			replyMessage("Rejected: cannot verify token state — %s", stateMsg)
+			os.Exit(1)
+		}
+	}
+
+	// Phase 2: First time seeing this token — mark atomically
+	if !alreadyMarked {
+		if replay.CheckAndMark(thash) {
+			log.Printf("Reject: cashu token race (hash=%s, source=%s)", thash[:16], cred.Source)
+			replyMessage("Rejected: token already used")
+			os.Exit(1)
+		}
 	}
 
 	// Mint allowlist: only accept test mints

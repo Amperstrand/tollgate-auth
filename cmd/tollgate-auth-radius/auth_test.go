@@ -198,13 +198,14 @@ func TestProcessAuth_ReplayedToken_Reject(t *testing.T) {
 
 	thash := cashu.TokenHash(token)
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
 
 	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
 	}
-	if !strings.Contains(result.ReplyMessage, "already used") {
+	if !strings.Contains(result.ReplyMessage, "already spent") {
 		t.Errorf("ReplyMessage = %q", result.ReplyMessage)
 	}
 }
@@ -543,5 +544,77 @@ func TestProcessAuth_RedemptionNotCalledOnVerifyFailure(t *testing.T) {
 	}
 	if fv.RedeemCalled != 0 {
 		t.Errorf("Redeem should not be called on verify failure, got %d calls", fv.RedeemCalled)
+	}
+}
+
+func TestProcessAuth_SpentToken_ActiveSession_Reconnect(t *testing.T) {
+	deps, _ := setupTestDeps(t)
+	mac := "aa:bb:cc:dd:ee:ff"
+	token := testtoken.V4Token(8)
+
+	thash := cashu.TokenHash(token)
+	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
+
+	rec := &SessionRecord{
+		MAC:      mac,
+		Amount:   8,
+		Started:  time.Now().Add(-2 * time.Minute),
+		Duration: 8 * 60,
+		PayType:  radiusauth.PaymentCashu,
+		Class:    "test-class",
+	}
+	deps.Sessions.Save(rec)
+
+	result := processAuth(deps, token, mac, "", "")
+
+	if !result.Accept {
+		t.Fatalf("expected Accept for spent token with active session: %s", result.ReplyMessage)
+	}
+	if !strings.Contains(result.ReplyMessage, "resumed") {
+		t.Errorf("ReplyMessage should contain 'resumed': %q", result.ReplyMessage)
+	}
+	if result.SessionTimeout < 1 {
+		t.Errorf("SessionTimeout should be >= 1, got %d", result.SessionTimeout)
+	}
+}
+
+func TestProcessAuth_SpentToken_Pending_Reject(t *testing.T) {
+	deps, _ := setupTestDeps(t)
+	token := testtoken.V4Token(8)
+
+	thash := cashu.TokenHash(token)
+	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StatePending
+
+	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+
+	if result.Accept {
+		t.Fatal("expected Reject for PENDING token")
+	}
+	if !strings.Contains(result.ReplyMessage, "processed") {
+		t.Errorf("ReplyMessage should mention processing: %q", result.ReplyMessage)
+	}
+}
+
+func TestProcessAuth_SpentHashes_UnspentAtMint_ProceedsWithRedemption(t *testing.T) {
+	deps, _ := setupTestDeps(t)
+	token := testtoken.V4Token(8)
+
+	thash := cashu.TokenHash(token)
+	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateUnspent
+
+	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+
+	if !result.Accept {
+		t.Fatalf("expected Accept when token UNSPENT at mint despite spent-hashes: %s", result.ReplyMessage)
+	}
+	if !strings.Contains(result.ReplyMessage, "Valid Cashu token") {
+		t.Errorf("ReplyMessage should show normal accept: %q", result.ReplyMessage)
+	}
+	fv := deps.Verifier.(*fakeverity.FakeVerifier)
+	if fv.RedeemCalled != 1 {
+		t.Errorf("Redeem should be called once, got %d", fv.RedeemCalled)
 	}
 }

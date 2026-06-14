@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/testtoken"
 )
@@ -68,12 +69,14 @@ func TestE2ECashuReplayRejection(t *testing.T) {
 		t.Fatalf("first call should Accept: %s", first.ReplyMessage)
 	}
 
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
+
 	second := processAuth(deps, token, mac2, "", "")
 	if second.Accept {
 		t.Fatal("second call with same token (different MAC) should Reject (replay)")
 	}
-	if !strings.Contains(second.ReplyMessage, "already used") {
-		t.Errorf("ReplyMessage should contain 'already used': %q", second.ReplyMessage)
+	if !strings.Contains(second.ReplyMessage, "already spent") {
+		t.Errorf("ReplyMessage should contain 'already spent': %q", second.ReplyMessage)
 	}
 }
 
@@ -189,6 +192,8 @@ func TestE2ESessionExpiredThenReauth(t *testing.T) {
 	if err := deps.Sessions.Save(rec); err != nil {
 		t.Fatalf("failed to expire session: %v", err)
 	}
+
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
 
 	replayResult := processAuth(deps, token1, mac2, "", "")
 	if replayResult.Accept {

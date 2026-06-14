@@ -135,11 +135,58 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 		}
 	}
 
-	if deps.Replay.CheckAndMark(thash) {
-		return AuthResult{
-			Accept:       false,
-			ReplyMessage: "Rejected: token already used",
-			LogMessage:   fmt.Sprintf("Reject: cashu token already spent (hash=%s, source=%s)", thash[:16], cred.Source),
+	// --- Idempotent redemption state machine ---
+	alreadyMarked := deps.Replay.IsSpent(thash)
+
+	if alreadyMarked {
+		state, stateMsg := deps.Verifier.CheckState(tokenData)
+
+		switch state {
+		case cashu.StateSpent:
+			if rec, found := deps.Sessions.Get(sessionID); found && deps.Sessions.IsActive(rec) {
+				remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
+				return AuthResult{
+					Accept:         true,
+					ReplyMessage:   fmt.Sprintf("Session resumed: %dm remaining", int(remaining.Minutes())),
+					SessionTimeout: max(1, int(remaining.Seconds())),
+					AcctInterval:   60,
+					Class:          rec.Class,
+					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
+				}
+			}
+
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token already spent",
+				LogMessage:   fmt.Sprintf("Reject: token %s spent at mint, no active session for %s", thash[:16], sessionID),
+			}
+
+		case cashu.StatePending:
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token is being processed, please try again in a few seconds",
+				LogMessage:   fmt.Sprintf("Reject: token %s pending at mint (hash=%s)", thash[:16], thash[:16]),
+			}
+
+		case cashu.StateUnspent:
+			// Token in spent-hashes but mint says UNSPENT — proceed with normal flow
+
+		default:
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: fmt.Sprintf("Rejected: cannot verify token state — %s", stateMsg),
+				LogMessage:   fmt.Sprintf("Reject: cannot determine token state during recovery (%s): %s", thash[:16], stateMsg),
+			}
+		}
+	}
+
+	if !alreadyMarked {
+		if deps.Replay.CheckAndMark(thash) {
+			return AuthResult{
+				Accept:       false,
+				ReplyMessage: "Rejected: token already used",
+				LogMessage:   fmt.Sprintf("Reject: cashu token race (hash=%s, source=%s)", thash[:16], cred.Source),
+			}
 		}
 	}
 
