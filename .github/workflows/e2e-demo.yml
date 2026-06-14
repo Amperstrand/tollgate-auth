@@ -288,8 +288,8 @@ jobs:
           echo "$CERT_TEXT" | grep -q "DNS:nodns.shop" \
             || { echo "FAIL: SAN does not include nodns.shop"; exit 1; }
 
-          # Check TLS 1.2 or 1.3
-          PROTO=$(echo "$CERT_INFO" | grep "Protocol  :" | awk '{print $NF}')
+          # Check TLS 1.2 or 1.3 (handle both OpenSSL 1.x "Protocol  :" and 3.x formats)
+          PROTO=$(echo "$CERT_INFO" | grep -oiE "TLSv[0-9.]+" | head -1)
           echo "TLS Protocol: $PROTO"
           if [ "$PROTO" != "TLSv1.2" ] && [ "$PROTO" != "TLSv1.3" ]; then
             echo "FAIL: Expected TLSv1.2 or TLSv1.3, got $PROTO"
@@ -297,7 +297,7 @@ jobs:
           fi
 
           # Check cipher is strong (AES-GCM or CHACHA)
-          CIPHER=$(echo "$CERT_INFO" | grep "Cipher    :" | awk '{print $NF}')
+          CIPHER=$(echo "$CERT_INFO" | grep -oiE "TLS_[A-Z_0-9]+" | head -1)
           echo "Cipher: $CIPHER"
           echo "$CIPHER" | grep -qiE "GCM|CHACHA|AES" \
             || { echo "FAIL: Weak cipher: $CIPHER"; exit 1; }
