@@ -22,3 +22,13 @@ package-lock.json
 .vscode/
 *.swp
 *.swo
+
+# Screenshots and images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.heic
