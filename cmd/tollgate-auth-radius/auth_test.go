@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"tollgate-auth/internal/auth"
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/radiusauth"
@@ -61,7 +62,7 @@ func TestProcessAuth_CashuTokenInUsername_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -87,7 +88,7 @@ func TestProcessAuth_CashuTokenInPassword_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(16)
 
-	result := processAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", token, "")
+	result := auth.ProcessAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", token, "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -101,7 +102,7 @@ func TestProcessAuth_CashuTokenInCleartextPassword_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(4)
 
-	result := processAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", "", token)
+	result := auth.ProcessAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", "", token)
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -114,7 +115,7 @@ func TestProcessAuth_CashuTokenInCleartextPassword_Accept(t *testing.T) {
 func TestProcessAuth_LNURLwInUsername_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 
-	result := processAuth(deps, "lnurlwdp68gup6jhjumue2nn29", "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, "lnurlwdp68gup6jhjumue2nn29", "aa:bb:cc:dd:ee:ff", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -130,7 +131,7 @@ func TestProcessAuth_LNURLwInUsername_Accept(t *testing.T) {
 func TestProcessAuth_LNURLwInPassword_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 
-	result := processAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", "lnurlwdp68gup6jhjumue2nn29", "")
+	result := auth.ProcessAuth(deps, "user1", "aa:bb:cc:dd:ee:ff", "lnurlwdp68gup6jhjumue2nn29", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -144,7 +145,7 @@ func TestProcessAuth_SplitToken_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	splitPW, splitUN := testtoken.V4TokenDLEQSplit()
 
-	result := processAuth(deps, splitUN, "aa:bb:cc:dd:ee:ff", splitPW, "")
+	result := auth.ProcessAuth(deps, splitUN, "aa:bb:cc:dd:ee:ff", splitPW, "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -157,7 +158,7 @@ func TestProcessAuth_SplitToken_Accept(t *testing.T) {
 func TestProcessAuth_NoPaymentCredential_Reject(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 
-	result := processAuth(deps, "alice", "aa:bb:cc:dd:ee:ff", "password123", "")
+	result := auth.ProcessAuth(deps, "alice", "aa:bb:cc:dd:ee:ff", "password123", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -171,7 +172,7 @@ func TestProcessAuth_InvalidMAC_Reject(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, "../etc/passwd", "", "")
+	result := auth.ProcessAuth(deps, token, "../etc/passwd", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -186,7 +187,7 @@ func TestProcessAuth_TokenDecodeFailure_Reject(t *testing.T) {
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.DecodeErr = errors.New("decode failed")
 
-	result := processAuth(deps, "cashuBinvalid", "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, "cashuBinvalid", "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -204,7 +205,7 @@ func TestProcessAuth_ZeroAmountToken_Reject(t *testing.T) {
 		Amount: 0,
 	}
 
-	result := processAuth(deps, "cashuBfake", "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, "cashuBfake", "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -222,7 +223,7 @@ func TestProcessAuth_ReplayedToken_Reject(t *testing.T) {
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -240,7 +241,7 @@ func TestProcessAuth_NonTestMint_Reject(t *testing.T) {
 		Amount: 8,
 	}
 
-	result := processAuth(deps, "cashuBfake", "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, "cashuBfake", "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -256,7 +257,7 @@ func TestProcessAuth_MintVerificationFails_Reject(t *testing.T) {
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "Token already spent"}
 
 	token := testtoken.V4Token(8)
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -272,7 +273,7 @@ func TestProcessAuth_RedeemFails_Reject(t *testing.T) {
 	fv.RedeemErr = errors.New("cdk-cli crashed")
 
 	token := testtoken.V4Token(8)
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject")
@@ -296,7 +297,7 @@ func TestProcessAuth_Reconnection_ActiveSession_Accept(t *testing.T) {
 	}
 	deps.Sessions.Save(rec)
 
-	result := processAuth(deps, "anything", mac, "", "")
+	result := auth.ProcessAuth(deps, "anything", mac, "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept for reconnection: %s", result.ReplyMessage)
@@ -326,7 +327,7 @@ func TestProcessAuth_Reconnection_ExpiredSession_FullAuth(t *testing.T) {
 	}
 	deps.Sessions.Save(rec)
 
-	result := processAuth(deps, token, mac, "", "")
+	result := auth.ProcessAuth(deps, token, mac, "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -350,7 +351,7 @@ func TestProcessAuth_Reconnection_NewToken_Topup(t *testing.T) {
 	}
 	deps.Sessions.Save(rec)
 
-	result := processAuth(deps, token, mac, "", "")
+	result := auth.ProcessAuth(deps, token, mac, "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -364,7 +365,7 @@ func TestProcessAuth_EmptyMAC_UsernameSession(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, "", "", "")
+	result := auth.ProcessAuth(deps, token, "", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -374,7 +375,7 @@ func TestProcessAuth_EmptyMAC_UsernameSession(t *testing.T) {
 func TestProcessAuth_UppercaseLNURLW_Accept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 
-	result := processAuth(deps, "LNURLWDP68GUP6JHJUMUE2NN29", "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, "LNURLWDP68GUP6JHJUMUE2NN29", "aa:bb:cc:dd:ee:ff", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -391,7 +392,7 @@ func TestProcessAuth_LNURLwReplay_Reject(t *testing.T) {
 	thash := cashu.TokenHash(code)
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
 
-	result := processAuth(deps, code, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, code, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject for replayed LNURLw")
@@ -406,7 +407,7 @@ func TestProcessAuth_SessionSavedOnAccept(t *testing.T) {
 	mac := "aa:bb:cc:dd:ee:ff"
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, mac, "", "")
+	result := auth.ProcessAuth(deps, token, mac, "", "")
 	if !result.Accept {
 		t.Fatal("expected Accept")
 	}
@@ -431,7 +432,7 @@ func TestProcessAuth_LNURLwSessionSavedOnAccept(t *testing.T) {
 	mac := "aa:bb:cc:dd:ee:ff"
 	code := "lnurlwdp68gup6jhjumue2nn29"
 
-	result := processAuth(deps, code, mac, "", "")
+	result := auth.ProcessAuth(deps, code, mac, "", "")
 	if !result.Accept {
 		t.Fatal("expected Accept")
 	}
@@ -452,7 +453,7 @@ func TestProcessAuth_ClassAttribute_PresentOnAccept(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if !result.Accept {
 		t.Fatal("expected Accept")
@@ -469,7 +470,7 @@ func TestProcessAuth_DelegatedMode_NoCredential_Reject(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	deps.AuthMode = "delegated"
 
-	result := processAuth(deps, "alice", "aa:bb:cc:dd:ee:ff", "password", "")
+	result := auth.ProcessAuth(deps, "alice", "aa:bb:cc:dd:ee:ff", "password", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject in delegated mode with no credential")
@@ -480,7 +481,7 @@ func TestProcessAuth_DelegatedMode_CashuToken_Accepts(t *testing.T) {
 	deps, _ := setupTestDepsDelegated(t)
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if !result.Accept {
 		t.Fatalf("delegated cashu should be accepted: %s", result.ReplyMessage)
@@ -504,7 +505,7 @@ func TestProcessAuth_MultipleAmounts(t *testing.T) {
 			deps, _ := setupTestDeps(t)
 			token := testtoken.V4Token(tc.amount)
 
-			result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+			result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 			if !result.Accept {
 				t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -529,7 +530,7 @@ func TestProcessAuth_MixedCaseLNURLWPrefix(t *testing.T) {
 	for i, code := range tests {
 		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
 			deps, _ := setupTestDeps(t)
-			result := processAuth(deps, code, "aa:bb:cc:dd:ee:ff", "", "")
+			result := auth.ProcessAuth(deps, code, "aa:bb:cc:dd:ee:ff", "", "")
 			if !result.Accept {
 				t.Fatalf("expected Accept for %q: %s", code, result.ReplyMessage)
 			}
@@ -542,7 +543,7 @@ func TestProcessAuth_VerifyNotCalledOnDecodeFailure(t *testing.T) {
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.DecodeErr = errors.New("bad token")
 
-	processAuth(deps, "cashuBgarbage", "aa:bb:cc:dd:ee:ff", "", "")
+	auth.ProcessAuth(deps, "cashuBgarbage", "aa:bb:cc:dd:ee:ff", "", "")
 
 	if fv.VerifyCalled != 0 {
 		t.Errorf("Verify should not be called on decode failure, got %d calls", fv.VerifyCalled)
@@ -558,7 +559,7 @@ func TestProcessAuth_RedemptionNotCalledOnVerifyFailure(t *testing.T) {
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "spent"}
 
 	token := testtoken.V4Token(8)
-	processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if fv.VerifyCalled != 1 {
 		t.Errorf("Verify should be called once, got %d", fv.VerifyCalled)
@@ -587,7 +588,7 @@ func TestProcessAuth_SpentToken_ActiveSession_Reconnect(t *testing.T) {
 	}
 	deps.Sessions.Save(rec)
 
-	result := processAuth(deps, token, mac, "", "")
+	result := auth.ProcessAuth(deps, token, mac, "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept for spent token with active session: %s", result.ReplyMessage)
@@ -608,7 +609,7 @@ func TestProcessAuth_SpentToken_Pending_Reject(t *testing.T) {
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StatePending
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject for PENDING token")
@@ -626,7 +627,7 @@ func TestProcessAuth_SpentHashes_UnspentAtMint_Reject(t *testing.T) {
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateUnspent
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject when token in spent-hashes (replay protection)")
@@ -644,7 +645,7 @@ func TestProcessAuth_DelegatedCashu_Accept(t *testing.T) {
 	deps, _ := setupTestDepsDelegated(t)
 	token := testtoken.V4Token(8)
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -680,7 +681,7 @@ func TestProcessAuth_Delegated_SpentToken_ActiveSession_Reconnect(t *testing.T) 
 	}
 	deps.Sessions.Save(rec)
 
-	result := processAuth(deps, token, mac, "", "")
+	result := auth.ProcessAuth(deps, token, mac, "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept for spent token with active session: %s", result.ReplyMessage)
@@ -705,7 +706,7 @@ func TestProcessAuth_Delegated_SpentToken_Pending_Reject(t *testing.T) {
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StatePending
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject for PENDING token")
@@ -723,7 +724,7 @@ func TestProcessAuth_Delegated_SpentHashes_UnspentAtMint_Reject(t *testing.T) {
 	deps.Replay.(*fakeverity.FakeReplayGuard).Spent[thash] = true
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateUnspent
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject when token in spent-hashes (replay protection)")
@@ -739,7 +740,7 @@ func TestProcessAuth_Delegated_BootstrapError_Reject(t *testing.T) {
 
 	deps.Bootstrapper.(*fakeverity.FakeBootstrapper).Err = errors.New("server unreachable")
 
-	result := processAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
 
 	if result.Accept {
 		t.Fatal("expected Reject on bootstrap error")

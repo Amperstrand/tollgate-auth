@@ -9,6 +9,8 @@ cashu-tollgate
 /tollgate-auth-radius.linux-*
 /tollgate-auth-ssh
 /tollgate-auth-ssh.linux-*
+/tollgate-daemon
+/tollgate-shim
 
 # Build artifacts
 *.pyc

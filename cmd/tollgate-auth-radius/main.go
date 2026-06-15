@@ -1,16 +1,15 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"tollgate-auth/internal/auth"
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
@@ -84,92 +83,6 @@ func recordLedgerAccounting(entry ledger.LedgerEntry) {
 	}
 	if err := ledgerInstance.RecordAccounting(entry); err != nil {
 		log.Printf("Warning: ledger RecordAccounting failed: %v", err)
-	}
-}
-
-// SessionStore tracks active RADIUS sessions by MAC address.
-// When a phone reconnects (sleep/wake), we skip token validation
-// if the session is still within its paid time window.
-type SessionStore struct {
-	Dir string
-}
-
-type SessionRecord struct {
-	MAC      string                 `json:"mac"`
-	Token    string                 `json:"token_hash"`
-	Guest    string                 `json:"guest"`
-	Mint     string                 `json:"mint"`
-	Amount   int                    `json:"amount"`
-	Started  time.Time              `json:"started"`
-	Duration int                    `json:"duration"` // seconds
-	Source   string                 `json:"source"`   // "username" or "password"
-	PayType  radiusauth.PaymentType `json:"pay_type"` // "cashu" or "lnurlw"
-	Class    string                 `json:"class"`
-}
-
-func (s *SessionStore) Path(mac string) string {
-	clean, ok := radiusauth.SanitizeMAC(mac)
-	if !ok {
-		clean = cashu.TokenHash(mac)[:16]
-	}
-	return filepath.Join(s.Dir, clean+".json")
-}
-
-func (s *SessionStore) Get(mac string) (*SessionRecord, bool) {
-	data, err := os.ReadFile(s.Path(mac))
-	if err != nil {
-		return nil, false
-	}
-	var rec SessionRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, false
-	}
-	return &rec, true
-}
-
-func (s *SessionStore) IsActive(rec *SessionRecord) bool {
-	deadline := rec.Started.Add(time.Duration(rec.Duration) * time.Second)
-	return time.Now().Before(deadline)
-}
-
-func (s *SessionStore) Save(rec *SessionRecord) error {
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.Path(rec.MAC), data, 0600)
-}
-
-func (s *SessionStore) Remove(mac string) {
-	os.Remove(s.Path(mac))
-}
-
-// Cleanup removes expired session files. Called probabilistically to avoid
-// overhead on every exec invocation (~5% of requests trigger cleanup).
-func (s *SessionStore) Cleanup() {
-	entries, err := os.ReadDir(s.Dir)
-	if err != nil {
-		return
-	}
-	now := time.Now()
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		path := filepath.Join(s.Dir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var rec SessionRecord
-		if err := json.Unmarshal(data, &rec); err != nil {
-			os.Remove(path)
-			continue
-		}
-		deadline := rec.Started.Add(time.Duration(rec.Duration) * time.Second)
-		if now.After(deadline.Add(time.Hour)) {
-			os.Remove(path)
-		}
 	}
 }
 
@@ -285,7 +198,7 @@ func main() {
 		AuthMode:   "local",
 	}
 
-	result := processAuth(deps, username, mac, password, clearTextPw)
+	result := auth.ProcessAuth(deps, username, mac, password, clearTextPw)
 	emitResult(result)
 }
 
@@ -338,23 +251,6 @@ func handleDelegated(username, mac, password, clearTextPw string) {
 		os.MkdirAll(BaseDir, 0755)
 		handleLNURLw(cred, sessionID, sessions, replay, operatorID)
 	}
-}
-
-func emitResult(r AuthResult) {
-	if r.LogMessage != "" {
-		log.Print(r.LogMessage)
-	}
-	if r.Accept {
-		replyMessage("%s", r.ReplyMessage)
-		radiusAttr("Session-Timeout", r.SessionTimeout)
-		radiusAttr("Acct-Interim-Interval", r.AcctInterval)
-		if r.Class != "" {
-			fmt.Printf("Class = \"%s\"\n", r.Class)
-		}
-		os.Exit(0)
-	}
-	replyMessage("%s", r.ReplyMessage)
-	os.Exit(1)
 }
 
 func handleCashu(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard, operatorID string) {

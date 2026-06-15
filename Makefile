@@ -1,9 +1,11 @@
-.PHONY: build build-linux build-radius build-settle deploy deploy-radius deploy-all deploy-settle deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius build-settle build-daemon build-shim deploy deploy-radius deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
 TOLLGATE_RS_DIR ?= $(HOME)/src/tollgate-rs
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
+DAEMON_BINARY := tollgate-daemon
+SHIM_BINARY := tollgate-shim
 REMOTE_USER := root
 REMOTE_HOST := nodns.shop
 REMOTE_PORT := 22
@@ -20,6 +22,12 @@ build-radius:
 
 build-settle:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o tollgate-settle ./cmd/tollgate-settle/
+
+build-daemon:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(DAEMON_BINARY) ./cmd/tollgate-daemon/
+
+build-shim:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(SHIM_BINARY) ./cmd/tollgate-shim/
 
 deploy: build-linux
 	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY)
@@ -54,6 +62,21 @@ deploy-radius: build-radius
 		'systemctl restart freeradius && \
 		 sleep 2 && \
 		 systemctl status freeradius --no-pager | tail -5'
+
+deploy-daemon: build-daemon build-shim
+	scp -P $(REMOTE_PORT) $(DAEMON_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/$(DAEMON_BINARY)
+	scp -P $(REMOTE_PORT) $(SHIM_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/$(SHIM_BINARY)
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-daemon.service $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-daemon.service
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'chmod +x /usr/local/bin/$(DAEMON_BINARY) /usr/local/bin/$(SHIM_BINARY) && \
+		 systemctl daemon-reload && \
+		 systemctl enable tollgate-daemon && \
+		 systemctl restart tollgate-daemon && \
+		 sleep 2 && \
+		 systemctl is-active tollgate-daemon && \
+		 echo "Daemon deployed. To switch FreeRADIUS to shim mode:" && \
+		 echo "  Update mods-available/cashu-exec program= to use $(SHIM_BINARY)" && \
+		 echo "  Then: systemctl restart freeradius"'
 
 deploy-all: deploy-radius deploy-rs
 	@echo "=== Both binaries deployed ==="
@@ -153,7 +176,7 @@ test-e2e:
 		'bash /tmp/test-radius-e2e.sh'
 
 clean:
-	rm -f $(SSH_BINARY) $(RADIUS_BINARY)
+	rm -f $(SSH_BINARY) $(RADIUS_BINARY) $(DAEMON_BINARY) $(SHIM_BINARY)
 
 install-hooks: ## Install git pre-commit, commit-msg, and pre-push hooks
 	ln -sf ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
