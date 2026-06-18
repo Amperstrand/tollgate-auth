@@ -3,6 +3,8 @@
 package fakeverity
 
 import (
+	"sync"
+
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/sessiond"
 )
@@ -102,6 +104,7 @@ func (f *FakeVerifier) CheckState(tokenData *cashu.TokenData) (cashu.ProofState,
 
 // FakeReplayGuard is an in-memory ReplayGuard for testing.
 type FakeReplayGuard struct {
+	mu    sync.Mutex
 	Spent map[string]bool
 }
 
@@ -113,6 +116,8 @@ func NewFakeReplayGuard() *FakeReplayGuard {
 // CheckAndMark returns true if thash was already marked spent.
 // First call for a hash returns false (not spent) and marks it.
 func (g *FakeReplayGuard) CheckAndMark(thash string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.Spent[thash] {
 		return true
 	}
@@ -121,6 +126,8 @@ func (g *FakeReplayGuard) CheckAndMark(thash string) bool {
 }
 
 func (g *FakeReplayGuard) IsSpent(thash string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	return g.Spent[thash]
 }
 

@@ -6,16 +6,16 @@ Wants=freeradius.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/tollgate-daemon
-Environment=TOLLGATE_SOCKET=/tmp/tollgate.sock
-Environment=TOLLGATE_HTTP_ADDR=:8090
+Environment=TOLLGATE_SOCKET=/run/tollgate/tollgate.sock
+Environment=TOLLGATE_HTTP_ADDR=:8091
 Environment=TOLLGATE_BASE_DIR=/opt/cashu-tollgate
 Environment=TOLLGATE_WALLET_DIR=/var/lib/cashu-wallet
 Environment=TOLLGATE_AUTH_MODE=local
 EnvironmentFile=/etc/tollgate/secrets.env
 
-# Run as root (needs access to wallet dir + session files)
-# The daemon does NOT create users or touch the system — it only
-# reads/writes files in /opt/cashu-tollgate/ and calls cdk-cli.
+Group=freerad
+RuntimeDirectory=tollgate
+RuntimeDirectoryMode=0750
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=4096

@@ -1,22 +1,21 @@
-# /etc/freeradius/3.0/mods-available/cashu-exec
-# FreeRADIUS exec module that calls tollgate-auth-radius for token validation.
+# FreeRADIUS exec module that calls tollgate-shim for token validation.
+#
+# tollgate-shim connects to tollgate-daemon over Unix socket /tmp/tollgate.sock.
+# The daemon holds secrets (nsec, API key) and runs auth.ProcessAuth persistently.
+# No secrets needed here — the shim is a thin socket client.
 #
 # FreeRADIUS passes:
 #   %{User-Name}          = inner username (Cashu token for PEAP path)
 #   %{User-Password}      = inner password  (Cashu token for TTLS+PAP path)
 #   %{Calling-Station-Id} = client MAC address (e.g. "aa-bb-cc-dd-ee-ff")
 #
-# The binary checks username OR password for a payment credential.
 # Exits 0 (Accept) or 1 (Reject).
 # Stdout is parsed as RADIUS attribute pairs (e.g. Reply-Message = "...")
 # and added to the Access-Accept response for the NAS/captive portal.
 
-# Secrets (nsec etc.) are sourced from /etc/tollgate/secrets.env
-# which is NOT stored in version control. See Makefile deploy-radius-config.
-
 exec cashu-auth {
     wait = yes
-    program = "/bin/sh -c '. /etc/tollgate/secrets.env && TOLLGATE_AUTH_MODE=local /usr/local/bin/tollgate-auth-radius \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\"'"
+    program = "/usr/local/bin/tollgate-shim \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\""
     output_pairs = reply
-    timeout = 15
+    timeout = 10
 }

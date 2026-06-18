@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	defaultSocketPath = "/tmp/tollgate.sock"
+	defaultSocketPath = "/run/tollgate/tollgate.sock"
 	defaultHTTPAddr   = ":8090"
 	defaultBaseDir    = "/opt/cashu-tollgate"
 	defaultWalletDir  = "/var/lib/cashu-wallet"
@@ -108,7 +108,7 @@ func main() {
 	m := newMetrics()
 
 	// --- Start HTTP server ---
-	go startHTTP(*httpAddr, deps, m)
+	go startHTTP(*httpAddr, deps, m, baseDir)
 
 	// --- Remove stale socket ---
 	if err := os.Remove(*socketPath); err != nil && !os.IsNotExist(err) {
@@ -220,8 +220,11 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 
 // --- HTTP server ---
 
-func startHTTP(addr string, deps *auth.Dependencies, m *metrics) {
+func startHTTP(addr string, deps *auth.Dependencies, m *metrics, baseDir string) {
 	mux := http.NewServeMux()
+
+	wgMgr := newWGManager(baseDir + "/wg-peers.json")
+	wgMgr.startCleanupLoop()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -289,6 +292,8 @@ func startHTTP(addr string, deps *auth.Dependencies, m *metrics) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	})
+
+	handleWGConnect(mux, deps, wgMgr)
 
 	srv := &http.Server{
 		Addr:         addr,

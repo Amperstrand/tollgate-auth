@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	defaultSocketPath = "/tmp/tollgate.sock"
+	defaultSocketPath = "/run/tollgate/tollgate.sock"
 	socketTimeout     = 15 * time.Second // must be >= FreeRADIUS exec timeout
 )
 

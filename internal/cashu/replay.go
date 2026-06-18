@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ func LogTokenWithError(tokenStr string, tokenData *TokenData, guest string, acce
 	}
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
+		log.Printf("Warning: failed to open token log %s: %v", logFile, err)
 		return
 	}
 	defer f.Close()
