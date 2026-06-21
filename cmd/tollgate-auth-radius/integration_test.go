@@ -30,7 +30,7 @@ func TestE2ECashuAcceptFullFlow(t *testing.T) {
 	mac := "aa:bb:cc:dd:ee:ff"
 	token := testtoken.V4Token(8)
 
-	result := auth.ProcessAuth(deps, token, mac, "", "")
+	result := auth.ProcessAuth(deps, token, mac, "", "", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
@@ -65,14 +65,14 @@ func TestE2ECashuReplayRejection(t *testing.T) {
 	mac2 := "11:22:33:44:55:66"
 	token := testtoken.V4Token(8)
 
-	first := auth.ProcessAuth(deps, token, mac1, "", "")
+	first := auth.ProcessAuth(deps, token, mac1, "", "", "", "")
 	if !first.Accept {
 		t.Fatalf("first call should Accept: %s", first.ReplyMessage)
 	}
 
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
 
-	second := auth.ProcessAuth(deps, token, mac2, "", "")
+	second := auth.ProcessAuth(deps, token, mac2, "", "", "", "")
 	if second.Accept {
 		t.Fatal("second call with same token (different MAC) should Reject (replay)")
 	}
@@ -84,7 +84,7 @@ func TestE2ECashuReplayRejection(t *testing.T) {
 func TestE2ELNURLwAcceptFullFlow(t *testing.T) {
 	deps := setupIntegrationDeps(t)
 
-	result := auth.ProcessAuth(deps, testtoken.LNURLwCode(), "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, testtoken.LNURLwCode(), "aa:bb:cc:dd:ee:ff", "", "", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -101,7 +101,7 @@ func TestE2ESplitTokenFullFlow(t *testing.T) {
 	deps := setupIntegrationDeps(t)
 	first200, rest178 := testtoken.V4TokenDLEQSplit()
 
-	result := auth.ProcessAuth(deps, rest178, "aa:bb:cc:dd:ee:ff", first200, "")
+	result := auth.ProcessAuth(deps, rest178, "aa:bb:cc:dd:ee:ff", first200, "", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -116,12 +116,12 @@ func TestE2EReconnectionFlow(t *testing.T) {
 	mac := "aa:bb:cc:dd:ee:ff"
 	token := testtoken.V4Token(8)
 
-	first := auth.ProcessAuth(deps, token, mac, "", "")
+	first := auth.ProcessAuth(deps, token, mac, "", "", "", "")
 	if !first.Accept {
 		t.Fatalf("first auth should Accept: %s", first.ReplyMessage)
 	}
 
-	second := auth.ProcessAuth(deps, "anything", mac, "", "")
+	second := auth.ProcessAuth(deps, "anything", mac, "", "", "", "")
 	if !second.Accept {
 		t.Fatalf("reconnection should Accept: %s", second.ReplyMessage)
 	}
@@ -141,7 +141,7 @@ func TestE2EMultipleAmounts(t *testing.T) {
 			deps := setupIntegrationDeps(t)
 			token := testtoken.V4Token(amount)
 
-			result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+			result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "", "", "")
 
 			if !result.Accept {
 				t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -158,7 +158,7 @@ func TestE2EOutputFormat(t *testing.T) {
 	deps := setupIntegrationDeps(t)
 	token := testtoken.V4Token(8)
 
-	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "")
+	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "", "", "")
 
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
@@ -180,7 +180,7 @@ func TestE2ESessionExpiredThenReauth(t *testing.T) {
 	mac2 := "11:22:33:44:55:66"
 	token1 := testtoken.V4Token(8)
 
-	first := auth.ProcessAuth(deps, token1, mac1, "", "")
+	first := auth.ProcessAuth(deps, token1, mac1, "", "", "", "")
 	if !first.Accept {
 		t.Fatalf("first auth should Accept: %s", first.ReplyMessage)
 	}
@@ -196,13 +196,13 @@ func TestE2ESessionExpiredThenReauth(t *testing.T) {
 
 	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateSpent
 
-	replayResult := auth.ProcessAuth(deps, token1, mac2, "", "")
+	replayResult := auth.ProcessAuth(deps, token1, mac2, "", "", "", "")
 	if replayResult.Accept {
 		t.Fatal("replayed token should Reject")
 	}
 
 	token2 := testtoken.V4Token(16)
-	reauth := auth.ProcessAuth(deps, token2, mac1, "", "")
+	reauth := auth.ProcessAuth(deps, token2, mac1, "", "", "", "")
 	if !reauth.Accept {
 		t.Fatalf("new token on expired session should Accept: %s", reauth.ReplyMessage)
 	}

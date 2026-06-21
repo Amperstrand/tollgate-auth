@@ -97,10 +97,31 @@ func LoadRegistry(path string) (*OperatorRegistry, error) {
 }
 
 // Resolve finds the matching operator for a given RADIUS client IP and NAS-ID.
-// Priority: exact client_ip match > exact nas_id match > default operator > nil
+// Priority: npub self-identification > exact client_ip match > exact nas_id match > default operator > nil
 // If multiple operators match by client_ip, first match wins.
 func (r *OperatorRegistry) Resolve(clientIP, nasID string) *OperatorContext {
-	// First pass: exact client_ip match
+	if strings.HasPrefix(nasID, "npub1") && len(nasID) == 63 {
+		for i := range r.operators {
+			if r.operators[i].Account.PayoutNpub == nasID {
+				return &OperatorContext{
+					Account:  r.operators[i].Account,
+					Source:   "config-file",
+					Resolved: true,
+				}
+			}
+		}
+		return &OperatorContext{
+			Account: OperatorAccount{
+				ID:         "nas-id:" + nasID[:16],
+				PayoutNpub: nasID,
+				CreatedAt:  time.Now(),
+			},
+			Source:   "nas-id-self",
+			Resolved: true,
+		}
+	}
+
+	// Second pass: exact client_ip match
 	for i := range r.operators {
 		if r.operators[i].Match.ClientIP != "" && r.operators[i].Match.ClientIP == clientIP {
 			return &OperatorContext{
@@ -111,7 +132,7 @@ func (r *OperatorRegistry) Resolve(clientIP, nasID string) *OperatorContext {
 		}
 	}
 
-	// Second pass: exact nas_id match (case-insensitive)
+	// Third pass: exact nas_id match (case-insensitive)
 	for i := range r.operators {
 		if r.operators[i].Match.NASID != "" && strings.EqualFold(r.operators[i].Match.NASID, nasID) {
 			return &OperatorContext{

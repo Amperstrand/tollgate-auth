@@ -198,7 +198,7 @@ func main() {
 		AuthMode:   "local",
 	}
 
-	result := auth.ProcessAuth(deps, username, mac, password, clearTextPw)
+	result := auth.ProcessAuth(deps, username, mac, password, clearTextPw, "", "")
 	emitResult(result)
 }
 

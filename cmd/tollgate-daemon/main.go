@@ -233,7 +233,7 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	}
 
 	// Process auth.
-	result := auth.ProcessAuth(deps, req.Username, req.MAC, req.Password, req.CleartextPassword)
+	result := auth.ProcessAuth(deps, req.Username, req.MAC, req.Password, req.CleartextPassword, req.NASID, req.ClientIP)
 
 	if result.Accept {
 		m.authAccept.Add(1)
@@ -369,7 +369,7 @@ func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir str
 		start := time.Now()
 		m.authTotal.Add(1)
 
-		result := auth.ProcessAuth(deps, req.Username, req.MAC, req.Password, req.CleartextPassword)
+		result := auth.ProcessAuth(deps, req.Username, req.MAC, req.Password, req.CleartextPassword, req.NASID, req.ClientIP)
 
 		if result.Accept {
 			m.authAccept.Add(1)

@@ -8,6 +8,8 @@
 #   %{User-Name}          = inner username (Cashu token for PEAP path)
 #   %{User-Password}      = inner password  (Cashu token for TTLS+PAP path)
 #   %{Calling-Station-Id} = client MAC address (e.g. "aa-bb-cc-dd-ee-ff")
+#   %{NAS-Identifier}     = NAS identifier (can carry AP's Nostr npub)
+#   %{NAS-IP-Address}     = NAS IP address
 #
 # Exits 0 (Accept) or 1 (Reject).
 # Stdout is parsed as RADIUS attribute pairs (e.g. Reply-Message = "...")
@@ -15,7 +17,7 @@
 
 exec cashu-auth {
     wait = yes
-    program = "/usr/local/bin/tollgate-shim \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\""
+    program = "/usr/local/bin/tollgate-shim \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\" \"%{NAS-Identifier}\" \"%{NAS-IP-Address}\""
     output_pairs = reply
     timeout = 10
 }

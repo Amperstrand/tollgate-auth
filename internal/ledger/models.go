@@ -34,6 +34,7 @@ type LedgerEntry struct {
 	OutputOctets   int64     `json:"output_octets,omitempty"`
 	SessionTime    int64     `json:"session_time,omitempty"`
 	NASIP          string    `json:"nas_ip,omitempty"`
+	NASID          string    `json:"nas_id,omitempty"`
 	TerminateCause string    `json:"terminate_cause,omitempty"`
 	ReplyMessage   string    `json:"reply_message,omitempty"`
 	Metadata       string    `json:"metadata,omitempty"`

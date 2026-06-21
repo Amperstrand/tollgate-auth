@@ -9,6 +9,7 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -177,7 +178,11 @@ func EmitClass(operatorID, sessionID, tokenHash string, hmacKey []byte) string {
 // ProcessAuth contains all auth logic.
 // Returns AuthResult instead of calling os.Exit or printing to stdout.
 // This is the unified entry point used by both the exec binary and the daemon.
-func ProcessAuth(deps *Dependencies, username, mac, password, clearTextPw string) AuthResult {
+func ProcessAuth(deps *Dependencies, username, mac, password, clearTextPw, nasID, clientIP string) AuthResult {
+	if strings.HasPrefix(nasID, "npub1") && len(nasID) == 63 {
+		log.Printf("Operator AP npub from NAS-Identifier: %s", nasID)
+	}
+
 	if !MacPattern.MatchString(mac) {
 		return AuthResult{
 			Accept:       false,

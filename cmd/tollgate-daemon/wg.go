@@ -215,7 +215,7 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 		syntheticMAC := fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
 			h[0], h[1], h[2], h[3], h[4], h[5])
 
-		result := auth.ProcessAuth(deps, req.Token, syntheticMAC, "", "")
+		result := auth.ProcessAuth(deps, req.Token, syntheticMAC, "", "", "tollgate-wg", "")
 
 		if !result.Accept {
 			w.Header().Set("Content-Type", "application/json")

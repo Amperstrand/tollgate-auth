@@ -119,7 +119,7 @@ func TestProcessAuthConcurrent(t *testing.T) {
 			defer wg.Done()
 			code := fmt.Sprintf("lnurlwdp68gup6jhjumue2nn%02d", n)
 			mac := fmt.Sprintf("aa:bb:cc:dd:ee:%02x", n)
-			result := ProcessAuth(deps, code, mac, "", "")
+			result := ProcessAuth(deps, code, mac, "", "", "", "")
 			results[n] = result
 			if !result.Accept && result.ReplyMessage == "" {
 				errors <- fmt.Errorf("goroutine %d: empty reply for non-accepted result", n)
@@ -179,7 +179,7 @@ func TestProcessAuthReplayConcurrent(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			mac := fmt.Sprintf("aa:bb:cc:dd:ee:%02x", n)
-			results[n] = ProcessAuth(deps, code, mac, "", "")
+			results[n] = ProcessAuth(deps, code, mac, "", "", "", "")
 		}(i)
 	}
 

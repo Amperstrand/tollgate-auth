@@ -44,7 +44,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "usage: %s <username> <mac-address> [password] [cleartext-password]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s <username> <mac-address> [password] [cleartext-password] [nas-id] [client-ip]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  Called by FreeRADIUS exec module. Forwards to tollgate-daemon.\n")
 		os.Exit(1)
 	}
@@ -59,16 +59,31 @@ func main() {
 	if len(os.Args) >= 5 {
 		clearTextPw = os.Args[4]
 	}
+	nasID := ""
+	if len(os.Args) >= 6 {
+		nasID = os.Args[5]
+	}
+	clientIP := ""
+	if len(os.Args) >= 7 {
+		clientIP = os.Args[6]
+	}
 
 	socketPath := config.GetEnv("TOLLGATE_SOCKET", defaultSocketPath)
+
+	if nasID == "" {
+		nasID = config.GetEnv("TOLLGATE_NAS_ID", "")
+	}
+	if clientIP == "" {
+		clientIP = config.GetEnv("TOLLGATE_CLIENT_IP", "")
+	}
 
 	req := auth.AuthRequest{
 		Username:          username,
 		MAC:               mac,
 		Password:          password,
 		CleartextPassword: clearTextPw,
-		ClientIP:          config.GetEnv("TOLLGATE_CLIENT_IP", ""),
-		NASID:             config.GetEnv("TOLLGATE_NAS_ID", ""),
+		ClientIP:          clientIP,
+		NASID:             nasID,
 	}
 
 	resp, err := sendRequest(socketPath, req)
