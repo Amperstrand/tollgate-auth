@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,6 +39,7 @@ import (
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
+	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/operator"
 	"tollgate-auth/internal/redact"
 )
@@ -99,6 +101,14 @@ func main() {
 		bootstrapper = fakeverity.NewProductionBootstrapper(sessiondURL)
 	}
 
+	var lg *ledger.Ledger
+	lgPath := filepath.Join(baseDir, "ledger.jsonl")
+	lg, err = ledger.OpenLedger(lgPath)
+	if err != nil {
+		slog.Warn("ledger open failed, continuing without ledger", "path", lgPath, "error", err)
+		lg = nil
+	}
+
 	deps := &auth.Dependencies{
 		Sessions:     sessions,
 		Replay:       replay,
@@ -108,6 +118,7 @@ func main() {
 		HMACKey:      opResolver.HMACKey(),
 		AuthMode:     authMode,
 		SessiondURL:  sessiondURL,
+		Ledger:       lg,
 	}
 
 	m := newMetrics()
@@ -235,6 +246,8 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	// Process auth.
 	result := auth.ProcessAuth(deps, req.Username, req.MAC, req.Password, req.CleartextPassword, req.NASID, req.ClientIP)
 
+	recordAuthLedger(deps, result, req.NASID, req.ClientIP, req.MAC)
+
 	if result.Accept {
 		m.authAccept.Add(1)
 	} else {
@@ -294,6 +307,31 @@ func logAuthOutcome(mac string, result auth.AuthResult, elapsed time.Duration, d
 		"mac", redact.LogSafe(redact.Truncate(mac, 32)),
 		"mint", mint,
 	)
+}
+
+func recordAuthLedger(deps *auth.Dependencies, result auth.AuthResult, nasID, clientIP, mac string) {
+	if deps.Ledger == nil {
+		return
+	}
+	entry := ledger.LedgerEntry{
+		EventType:    ledger.EventAuthAccept,
+		OperatorID:   deps.OperatorID,
+		NASID:        nasID,
+		NASIP:        clientIP,
+		MAC:          mac,
+		PaymentType:  result.PayType,
+		AmountSat:    result.AmountSat,
+		DurationSec:  result.SessionTimeout,
+		MintURL:      result.MintURL,
+		TokenHash:    result.TokenHash,
+		SessionClass: result.Class,
+		ReplyMessage: result.ReplyMessage,
+	}
+	if !result.Accept {
+		entry.EventType = ledger.EventAuthReject
+		entry.DurationSec = 0
+	}
+	deps.Ledger.RecordAuth(entry)
 }
 
 // --- HTTP server ---
@@ -370,6 +408,8 @@ func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir str
 		m.authTotal.Add(1)
 
 		result := auth.ProcessAuth(deps, req.Username, req.MAC, req.Password, req.CleartextPassword, req.NASID, req.ClientIP)
+
+		recordAuthLedger(deps, result, req.NASID, req.ClientIP, req.MAC)
 
 		if result.Accept {
 			m.authAccept.Add(1)

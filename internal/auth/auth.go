@@ -19,6 +19,7 @@ import (
 
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/fakeverity"
+	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/radius"
 	"tollgate-auth/internal/radiusauth"
 	"tollgate-auth/internal/redact"
@@ -44,6 +45,10 @@ type AuthResult struct {
 	AcctInterval   int
 	Class          string
 	LogMessage     string
+	AmountSat      int
+	MintURL        string
+	TokenHash      string
+	PayType        string
 }
 
 // Dependencies holds all injectable dependencies for auth processing.
@@ -56,6 +61,7 @@ type Dependencies struct {
 	HMACKey      []byte
 	AuthMode     string // "local" or "delegated"
 	SessiondURL  string
+	Ledger       *ledger.Ledger
 }
 
 // SessionRecord tracks a single RADIUS session.
@@ -207,6 +213,10 @@ func ProcessAuth(deps *Dependencies, username, mac, password, clearTextPw, nasID
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes())),
+					AmountSat:      rec.Amount,
+					MintURL:        rec.Mint,
+					TokenHash:      rec.Token,
+					PayType:        string(rec.PayType),
 				}
 			}
 			deps.Sessions.Remove(sessionID)
@@ -287,6 +297,10 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
+					AmountSat:      rec.Amount,
+					MintURL:        rec.Mint,
+					TokenHash:      rec.Token,
+					PayType:        string(rec.PayType),
 				}
 			}
 
@@ -378,6 +392,10 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 		Class:          classStr,
 		LogMessage: fmt.Sprintf("Accept: session=%s type=cashu amount=%d sat duration=%ds mint=%s source=%s",
 			sessionID, tokenData.Amount, seconds, tokenData.Mint, cred.Source),
+		AmountSat: tokenData.Amount,
+		MintURL:   tokenData.Mint,
+		TokenHash: thash,
+		PayType:   string(radiusauth.PaymentCashu),
 	}
 }
 
@@ -415,6 +433,10 @@ func processLNURLw(deps *Dependencies, cred radiusauth.PaymentCredential, sessio
 		Class:          classStr,
 		LogMessage: fmt.Sprintf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s \u2014 pass-through accept",
 			sessionID, thash[:16], cred.Source),
+		AmountSat: 0,
+		MintURL:   "lnurlw-pending",
+		TokenHash: thash,
+		PayType:   string(radiusauth.PaymentLNURLW),
 	}
 }
 
@@ -446,6 +468,10 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (delegated, spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
+					AmountSat:      rec.Amount,
+					MintURL:        rec.Mint,
+					TokenHash:      rec.Token,
+					PayType:        string(rec.PayType),
 				}
 			}
 			return AuthResult{
@@ -546,5 +572,9 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 		Class:          classStr,
 		LogMessage: fmt.Sprintf("Accept: session=%s type=delegated duration=%ds sats=%d source=%s",
 			sessionID, seconds, result.AmountSat, cred.Source),
+		AmountSat: displayAmount,
+		MintURL:   "delegated",
+		TokenHash: thash,
+		PayType:   string(radiusauth.PaymentCashu),
 	}
 }

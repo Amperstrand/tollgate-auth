@@ -217,6 +217,8 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 
 		result := auth.ProcessAuth(deps, req.Token, syntheticMAC, "", "", "tollgate-wg", "")
 
+		recordAuthLedger(deps, result, "tollgate-wg", "", syntheticMAC)
+
 		if !result.Accept {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)

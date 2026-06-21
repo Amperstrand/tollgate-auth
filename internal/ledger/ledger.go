@@ -236,6 +236,68 @@ func (l *Ledger) RevenueSummary(operatorID string, start, end time.Time) (*Reven
 	return report, nil
 }
 
+// QueryByNASID returns all ledger entries for a NASID since the given time,
+// sorted by timestamp descending (most recent first).
+func (l *Ledger) QueryByNASID(nasID string, since time.Time) ([]LedgerEntry, error) {
+	entries, err := l.readAll()
+	if err != nil {
+		return nil, fmt.Errorf("ledger: query by NASID: %w", err)
+	}
+
+	var filtered []LedgerEntry
+	for _, e := range entries {
+		if e.NASID != nasID {
+			continue
+		}
+		if !since.IsZero() && parseTime(e.Timestamp).Before(since) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+
+	return reverseEntries(filtered), nil
+}
+
+// RevenueByNASID returns a revenue report for a NASID over a time range.
+func (l *Ledger) RevenueByNASID(nasID string, start, end time.Time) (*RevenueReport, error) {
+	entries, err := l.readAll()
+	if err != nil {
+		return nil, fmt.Errorf("ledger: revenue by NASID: %w", err)
+	}
+
+	report := &RevenueReport{
+		NASID:     nasID,
+		StartTime: start,
+		EndTime:   end,
+	}
+
+	for _, e := range entries {
+		if e.NASID != nasID {
+			continue
+		}
+		t := parseTime(e.Timestamp)
+		if t.Before(start) || t.After(end) {
+			continue
+		}
+
+		switch e.EventType {
+		case EventAuthAccept:
+			report.TotalSessions++
+			report.AcceptedSessions++
+			report.TotalSat += e.AmountSat
+		case EventAuthReject:
+			report.TotalSessions++
+			report.RejectedSessions++
+		}
+	}
+
+	if report.AcceptedSessions > 0 {
+		report.AverageAmount = float64(report.TotalSat) / float64(report.AcceptedSessions)
+	}
+
+	return report, nil
+}
+
 // parseTime parses an RFC3339 timestamp string, returning zero time on error.
 func parseTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)

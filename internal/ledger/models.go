@@ -43,6 +43,7 @@ type LedgerEntry struct {
 // RevenueReport summarizes revenue for an operator over a time range.
 type RevenueReport struct {
 	OperatorID       string
+	NASID            string
 	TotalSat         int
 	TotalSessions    int
 	AcceptedSessions int
