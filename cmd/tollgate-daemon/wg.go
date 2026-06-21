@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -95,7 +95,7 @@ func (m *wgManager) addPeer(pubkey, tokenHash string, durationSec int) (string, 
 
 	if existing, ok := m.peers[pubkey]; ok && existing.ExpiresAt > time.Now().Unix() {
 		if err := wgRemovePeer(pubkey); err != nil {
-			log.Printf("WG: warning: failed to remove old peer: %v", err)
+			slog.Warn("wg remove old peer", "pubkey", truncatePubkey(pubkey), "error", err)
 		}
 	}
 
@@ -122,7 +122,7 @@ func (m *wgManager) removePeer(pubkey string) error {
 	defer m.mu.Unlock()
 
 	if err := wgRemovePeer(pubkey); err != nil {
-		log.Printf("WG: warning: wg remove peer: %v", err)
+		slog.Warn("wg remove peer", "pubkey", truncatePubkey(pubkey), "error", err)
 	}
 	delete(m.peers, pubkey)
 	m.saveState()
@@ -137,9 +137,13 @@ func (m *wgManager) cleanup() {
 	for pubkey, peer := range m.peers {
 		if peer.ExpiresAt < now {
 			if err := wgRemovePeer(pubkey); err != nil {
-				log.Printf("WG: cleanup: wg remove %s: %v", pubkey[:16], err)
+				slog.Warn("wg cleanup remove", "pubkey", truncatePubkey(pubkey), "ip", peer.IP, "error", err)
 			} else {
-				log.Printf("WG: cleanup: removed expired peer (pubkey=%s..., ip=%s)", pubkey[:16], peer.IP)
+				slog.Info("wg cleanup removed expired peer",
+					"action", "removed",
+					"pubkey", truncatePubkey(pubkey),
+					"ip", peer.IP,
+				)
 			}
 			delete(m.peers, pubkey)
 		}
@@ -230,7 +234,7 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 
 		ip, err := mgr.addPeer(req.Pubkey, tokenHash, result.SessionTimeout)
 		if err != nil {
-			log.Printf("WG: failed to add peer: %v", err)
+			slog.Error("wg add peer", "pubkey", truncatePubkey(req.Pubkey), "error", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -239,8 +243,12 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 			return
 		}
 
-		log.Printf("WG: peer added pubkey=%s... ip=%s timeout=%ds",
-			req.Pubkey[:min(16, len(req.Pubkey))], ip, result.SessionTimeout)
+		slog.Info("wg peer added",
+			"action", "added",
+			"pubkey", truncatePubkey(req.Pubkey),
+			"ip", ip,
+			"timeout", result.SessionTimeout,
+		)
 
 		resp := wgConnectResponse{
 			ClientIP:       ip,
@@ -285,9 +293,9 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 	})
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+func truncatePubkey(pubkey string) string {
+	if len(pubkey) > 16 {
+		return pubkey[:16]
 	}
-	return b
+	return pubkey
 }

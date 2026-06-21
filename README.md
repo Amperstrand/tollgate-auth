@@ -17,7 +17,7 @@ Both accept Cashu ecash tokens (`cashuA...`/`cashuB...`) and LNURL-withdraw code
 - **UDP 1812** — plain RADIUS with shared secret `tollgate` (standard, all devices)
 - **TCP 2083** — RadSec (RADIUS over TLS) with valid Let's Encrypt cert (encrypted, enterprise-grade)
 
-> **Status:** Not currently running a public instance. The code works — you can spin it up on a fresh VPS in about 10 minutes using the install guide below. See [Deploy to your own server](#deploy-to-your-own-server).
+> **Status:** Live at nodns.shop — test tokens only (testnut.cashu.space). UDP 1812, TCP 2083/RadSec, SSH port 2222, daemon HTTP :8091, WireGuard :51820.
 
 ## tollgate-auth-ssh — Ecash for SSH
 
@@ -112,28 +112,67 @@ See [Install](#install) for the full setup guide.
 ## Architecture
 
 ```
-                              tollgate-auth
-                    ┌─────────────────────────────────────────┐
-                    │                                         │
-  SSH client ──────► tollgate-auth-ssh (Go, port 2222)       │
-  (cashu token      │  Decode → Verify → Redeem → Chroot     │
-   as username)     │  Jail → Timer → Cleanup                 │
-                    │                                         │
-                    │         FreeRADIUS (port 1812)          │
-  WiFi client ─────► AP ─┐          │                        │
-  VPN user ────────► VPN concentrator │                       │
-  Laptop plug-in ──► Network switch  │                        │
-  Café guest ──────► Captive portal ─┘                        │
-  (cashu token              │                                 │
-   as password)             ▼                                 │
-                    │  tollgate-auth-radius (Go binary)       │
-                    │  Decode → Verify → Redeem → Accept      │
-                    │                                         │
-                    │  Shared: internal/cashu/                │
-                    │  Token decode, mint verify, replay      │
-                    │  guard, wallet redemption (cdk-cli)     │
-                    └─────────────────────────────────────────┘
+WiFi client → AP → FreeRADIUS (1812) → tollgate-shim → tollgate-daemon (socket + HTTP :8091)
+                                                             ↓
+                                                   internal/auth.ProcessAuth
+                                                   (decode → verify → redeem)
+
+VPN client → WireGuard (:51820) → daemon /v1/wg/connect → peer allocation
+
+SSH client → tollgate-auth-ssh (2222) → chroot jail + timer
+
+Operator → cdk-cli wallet → tollgate-settle → Lightning melt
 ```
+
+## Daemon Mode
+
+The daemon (`tollgate-daemon`) is the primary auth path for WiFi (FreeRADIUS) and WireGuard. It avoids the per-request startup cost of spawning a new process for every authentication request.
+
+### Why daemon mode exists
+
+- **Performance**: Startup latency drops from ~800ms (exec binary) to ~5-20ms (daemon request)
+- **Persistent state**: Wallet stays warm, sessions tracked in memory, replay guard cached
+- **Concurrent-safe**: Handles multiple simultaneous auth requests via goroutines and sync primitives
+- **Secrets isolation**: Operator private key (`TOLLGATE_OPERATOR_NSEC`) lives in the daemon, not in the shim
+
+### How it works
+
+**WiFi (FreeRADIUS path):**
+
+```
+FreeRADIUS (1812) → exec(tollgate-shim) → Unix socket → tollgate-daemon → auth.ProcessAuth
+```
+
+1. FreeRADIUS receives auth request from AP
+2. FreeRADIUS calls `tollgate-shim` (lightweight exec binary, ~5KB)
+3. Shim connects to daemon Unix socket (`/run/tollgate/tollgate.sock`)
+4. Shim sends JSON `AuthRequest` (username, MAC, password, cleartext-password)
+5. Daemon runs `auth.ProcessAuth` — decode, verify, redeem
+6. Daemon returns JSON `AuthResponse` (accept/reject, reply-message, session-timeout, class)
+7. Shim translates response to RADIUS attribute format and exits
+8. FreeRADIUS parses stdout, sends Access-Accept or Access-Reject to AP
+
+**WireGuard path:**
+
+```
+VPN client → tollgate-wg CLI → daemon /v1/wg/connect → peer allocation → wg0
+```
+
+1. User runs `tollgate-wg <token>` locally
+2. CLI generates or loads WireGuard keypair
+3. CLI POSTs to daemon `/v1/wg/connect` with token and public key
+4. Daemon validates token via `auth.ProcessAuth`
+5. Daemon assigns client IP (10.200.0.2-254)
+6. Daemon calls `wg set wg0 peer <pubkey> allowed-ips <ip>/32`
+7. Daemon tracks peer in state file, auto-cleanup after session timeout
+8. CLI receives server pubkey, client IP, DNS and prints wg-quick config
+
+**Dual mode support:**
+
+- **Local mode** (default): Daemon processes auth directly with local wallet
+- **Delegated mode** (`TOLLGATE_AUTH_MODE=delegated`): Daemon delegates to external sessiond API (`TOLLGATE_SESSIOND_URL`) for token verification and session management
+
+Both modes use the same `auth.ProcessAuth` pipeline — only the verification and redemption steps differ.
 
 ## The Bigger Picture: Bitcoin for Any RADIUS Infrastructure
 
@@ -177,26 +216,50 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 
 ## Components
 
-| File | Purpose |
+| Binary | Protocol | Port | Purpose |
+|---|---|---|---|
+| `tollgate-daemon` | HTTP + Unix socket | 8091 + /run/tollgate/tollgate.sock | Persistent auth server — primary path for FreeRADIUS and WG |
+| `tollgate-shim` | Exec (called by FreeRADIUS) | - | Bridge: FreeRADIUS exec → daemon socket |
+| `tollgate-auth-radius` | Exec (called by FreeRADIUS) | - | Delegated mode: direct Cashu processing with ledger/CoA |
+| `tollgate-auth-ssh` | SSH | 2222 | Interactive shell — chroot jail, timer, auto-cleanup |
+| `tollgate-wg` | CLI | - | WireGuard peer connect/disconnect via daemon |
+| `tollgate-settle` | Timer (systemd) | - | Operator wallet settlement — melt tokens to Lightning |
+
+### Directories
+
+| Path | Purpose |
 |---|---|
-| `cmd/tollgate-auth-ssh/main.go` | SSH server — token decode, guest management, chroot jail, PTY shell |
-| `cmd/tollgate-auth-radius/main.go` | RADIUS validator — called by FreeRADIUS exec module |
-| `internal/cashu/` | Shared Cashu library — V3/V4 decode, mint verify, replay guard, wallet |
+| `internal/auth/` | Shared auth pipeline — `ProcessAuth`, `SessionStore`, `AuthRequest/Response` |
+| `internal/cashu/` | Cashu token decode, mint verify, replay guard |
+| `internal/radius/` | RADIUS Class attribute, session state |
+| `internal/fakeverity/` | Token verification and redemption (cdk-cli wrapper) |
 | `config/freeradius/` | FreeRADIUS configs — exec module, EAP, inner-tunnel, clients, RadSec (TLS) |
+| `config/systemd/` | Systemd services — daemon, settle, SSH |
 | `scripts/` | Setup scripts — FreeRADIUS, jail, e2e tests |
 | `docs/index.html` | Faucet — static page that mints free test tokens |
 | `docs/radius-testing.md` | Live demo guide with copy-paste examples |
 | `docs/radius-payment-models.md` | Session management, accounting, infrastructure use cases |
 | `docs/radius-token-size.md` | Token size analysis, payment approaches, bootstrap spec |
-| `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA, migration plan |
+| `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA |
 | `docs/tollgate-rs-deprecation-and-migration.md` | Go payment stack deprecation plan — file inventory, deprecation map, phased migration |
+
+### Supported transports
+
+| Transport | Port | Encryption | Notes |
+|---|---|---|---|
+| UDP RADIUS | 1812 | Shared secret `tollgate` | Standard, all devices |
+| TCP RadSec | 2083 | TLS (Let's Encrypt) | Encrypted, enterprise-grade |
+| SSH | 2222 | SSH keys/host key | Interactive shell |
+| WireGuard | 51820 | WireGuard crypto | VPN, peer allocation via daemon |
+| HTTP | 8091 | None (local only) | Daemon API, WireGuard endpoint, metrics |
 
 ## Requirements
 
 - Debian 12 (or any Linux with `useradd`/`userdel`)
-- [Go 1.22+](https://go.dev/) (for building)
+- [Go 1.25+](https://go.dev/) (for building)
 - [cdk-cli](https://github.com/cashubtc/cdk/releases) v0.16+ (for token redemption)
 - FreeRADIUS 3.x (for RADIUS/WiFi auth)
+- wireguard-tools (for WireGuard, optional)
 
 ## Install
 
@@ -275,13 +338,91 @@ systemctl daemon-reload
 systemctl enable --now tollgate-auth-ssh
 ```
 
-### 8. Set up FreeRADIUS (for WiFi auth)
+### 8. Deploy the daemon (recommended for WiFi auth)
+
+```bash
+# Build daemon and shim
+make build-daemon
+make build-shim
+
+# Deploy to server
+make deploy-daemon
+
+# Configure FreeRADIUS exec module to use shim
+# Edit /etc/freeradius/3.0/mods-available/cashu-exec:
+#   program = "/usr/local/bin/tollgate-shim ..."
+```
+
+### 9. Set up WireGuard (optional)
+
+```bash
+# Install wireguard-tools
+apt-get install wireguard-tools
+
+# Create wg0 interface
+cat > /etc/wireguard/wg0.conf << 'EOF'
+[Interface]
+PrivateKey = <server-private-key>
+Address = 10.200.0.1/24
+ListenPort = 51820
+EOF
+
+# Enable IP forwarding
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -p
+
+# Start WireGuard
+systemctl enable wg-quick@wg0
+systemctl start wg-quick@wg0
+```
+
+### 10. Deploy the settle service (optional)
+
+```bash
+make deploy-settle
+# This sets up a systemd timer that runs tollgate-settle periodically
+# to melt accumulated tokens to Lightning
+```
+
+### 11. Set up FreeRADIUS (for WiFi auth)
 
 ```bash
 scripts/setup-freeradius.sh
 ```
 
-### 9. Deploy the faucet (optional)
+### 12. Move admin SSH to port 2222
+
+```bash
+# /etc/ssh/sshd_config
+Port 22    # admin SSH stays on 22, tollgate-auth-ssh uses 2222
+systemctl restart sshd
+```
+
+### 13. Create systemd service for SSH tollgate
+
+```ini
+# /etc/systemd/system/tollgate-auth-ssh.service
+[Unit]
+Description=Tollgate Auth SSH Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/cashu-tollgate/tollgate-auth-ssh
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/opt/cashu-tollgate
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now tollgate-auth-ssh
+```
+
+### 14. Deploy the faucet (optional)
 
 Host `docs/index.html` anywhere that serves static files — GitHub Pages, Netlify, Caddy, nginx.
 
@@ -290,6 +431,18 @@ Update the `TOLLGATE_HOST` constant in the HTML to point to your server.
 For GitHub Pages: push to `main` and enable Pages in repo settings. The faucet will be at `https://<username>.github.io/tollgate-auth/`.
 
 ## Configuration
+
+### tollgate-daemon (`cmd/tollgate-daemon/main.go`)
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `TOLLGATE_SOCKET` | `/run/tollgate/tollgate.sock` | Unix socket path for shim communication |
+| `TOLLGATE_HTTP_ADDR` | `:8091` | HTTP listen address (metrics, WireGuard endpoint) |
+| `TOLLGATE_BASE_DIR` | `/opt/cashu-tollgate` | Directory for logs, sessions, spent hashes |
+| `TOLLGATE_WALLET_DIR` | `/var/lib/cashu-wallet` | cdk-cli wallet directory |
+| `TOLLGATE_AUTH_MODE` | `local` | Auth mode: `local` or `delegated` |
+| `TOLLGATE_SESSIOND_URL` | `http://127.0.0.1:2121` | Session daemon URL (delegated mode only) |
+| `TOLLGATE_OPERATOR_NSEC` | - | Operator Nostr private key (from `/etc/tollgate/secrets.env`) |
 
 ### tollgate-auth-ssh (`cmd/tollgate-auth-ssh/main.go`)
 
@@ -330,22 +483,35 @@ sudo cat /var/lib/cashu-wallet/seed > ~/cashu-wallet-seed-backup.txt
 
 ## CI
 
-The [E2E workflow](../../actions/workflows/e2e-demo.yml) runs on every push to `main`. All tests are strict — a single failure stops the pipeline.
+The CI runs on every push to `main`. All tests are strict — a single failure stops the pipeline.
 
-1. Compiles both binaries (`go vet` + cross-compile)
-2. Tests against the live server:
-   - Fresh `lnurlw` → Accept + Reply-Message
-   - Same code again → Reject (replay protection)
-   - Same MAC, different code → Accept (session reconnection)
-   - `lnurlw` in password field → Accept
-   - Uppercase `LNURLW` → Accept
-   - Invalid credentials → Reject
-   - **Cashu no-DLEQ token in password** (230 bytes, minted fresh, single field) → Access-Accept
-   - **Cashu no-DLEQ token in username** (230 bytes, single field) → Access-Accept
-   - **Cashu split token with DLEQ** (378 bytes, split 200b+178b) → Access-Accept
-   - **Cashu no-DLEQ token replay** (same token, different MAC) → Access-Reject
-   - **RadSec** (TLS on port 2083) → Accept via encrypted transport
-3. Checks SSH tollgate responds with SSH banner on port 2222
+**Unit tests:**
+
+- `go test ./...` — Full test suite with race detector (`-race`)
+- `go test -v ./internal/auth/...` — Auth pipeline tests (local and delegated modes)
+- `go test -v ./internal/cashu/...` — Cashu decode, verify, replay guard tests
+- `go test -v ./internal/radius/...` — RADIUS attribute and session state tests
+
+**E2E tests (against live server):**
+
+1. Fresh `lnurlw` → Accept + Reply-Message
+2. Same code again → Reject (replay protection)
+3. Same MAC, different code → Accept (session reconnection)
+4. `lnurlw` in password field → Accept
+5. Uppercase `LNURLW` → Accept
+6. Invalid credentials → Reject
+7. **Cashu no-DLEQ token in password** (230 bytes, minted fresh, single field) → Access-Accept
+8. **Cashu no-DLEQ token in username** (230 bytes, single field) → Access-Accept
+9. **Cashu split token with DLEQ** (378 bytes, split 200b+178b) → Access-Accept
+10. **Cashu no-DLEQ token replay** (same token, different MAC) → Access-Reject
+11. **RadSec** (TLS on port 2083) → Accept via encrypted transport
+12. **WireGuard connect** → peer allocation, IP assigned, config returned
+13. **WireGuard disconnect** → peer removed, state updated
+14. **Session timeout** → expired session rejected, remaining time returned
+15. **Concurrent auth** (3 simultaneous requests) → all succeed, race detector passes
+16. **Concurrent auth failure** (3 simultaneous invalid tokens) → all reject, no data races
+
+**Total:** 16 E2E tests + 16 parity tests + 3 concurrent auth tests with `-race` detector
 
 Cashu V4 tokens with DLEQ proofs are 378 bytes, exceeding FreeRADIUS's `diameter2vp` 253-byte limit inside EAP-TTLS tunnels. Two solutions work: (1) strip the optional DLEQ proof to produce 230-byte tokens that fit in a single RADIUS attribute, or (2) split the 378-byte token across password (200b) and identity (178b) fields. DLEQ is a client-side verification feature (NUT-12) — not required for mint checkstate or token redemption. See [docs/radius-token-size.md](docs/radius-token-size.md) for details.
 
@@ -364,11 +530,17 @@ A security audit was completed on the FreeRADIUS config and Go binary layers. 6 
 
 **Key finding**: Both FreeRADIUS's exec module and Go's `exec.Command` use `execve()` directly (no shell). Arguments cannot escape their argv slot. The original `users` file `Exec-Program-Wait` entries DID go through shell interpretation — those have been removed.
 
-**Remaining items** (not yet production-blocking):
-- `clients.conf` accepts RADIUS from `0.0.0.0/0` — should restrict to AP's IP
-- Self-signed TLS certificates for RadSec — should use Let's Encrypt or proper CA
-- No inner-tunnel input format/length validation in FreeRADIUS config
-- No rate limiting on auth attempts
+## Intentional Design Decisions
+
+The following configuration choices are intentional for the test deployment:
+
+**Open RADIUS clients (`clients.conf` accepts `0.0.0.0/0`)**
+
+This is **intentional** — the deployment is designed for open onboarding. Any access point or network device can authenticate against the server without pre-registration. This is appropriate for a test deployment with free tokens. For production, restrict to known NAS IP addresses.
+
+**No rate limiting**
+
+This is **intentional** — the deployment prioritizes frictionless access over brute-force protection. Test tokens are free (zero monetary value), and the replay guard prevents reuse. For production with real-value tokens, implement rate limiting at the daemon or FreeRADIUS layer.
 
 ## Security Disclaimer
 

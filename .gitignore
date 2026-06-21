@@ -11,6 +11,8 @@ cashu-tollgate
 /tollgate-auth-ssh.linux-*
 /tollgate-daemon
 /tollgate-shim
+/tollgate-wg
+/tollgate-settle
 
 # Build artifacts
 *.pyc
@@ -34,4 +36,4 @@ package-lock.json
 *.tiff
 *.webp
 *.heic
-tollgate-wg
+

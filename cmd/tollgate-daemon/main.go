@@ -12,21 +12,24 @@
 // The daemon also exposes HTTP endpoints for non-RADIUS auth (WireGuard, OpenVPN):
 //
 //	GET  /healthz   — health check
+//	GET  /readyz    — readiness check (socket listener state)
 //	GET  /metrics   — Prometheus-style counters
 //	POST /v1/auth   — JSON auth (same protocol as socket, for VPN scripts)
 package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -44,6 +47,7 @@ const (
 	defaultHTTPAddr   = ":8090"
 	defaultBaseDir    = "/opt/cashu-tollgate"
 	defaultWalletDir  = "/var/lib/cashu-wallet"
+	shutdownTimeout   = 30 * time.Second
 )
 
 // metrics holds atomic counters for observability.
@@ -61,11 +65,11 @@ func newMetrics() *metrics {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+
 	socketPath := flag.String("socket", config.GetEnv("TOLLGATE_SOCKET", defaultSocketPath), "Unix socket path")
 	httpAddr := flag.String("http", config.GetEnv("TOLLGATE_HTTP_ADDR", defaultHTTPAddr), "HTTP listen address")
 	flag.Parse()
-
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	// --- Load configuration ---
 	baseDir := config.GetEnv("TOLLGATE_BASE_DIR", defaultBaseDir)
@@ -83,7 +87,8 @@ func main() {
 
 	opResolver, err := operator.NewResolver("")
 	if err != nil {
-		log.Fatalf("Fatal: operator resolver: %v", err)
+		slog.Error("operator resolver", "error", err)
+		os.Exit(1)
 	}
 	opCtx := opResolver.Resolve("", "")
 
@@ -107,48 +112,93 @@ func main() {
 
 	m := newMetrics()
 
-	// --- Start HTTP server ---
-	go startHTTP(*httpAddr, deps, m, baseDir)
+	var socketReady atomic.Bool
+	var authWG sync.WaitGroup
+
+	httpServer := newHTTPServer(*httpAddr, deps, m, baseDir, *socketPath, &socketReady, &authWG)
+
+	go func() {
+		slog.Info("HTTP server listening", "addr", *httpAddr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server", "error", err)
+			os.Exit(1)
+		}
+	}()
 
 	// --- Remove stale socket ---
 	if err := os.Remove(*socketPath); err != nil && !os.IsNotExist(err) {
-		log.Fatalf("Fatal: cannot remove stale socket %s: %v", *socketPath, err)
+		slog.Error("cannot remove stale socket", "socket", *socketPath, "error", err)
+		os.Exit(1)
 	}
 
 	// --- Listen on Unix socket ---
 	listener, err := net.Listen("unix", *socketPath)
 	if err != nil {
-		log.Fatalf("Fatal: listen %s: %v", *socketPath, err)
+		slog.Error("socket listen", "socket", *socketPath, "error", err)
+		os.Exit(1)
 	}
 
 	// Socket permissions: freerad user needs read/write.
 	os.Chmod(*socketPath, 0660)
+	socketReady.Store(true)
+
+	slog.Info("daemon starting",
+		"socket", *socketPath,
+		"http", *httpAddr,
+		"mode", authMode,
+		"operator", opCtx.Account.ID,
+	)
 
 	// --- Signal handling ---
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
+	shutdownComplete := make(chan struct{})
 	go func() {
 		sig := <-sigCh
-		log.Printf("Received %s, shutting down...", sig)
-		listener.Close()
-		os.Remove(*socketPath)
-		os.Exit(0)
-	}()
+		slog.Info("Shutting down gracefully...", "signal", sig.String())
 
-	log.Printf("Tollgate daemon: socket=%s http=%s mode=%s operator=%s",
-		*socketPath, *httpAddr, authMode, opCtx.Account.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		if err := httpServer.Shutdown(ctx); err != nil {
+			slog.Error("HTTP shutdown error", "error", err)
+		}
+
+		listener.Close()
+
+		waitDone := make(chan struct{})
+		go func() {
+			authWG.Wait()
+			close(waitDone)
+		}()
+		select {
+		case <-waitDone:
+		case <-ctx.Done():
+			slog.Warn("in-flight auth requests did not complete within timeout")
+		}
+
+		os.Remove(*socketPath)
+		slog.Info("Shutdown complete")
+		close(shutdownComplete)
+	}()
 
 	// --- Accept loop ---
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if isClosedErr(err) {
+				<-shutdownComplete
 				return
 			}
-			log.Printf("Accept error: %v", err)
+			slog.Error("accept error", "error", err)
 			continue
 		}
-		go handleSocketConn(conn, deps, m)
+		authWG.Add(1)
+		go func() {
+			defer authWG.Done()
+			handleSocketConn(conn, deps, m)
+		}()
 	}
 }
 
@@ -170,7 +220,7 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	if !scanner.Scan() {
 		m.authErrors.Add(1)
 		if err := scanner.Err(); err != nil {
-			log.Printf("Error: socket read: %v", err)
+			slog.Error("socket read", "error", err)
 		}
 		return
 	}
@@ -178,7 +228,7 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	var req auth.AuthRequest
 	if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 		m.authErrors.Add(1)
-		log.Printf("Error: parse request: %v", err)
+		slog.Error("parse request", "error", err)
 		return
 	}
 
@@ -192,7 +242,7 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	}
 
 	if result.LogMessage != "" {
-		log.Print(result.LogMessage)
+		slog.Info("auth detail", "message", result.LogMessage)
 	}
 
 	// Periodic session cleanup (~5% of requests).
@@ -205,7 +255,7 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	data, err := json.Marshal(resp)
 	if err != nil {
 		m.authErrors.Add(1)
-		log.Printf("Error: marshal response: %v", err)
+		slog.Error("marshal response", "error", err)
 		return
 	}
 	conn.Write(data)
@@ -214,13 +264,41 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 	elapsed := time.Since(start)
 	m.authUsecs.Add(elapsed.Microseconds())
 
-	log.Printf("Auth: mac=%s accept=%v duration=%v",
-		redact.LogSafe(redact.Truncate(req.MAC, 32)), result.Accept, elapsed)
+	logAuthOutcome(req.MAC, result, elapsed, deps)
+}
+
+// logAuthOutcome emits a structured slog line for an auth attempt. The
+// amount_sat and mint fields are sourced from the persisted session record
+// (written synchronously by auth.ProcessAuth on accept) so rejected requests
+// report zero/empty values.
+func logAuthOutcome(mac string, result auth.AuthResult, elapsed time.Duration, deps *auth.Dependencies) {
+	outcome := "reject"
+	if result.Accept {
+		outcome = "accept"
+	}
+
+	amountSat := 0
+	mint := ""
+	if result.Accept {
+		if rec, ok := deps.Sessions.Get(mac); ok && rec != nil {
+			amountSat = rec.Amount
+			mint = rec.Mint
+		}
+	}
+
+	slog.Info("auth request",
+		"outcome", outcome,
+		"duration_ms", elapsed.Milliseconds(),
+		"amount_sat", amountSat,
+		"session_timeout", result.SessionTimeout,
+		"mac", redact.LogSafe(redact.Truncate(mac, 32)),
+		"mint", mint,
+	)
 }
 
 // --- HTTP server ---
 
-func startHTTP(addr string, deps *auth.Dependencies, m *metrics, baseDir string) {
+func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir string, socketPath string, socketReady *atomic.Bool, authWG *sync.WaitGroup) *http.Server {
 	mux := http.NewServeMux()
 
 	wgMgr := newWGManager(baseDir + "/wg-peers.json")
@@ -229,6 +307,20 @@ func startHTTP(addr string, deps *auth.Dependencies, m *metrics, baseDir string)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"ok"}`)
+	})
+
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if !socketReady.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			io.WriteString(w, `{"status":"not ready"}`)
+			return
+		}
+		body, _ := json.Marshal(map[string]string{
+			"status": "ready",
+			"socket": socketPath,
+		})
+		w.Write(body)
 	})
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +363,9 @@ func startHTTP(addr string, deps *auth.Dependencies, m *metrics, baseDir string)
 			return
 		}
 
+		authWG.Add(1)
+		defer authWG.Done()
+
 		start := time.Now()
 		m.authTotal.Add(1)
 
@@ -283,10 +378,13 @@ func startHTTP(addr string, deps *auth.Dependencies, m *metrics, baseDir string)
 		}
 
 		if result.LogMessage != "" {
-			log.Print(result.LogMessage)
+			slog.Info("auth detail", "message", result.LogMessage)
 		}
 
-		m.authUsecs.Add(time.Since(start).Microseconds())
+		elapsed := time.Since(start)
+		m.authUsecs.Add(elapsed.Microseconds())
+
+		logAuthOutcome(req.MAC, result, elapsed, deps)
 
 		resp := auth.AuthResponseFromResult(result)
 		w.Header().Set("Content-Type", "application/json")
@@ -295,15 +393,10 @@ func startHTTP(addr string, deps *auth.Dependencies, m *metrics, baseDir string)
 
 	handleWGConnect(mux, deps, wgMgr)
 
-	srv := &http.Server{
+	return &http.Server{
 		Addr:         addr,
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
-	}
-
-	log.Printf("HTTP server on %s", addr)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("HTTP server: %v", err)
 	}
 }
