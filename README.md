@@ -107,7 +107,7 @@ make build-linux
 make deploy
 ```
 
-See [Install](#install) for the full setup guide.
+See [Install](#install) for the full setup guide, or the [Operator Deployment Guide](docs/operator-guide.md) for end-to-end instructions including AP flashing with Nostr identity, payment flow, revenue attribution, and upgrade paths.
 
 ## Architecture
 
