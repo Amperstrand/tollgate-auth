@@ -1,13 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -41,31 +42,6 @@ var (
 	sshSessiondURL = config.GetEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
 )
 
-var safeTerms = map[string]bool{
-	"vt100": true, "vt102": true, "vt220": true, "vt320": true,
-	"xterm": true, "xterm-256color": true, "xterm-color": true,
-	"linux": true, "screen": true, "screen-256color": true,
-	"dumb": true, "ansi": true, "rxvt": true, "rxvt-unicode": true,
-	"tmux": true, "tmux-256color": true,
-}
-
-func isSafeTerm(term string) bool {
-	if len(term) > 32 {
-		return false
-	}
-	return safeTerms[term]
-}
-
-// --- Session Metadata ---
-
-type SessionMeta struct {
-	Started  float64 `json:"started"`
-	Duration int     `json:"duration"`
-	Guest    string  `json:"guest"`
-	Mint     string  `json:"mint"`
-	Amount   int     `json:"amount"`
-}
-
 // --- Jail Management ---
 
 func createJail(guest string, tokenData *cashu.TokenData, seconds int) error {
@@ -76,19 +52,11 @@ func createJail(guest string, tokenData *cashu.TokenData, seconds int) error {
 		return fmt.Errorf("jail copy failed: %s: %w", string(out), err)
 	}
 
-	meta := SessionMeta{
-		Started:  float64(time.Now().Unix()),
-		Duration: seconds,
-		Guest:    guest,
-		Mint:     tokenData.Mint,
-		Amount:   tokenData.Amount,
+	guestHome := filepath.Join(jailPath, "home", guest)
+	if err := os.MkdirAll(guestHome, 0755); err != nil {
+		return fmt.Errorf("create guest home failed: %w", err)
 	}
-	data, _ := json.Marshal(meta)
-	metaPath := jailPath + "/home/nobody/.tollgate"
-	if err := os.WriteFile(metaPath, data, 0600); err != nil {
-		return fmt.Errorf("write metadata failed: %w", err)
-	}
-	os.Chown(metaPath, 65534, 65534)
+	os.Chown(guestHome, 65534, 65534)
 
 	return nil
 }
@@ -161,23 +129,18 @@ func main() {
 			return
 		}
 
-		// MOTD
-		io.WriteString(s, decision.MOTD)
-
-		// 8. Spawn chroot shell inside PTY
 		jailPath := SessionDir + "/" + guest
-		ptyReq, winCh, isPty := s.Pty()
-		cmd := exec.Command("chroot", "--userspec=nobody:nogroup", jailPath, "/bin/sh", "-l")
+		_, winCh, _ := s.Pty()
+		cmd := exec.Command("chroot", "--userspec=nobody:nogroup", jailPath, "/bin/tollgate-shell")
 		cmd.Env = []string{
-			"HOME=/home/nobody",
 			"PATH=/bin",
-		}
-		if isPty {
-			term := ptyReq.Term
-			if !isSafeTerm(term) {
-				term = "vt100"
-			}
-			cmd.Env = append(cmd.Env, fmt.Sprintf("TERM=%s", term))
+			"HOME=/home/" + guest,
+			"TOLLGATE_AMOUNT=" + strconv.Itoa(tokenData.Amount),
+			"TOLLGATE_DURATION=" + strconv.Itoa(seconds),
+			"TOLLGATE_MINT=" + tokenData.Mint,
+			"TOLLGATE_GUEST=" + guest,
+			"TOLLGATE_SESSION_START=" + strconv.FormatInt(time.Now().Unix(), 10),
+			"TERM=xterm-256color",
 		}
 
 		ptmx, err := pty.Start(cmd)
@@ -191,7 +154,6 @@ func main() {
 
 		log.Printf("Chroot shell PID=%d for %s", cmd.Process.Pid, guest)
 
-		sessionStart := time.Now()
 		done := make(chan struct{})
 		cleanupOnce := sync.Once{}
 		cleanup := func() {
@@ -222,31 +184,6 @@ func main() {
 				time.Sleep(500 * time.Millisecond)
 				cleanup()
 			case <-done:
-			}
-		}()
-
-		// Periodic time reminder
-		go func() {
-			reminderInterval := 60 * time.Second
-			if seconds < 120 {
-				reminderInterval = 15 * time.Second
-			}
-			ticker := time.NewTicker(reminderInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					elapsed := time.Since(sessionStart)
-					remaining := time.Duration(seconds)*time.Second - elapsed
-					if remaining <= 0 {
-						return
-					}
-					mins := int(remaining.Minutes())
-					secs := int(remaining.Seconds()) % 60
-					io.WriteString(s, fmt.Sprintf("\r\n  [%dm %02ds remaining]\r\n", mins, secs))
-				case <-done:
-					return
-				}
 			}
 		}()
 
