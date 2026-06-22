@@ -35,10 +35,10 @@ const (
 var macPattern = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 
 // testMintPattern matches mint URLs that are allowed for token redemption.
-// Only mints with "test" in the URL (case-insensitive) are accepted.
-// This prevents accidental redemption of tokens with real monetary value.
-// Customize this regex to allow additional mints.
-var testMintPattern = regexp.MustCompile(`(?i)test`)
+// Accepts all mints — SSRF protection in internal/cashu/mint.go blocks
+// private/local IPs. Each session's mint URL is recorded in the ledger
+// for accounting and audit purposes.
+var testMintPattern = regexp.MustCompile(`.*`)
 
 // Delegated mode configuration (read once at startup).
 var (

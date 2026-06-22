@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,12 +33,6 @@ func CheckTokenState(tokenData *TokenData) (ProofState, string) {
 
 	if !strings.HasPrefix(mintURL, "http") {
 		return "", "Invalid mint URL"
-	}
-
-	isTest := strings.Contains(strings.ToLower(mintURL), "test")
-	if !isTest {
-		log.Printf("Real-mint token (no enforcement): %s", mintURL)
-		return StateUnspent, "OK"
 	}
 
 	if !isSafeMintURL(mintURL) {

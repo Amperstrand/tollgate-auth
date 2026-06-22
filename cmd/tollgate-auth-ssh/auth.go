@@ -207,7 +207,7 @@ func renderMOTD(tokenData *cashu.TokenData, guest string, seconds int) string {
 			"  |  User:   %-28s |\r\n"+
 			"  |  Test:   %-28s |\r\n"+
 			"  +======================================+\r\n"+
-			"  |  Type 'timeleft' to see time left    |\r\n"+
+			"  |  Timer and dungeon await within.     |\r\n"+
 			"  |  Session ends when time runs out.    |\r\n"+
 			"  +======================================+\r\n"+
 			"\r\n",

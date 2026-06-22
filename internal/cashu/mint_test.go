@@ -10,40 +10,33 @@ import (
 
 // --- VerifyWithMint ---
 
-func TestVerifyWithMint_NonTestMint_SkipsVerification(t *testing.T) {
+func TestVerifyWithMint_RealMint_VerifiesViaHTTP(t *testing.T) {
 	td := &TokenData{
 		Mint:   "https://real-mint.example.com",
 		Proofs: []ProofEntry{{Amount: 8, Secret: "s1"}},
 	}
 
 	ok, msg := VerifyWithMint(td)
-	if !ok {
-		t.Errorf("non-test mint should skip verification, got ok=false msg=%q", msg)
-	}
-	if msg != "OK" {
-		t.Errorf("msg = %q, want OK", msg)
+	if ok {
+		t.Errorf("real mint should be verified via HTTP (will fail as unreachable), got ok=true msg=%q", msg)
 	}
 }
 
-func TestVerifyWithMint_NonTestMintWithServer(t *testing.T) {
-	// Server should never be called for non-test mints
-	called := false
+func TestVerifyWithMint_RealMintWithServer_SSRFProtected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"states":[{"Y":"02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d","state":"UNSPENT","witness":null}]}`))
 	}))
 	defer server.Close()
 
 	td := &TokenData{
 		Mint:   server.URL,
-		Proofs: []ProofEntry{{Amount: 8, Secret: "s1"}},
+		Proofs: []ProofEntry{{Amount: 8, Secret: "test_secret_12345", C: "02100b2c1b0f3a4d5e6f708192a3b4c5d6e7f809192a3b4c5d6e7f809192a3b4c5d"}},
 	}
 
-	ok, msg := VerifyWithMint(td)
-	if !ok {
-		t.Errorf("expected ok=true for non-test mint, got msg=%q", msg)
-	}
-	if called {
-		t.Error("server should not be called for non-test mint")
+	ok, _ := VerifyWithMint(td)
+	if ok {
+		t.Error("SSRF protection should block localhost test server")
 	}
 }
 
@@ -112,9 +105,9 @@ func TestVerifyWithMint_TrailingSlashStripped(t *testing.T) {
 		Proofs: []ProofEntry{{Amount: 1, Secret: "s"}},
 	}
 
-	ok, _ := VerifyWithMint(td)
-	if !ok {
-		t.Error("expected ok=true for non-test mint with trailing slash")
+	ok, msg := VerifyWithMint(td)
+	if ok {
+		t.Errorf("expected ok=false for unreachable mint with trailing slash, got msg=%q", msg)
 	}
 }
 

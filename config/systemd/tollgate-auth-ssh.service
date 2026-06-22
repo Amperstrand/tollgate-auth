@@ -1,0 +1,22 @@
+[Unit]
+Description=Tollgate Auth SSH Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/cashu-tollgate/tollgate-auth-ssh
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/opt/cashu-tollgate
+
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=100
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

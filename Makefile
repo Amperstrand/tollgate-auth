@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius build-settle build-daemon build-shim deploy deploy-radius deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius build-settle build-daemon build-shim build-shell deploy deploy-radius deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
 TOLLGATE_RS_DIR ?= $(HOME)/src/tollgate-rs
 
@@ -6,6 +6,7 @@ SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
 DAEMON_BINARY := tollgate-daemon
 SHIM_BINARY := tollgate-shim
+SHELL_BINARY := tollgate-shell
 REMOTE_USER := root
 REMOTE_HOST := nodns.shop
 REMOTE_PORT := 22
@@ -28,6 +29,9 @@ build-daemon:
 
 build-shim:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(SHIM_BINARY) ./cmd/tollgate-shim/
+
+build-shell:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(SHELL_BINARY) ./cmd/tollgate-shell/
 
 deploy: build-linux
 	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY)
@@ -140,7 +144,7 @@ deploy-certs:
 		 systemctl enable sync-caddy-certs.timer && \
 		 /usr/local/sbin/sync-caddy-certs-to-freeradius'
 
-deploy-jail:
+deploy-jail: build-shell
 	scp -P $(REMOTE_PORT) scripts/setup-jail.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/setup-jail.sh
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
 		'bash /tmp/setup-jail.sh'

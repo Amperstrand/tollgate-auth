@@ -233,7 +233,7 @@ func TestProcessAuth_ReplayedToken_Reject(t *testing.T) {
 	}
 }
 
-func TestProcessAuth_NonTestMint_Reject(t *testing.T) {
+func TestProcessAuth_AnyMint_Accepted(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.DecodeResult = &cashu.TokenData{
@@ -243,11 +243,8 @@ func TestProcessAuth_NonTestMint_Reject(t *testing.T) {
 
 	result := auth.ProcessAuth(deps, "cashuBfake", "aa:bb:cc:dd:ee:ff", "", "", "", "")
 
-	if result.Accept {
-		t.Fatal("expected Reject")
-	}
-	if !strings.Contains(result.ReplyMessage, "not a testnet mint") {
-		t.Errorf("ReplyMessage = %q", result.ReplyMessage)
+	if !result.Accept {
+		t.Fatalf("expected Accept for non-test mint, got: %s", result.ReplyMessage)
 	}
 }
 

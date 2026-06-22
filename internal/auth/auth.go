@@ -33,7 +33,7 @@ const (
 
 // Patterns.
 var (
-	TestMintPattern = regexp.MustCompile(`(?i)test`)
+	TestMintPattern = regexp.MustCompile(`.*`)
 	MacPattern      = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 )
 
@@ -346,8 +346,8 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 	if !IsTestMint(tokenData.Mint) {
 		return AuthResult{
 			Accept:       false,
-			ReplyMessage: fmt.Sprintf("Rejected: mint '%s' is not a testnet mint \u2014 only test mints accepted", tokenData.Mint),
-			LogMessage:   fmt.Sprintf("Reject: non-test mint (%s) \u2014 only test mints are accepted", tokenData.Mint),
+			ReplyMessage: fmt.Sprintf("Rejected: mint '%s' is not allowed", tokenData.Mint),
+			LogMessage:   fmt.Sprintf("Reject: mint not allowed (%s)", tokenData.Mint),
 		}
 	}
 
