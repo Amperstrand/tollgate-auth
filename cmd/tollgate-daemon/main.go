@@ -78,6 +78,7 @@ func main() {
 	walletDir := config.GetEnv("TOLLGATE_WALLET_DIR", defaultWalletDir)
 	authMode := config.GetEnv("TOLLGATE_AUTH_MODE", "local")
 	sessiondURL := config.GetEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
+	adminToken := config.GetEnv("TOLLGATE_ADMIN_TOKEN", "")
 
 	// --- Initialize dependencies (once, kept warm) ---
 	sessionsDir := baseDir + "/radius-sessions"
@@ -126,7 +127,15 @@ func main() {
 	var socketReady atomic.Bool
 	var authWG sync.WaitGroup
 
-	httpServer := newHTTPServer(*httpAddr, deps, m, baseDir, *socketPath, &socketReady, &authWG)
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			deps.Sessions.Cleanup()
+		}
+	}()
+
+	httpServer := newHTTPServer(*httpAddr, deps, m, baseDir, *socketPath, &socketReady, &authWG, adminToken)
 
 	go func() {
 		slog.Info("HTTP server listening", "addr", *httpAddr)
@@ -258,11 +267,6 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 		slog.Info("auth detail", "message", result.LogMessage)
 	}
 
-	// Periodic session cleanup (~5% of requests).
-	if time.Now().UnixNano()%20 == 0 {
-		deps.Sessions.Cleanup()
-	}
-
 	// Send response.
 	resp := auth.AuthResponseFromResult(result)
 	data, err := json.Marshal(resp)
@@ -336,7 +340,7 @@ func recordAuthLedger(deps *auth.Dependencies, result auth.AuthResult, nasID, cl
 
 // --- HTTP server ---
 
-func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir string, socketPath string, socketReady *atomic.Bool, authWG *sync.WaitGroup) *http.Server {
+func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir string, socketPath string, socketReady *atomic.Bool, authWG *sync.WaitGroup, adminToken string) *http.Server {
 	mux := http.NewServeMux()
 
 	wgMgr := newWGManager(baseDir + "/wg-peers.json")
@@ -362,6 +366,14 @@ func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir str
 	})
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if adminToken != "" {
+			provided := r.Header.Get("Authorization")
+			expected := "Bearer " + adminToken
+			if provided != expected {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
 		total := m.authTotal.Load()
 		accept := m.authAccept.Load()
 		reject := m.authReject.Load()
