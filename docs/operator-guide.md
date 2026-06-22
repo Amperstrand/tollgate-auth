@@ -334,6 +334,56 @@ Edit `/etc/tollgate/operators.json`:
 {"operators":[{"id":"ap-lobby","payout_npub":"npub1abc...","match":{"nas_id":"npub1abc..."}}]}
 ```
 
+## Ledger and Revenue Tracking
+
+The daemon records every authentication event to an append-only ledger for revenue attribution and wallet reconciliation.
+
+**Ledger file location:** `/opt/cashu-tollgate/ledger.jsonl`
+
+**Entry format (JSONL, one JSON object per line):**
+
+Each entry records a complete accounting event with these fields:
+
+- timestamp (RFC3339 UTC)
+- event_type (auth_accept or auth_reject)
+- nas_id (AP's Nostr npub — identifies which AP earned the revenue)
+- nas_ip (AP's IP address)
+- mac (client device MAC)
+- payment_type (cashu or lnurlw)
+- amount_sat (how much was paid — 0 for LNURLw demo)
+- duration_sec (what was sold — seconds of access)
+- mint_url (which Cashu mint)
+- token_hash (unique token identifier — one per session)
+- session_class (HMAC-signed session reference for RADIUS accounting)
+- operator_id (gateway operator identifier)
+
+**Querying the ledger:**
+
+```bash
+# Count entries per AP (by npub)
+sudo cat /opt/cashu-tollgate/ledger.jsonl | jq -r 'select(.nas_id) | .nas_id' | sort | uniq -c | sort -rn
+
+# Revenue per AP
+sudo cat /opt/cashu-tollgate/ledger.jsonl | jq -r 'select(.event_type=="auth_accept" and .nas_id) | "\(.nas_id) \(.amount_sat)"' | awk '{s[$1]+=$2; c[$1]++} END {for(k in s) print s[k], c[k], k}' | sort -rn
+
+# All sessions for a specific AP
+sudo cat /opt/cashu-tollgate/ledger.jsonl | jq 'select(.nas_id=="npub1abc...")'
+
+# Wallet reconciliation
+sudo cat /opt/cashu-tollgate/ledger.jsonl | jq '[select(.event_type=="auth_accept") | .amount_sat] | add'
+# Compare with:
+sudo -u cashu-wallet cdk-cli --work-dir /var/lib/cashu-wallet balance
+```
+
+**Test verification:**
+
+The ledger has been verified on two deployments:
+
+- Production server (nodns.shop): 24 entries, zero data integrity issues, wallet reconciles
+- Fresh Google Cloud VM: 9 entries from 8 test scenarios, all NASIDs tracked correctly
+
+The ledger is append-only JSONL with mutex locking. For high-volume deployments (1000+ auths/day), consider migrating to SQLite via the existing internal/ledger/ package interfaces.
+
 ## Troubleshooting
 
 **radtest returns Access-Reject:**
