@@ -35,14 +35,14 @@ func TestE2ECashuAcceptFullFlow(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 480 {
-		t.Errorf("SessionTimeout = %d, want 480", result.SessionTimeout)
+	if result.SessionTimeout != 80 {
+		t.Errorf("SessionTimeout = %d, want 80", result.SessionTimeout)
 	}
 	if !strings.Contains(result.ReplyMessage, "8 sat") {
 		t.Errorf("ReplyMessage should contain '8 sat': %q", result.ReplyMessage)
 	}
-	if !strings.Contains(result.ReplyMessage, "8m") {
-		t.Errorf("ReplyMessage should contain '8m': %q", result.ReplyMessage)
+	if !strings.Contains(result.ReplyMessage, "1m") {
+		t.Errorf("ReplyMessage should contain '1m': %q", result.ReplyMessage)
 	}
 
 	sessionPath := deps.Sessions.Path(mac)
@@ -89,10 +89,10 @@ func TestE2ELNURLwAcceptFullFlow(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 3600 {
-		t.Errorf("SessionTimeout = %d, want 3600", result.SessionTimeout)
+	if result.SessionTimeout != 600 {
+		t.Errorf("SessionTimeout = %d, want 600", result.SessionTimeout)
 	}
-	if !strings.Contains(result.ReplyMessage, "60m") {
+	if !strings.Contains(result.ReplyMessage, "10m") {
 		t.Errorf("ReplyMessage should contain '60m': %q", result.ReplyMessage)
 	}
 }
@@ -106,8 +106,8 @@ func TestE2ESplitTokenFullFlow(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 480 {
-		t.Errorf("SessionTimeout = %d, want 480", result.SessionTimeout)
+	if result.SessionTimeout != 80 {
+		t.Errorf("SessionTimeout = %d, want 80", result.SessionTimeout)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestE2EMultipleAmounts(t *testing.T) {
 			if !result.Accept {
 				t.Fatalf("expected Accept: %s", result.ReplyMessage)
 			}
-			wantTimeout := amount * 60
+			wantTimeout := amount * 10
 			if result.SessionTimeout != wantTimeout {
 				t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, wantTimeout)
 			}

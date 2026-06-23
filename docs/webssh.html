@@ -48,7 +48,7 @@ h1{font-size:1.4rem;margin-bottom:.25rem;color:#fff;text-align:center}
 <ol class="steps">
 <li>Get a free <strong>Cashu token</strong> from the testnut faucet (fake Bitcoin, zero value).</li>
 <li>Click <strong>Connect</strong> to open an SSH session in your browser.</li>
-<li>You get <strong>1 minute per satoshi</strong>. An 8-sat token = 8 minutes of shell time.</li>
+<li>You get <strong>10 seconds per satoshi</strong>. A 64-sat token = about 10 minutes of game time.</li>
 <li>Choose <strong>Timer mode</strong> (countdown) or <strong>Adventure mode</strong> (Crypt of Cashu dungeon crawler).</li>
 </ol>
 <p class="info">New to Cashu? It's a Bitcoin ecash system. Tokens are bearer instruments — anyone with the token string can redeem them. <a href="https://cashu.space" target="_blank">Learn more</a>. You can also get tokens from <a href="https://amperstrand.github.io/tollgate-auth/">the faucet</a> or any Cashu wallet.</p>
@@ -70,8 +70,13 @@ h1{font-size:1.4rem;margin-bottom:.25rem;color:#fff;text-align:center}
 
 <div class="card">
 <h2>2. Connect via browser SSH</h2>
+<p class="info">Or use a real terminal: copy the command below.</p>
+<div class="token-box" style="margin-bottom:.5rem">
+<input type="text" class="token-input" id="sshCmd" readonly placeholder="ssh command appears here after minting" style="font-size:.75rem">
+<button class="btn secondary" id="copySshBtn">Copy SSH Cmd</button>
+</div>
 <div class="btn-row">
-<button class="btn" id="connectBtn" disabled>Connect</button>
+<button class="btn" id="connectBtn" disabled>Connect in Browser</button>
 <button class="btn secondary" id="disconnectBtn" style="display:none">Disconnect</button>
 </div>
 <div class="status" id="connStatus"></div>
@@ -129,7 +134,7 @@ mintBtn.addEventListener('click', async () => {
     try {
         const wallet = new Wallet(MINT_URL, 'sat');
         await wallet.loadMint();
-        const quote = await wallet.createMintQuoteBolt11(8);
+        const quote = await wallet.createMintQuoteBolt11(64);
         setStatus(mintStatus, 'Waiting for payment (testnut auto-pays)...', false);
         let paid = false;
         for (let i = 0; i < 30; i++) {
@@ -139,11 +144,12 @@ mintBtn.addEventListener('click', async () => {
         }
         if (!paid) throw new Error('Payment timeout (testnut should auto-pay)');
         setStatus(mintStatus, 'Minting proofs...', false);
-        const proofs = await wallet.mintProofsBolt11(8, quote.quote);
+        const proofs = await wallet.mintProofsBolt11(64, quote.quote);
         const token = getEncodedToken({ mint: MINT_URL, proofs });
         tokenInput.value = token;
         connectBtn.disabled = false;
-        setStatus(mintStatus, 'Success! 8-sat token minted (8 minutes of access).', false);
+        document.getElementById('sshCmd').value = `ssh -p 2222 -l ${token} nodns.shop`;
+        setStatus(mintStatus, 'Success! 64-sat token minted (about 10 minutes at 10s/sat).', false);
     } catch (e) {
         setStatus(mintStatus, 'Error: ' + e.message, true);
     }
@@ -157,6 +163,16 @@ copyBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(v).then(() => {
         copyToast.classList.add('show');
         setTimeout(() => copyToast.classList.remove('show'), 1500);
+    });
+});
+
+document.getElementById('copySshBtn').addEventListener('click', () => {
+    const v = document.getElementById('sshCmd').value.trim();
+    if (!v) return;
+    navigator.clipboard.writeText(v).then(() => {
+        copyToast.textContent = 'SSH command copied!';
+        copyToast.classList.add('show');
+        setTimeout(() => { copyToast.classList.remove('show'); copyToast.textContent = 'Copied!'; }, 1500);
     });
 });
 

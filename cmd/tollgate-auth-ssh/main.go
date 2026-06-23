@@ -28,7 +28,7 @@ import (
 
 const (
 	Port          = 2222
-	RateSecPerSat = 60
+	RateSecPerSat = 10
 	BaseDir       = "/opt/cashu-tollgate"
 	JailTemplate  = BaseDir + "/jail-template"
 	SessionDir    = BaseDir + "/sessions"

@@ -61,8 +61,8 @@ func TestProcessSSHAuth_Local_ValidToken_Accept(t *testing.T) {
 	if !decision.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", decision.Error)
 	}
-	if decision.Seconds != 8*60 {
-		t.Errorf("Seconds = %d, want %d", decision.Seconds, 8*60)
+	if decision.Seconds != 8*10 {
+		t.Errorf("Seconds = %d, want %d", decision.Seconds, 8*10)
 	}
 	if decision.TokenData == nil {
 		t.Fatal("TokenData should not be nil on Accept")
@@ -87,7 +87,7 @@ func TestProcessSSHAuth_Local_MOTD_ContainsFields(t *testing.T) {
 	if !strings.Contains(decision.MOTD, "8 sat") {
 		t.Errorf("MOTD should contain '8 sat': %q", decision.MOTD)
 	}
-	if !strings.Contains(decision.MOTD, "480 sec") {
+	if !strings.Contains(decision.MOTD, "80 sec") {
 		t.Errorf("MOTD should contain '480 sec': %q", decision.MOTD)
 	}
 	if !strings.Contains(decision.MOTD, decision.Guest) {
@@ -472,11 +472,11 @@ func TestProcessSSHAuth_Local_MultipleAmounts(t *testing.T) {
 		amount  int
 		wantSec int
 	}{
-		{1, 60},
-		{8, 480},
-		{30, 1800},
-		{60, 3600},
-		{100, 6000},
+		{1, 10},
+		{8, 80},
+		{30, 300},
+		{60, 600},
+		{100, 1000},
 	}
 
 	for _, tc := range tests {

@@ -67,8 +67,8 @@ func TestProcessAuth_CashuTokenInUsername_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 8*60 {
-		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 8*60)
+	if result.SessionTimeout != 8*10 {
+		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 8*10)
 	}
 	if result.AcctInterval != 60 {
 		t.Errorf("AcctInterval = %d, want 60", result.AcctInterval)
@@ -93,8 +93,8 @@ func TestProcessAuth_CashuTokenInPassword_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 16*60 {
-		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 16*60)
+	if result.SessionTimeout != 16*10 {
+		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 16*10)
 	}
 }
 
@@ -107,8 +107,8 @@ func TestProcessAuth_CashuTokenInCleartextPassword_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 4*60 {
-		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 4*60)
+	if result.SessionTimeout != 4*10 {
+		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 4*10)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestProcessAuth_LNURLwInUsername_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 3600 {
-		t.Errorf("SessionTimeout = %d, want 3600", result.SessionTimeout)
+	if result.SessionTimeout != 600 {
+		t.Errorf("SessionTimeout = %d, want 600", result.SessionTimeout)
 	}
 	if !strings.Contains(result.ReplyMessage, "LNURLw") {
 		t.Errorf("ReplyMessage should contain 'LNURLw': %q", result.ReplyMessage)
@@ -136,8 +136,8 @@ func TestProcessAuth_LNURLwInPassword_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 3600 {
-		t.Errorf("SessionTimeout = %d, want 3600", result.SessionTimeout)
+	if result.SessionTimeout != 600 {
+		t.Errorf("SessionTimeout = %d, want 600", result.SessionTimeout)
 	}
 }
 
@@ -150,8 +150,8 @@ func TestProcessAuth_SplitToken_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept, got Reject: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 8*60 {
-		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 8*60)
+	if result.SessionTimeout != 8*10 {
+		t.Errorf("SessionTimeout = %d, want %d", result.SessionTimeout, 8*10)
 	}
 }
 
@@ -377,8 +377,8 @@ func TestProcessAuth_UppercaseLNURLW_Accept(t *testing.T) {
 	if !result.Accept {
 		t.Fatalf("expected Accept: %s", result.ReplyMessage)
 	}
-	if result.SessionTimeout != 3600 {
-		t.Errorf("SessionTimeout = %d, want 3600", result.SessionTimeout)
+	if result.SessionTimeout != 600 {
+		t.Errorf("SessionTimeout = %d, want 600", result.SessionTimeout)
 	}
 }
 
@@ -416,8 +416,8 @@ func TestProcessAuth_SessionSavedOnAccept(t *testing.T) {
 	if rec.Amount != 8 {
 		t.Errorf("session amount = %d, want 8", rec.Amount)
 	}
-	if rec.Duration != 8*60 {
-		t.Errorf("session duration = %d, want %d", rec.Duration, 8*60)
+	if rec.Duration != 8*10 {
+		t.Errorf("session duration = %d, want %d", rec.Duration, 8*10)
 	}
 	if rec.PayType != radiusauth.PaymentCashu {
 		t.Errorf("session paytype = %q, want cashu", rec.PayType)
@@ -438,8 +438,8 @@ func TestProcessAuth_LNURLwSessionSavedOnAccept(t *testing.T) {
 	if !found {
 		t.Fatal("session should be saved")
 	}
-	if rec.Duration != 3600 {
-		t.Errorf("session duration = %d, want 3600", rec.Duration)
+	if rec.Duration != 600 {
+		t.Errorf("session duration = %d, want 600", rec.Duration)
 	}
 	if rec.PayType != radiusauth.PaymentLNURLW {
 		t.Errorf("session paytype = %q, want lnurlw", rec.PayType)
@@ -491,10 +491,10 @@ func TestProcessAuth_MultipleAmounts(t *testing.T) {
 		wantSec int
 		wantMin int
 	}{
-		{1, 60, 1},
-		{8, 480, 8},
-		{60, 3600, 60},
-		{100, 6000, 100},
+		{1, 10, 0},
+		{8, 80, 1},
+		{60, 600, 10},
+		{100, 1000, 16},
 	}
 
 	for _, tc := range tests {
@@ -651,8 +651,8 @@ func TestProcessAuth_DelegatedCashu_Accept(t *testing.T) {
 	if bs.Called != 1 {
 		t.Errorf("Bootstrap should be called once, got %d", bs.Called)
 	}
-	if result.SessionTimeout != 480 {
-		t.Errorf("SessionTimeout = %d, want 480", result.SessionTimeout)
+	if result.SessionTimeout != 80 {
+		t.Errorf("SessionTimeout = %d, want 80", result.SessionTimeout)
 	}
 	if !strings.Contains(result.ReplyMessage, "Valid Cashu token") {
 		t.Errorf("ReplyMessage should contain 'Valid Cashu token': %q", result.ReplyMessage)
