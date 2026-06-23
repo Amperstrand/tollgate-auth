@@ -143,7 +143,7 @@ type FakeBootstrapper struct {
 
 func NewFakeBootstrapper() *FakeBootstrapper {
 	return &FakeBootstrapper{
-		Result: &BootstrapResult{AllotmentMs: 480000, AmountSat: 8, EffectiveRateSecPerSat: 60},
+		Result: &BootstrapResult{AllotmentMs: 80000, AmountSat: 8, EffectiveRateSecPerSat: 10},
 	}
 }
 

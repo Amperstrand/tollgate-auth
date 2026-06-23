@@ -27,8 +27,8 @@ const (
 	BaseDir          = "/opt/cashu-tollgate"
 	WalletDir        = "/var/lib/cashu-wallet"
 	TokensLogFile    = BaseDir + "/radius-tokens.log"
-	RateSecPerSat    = 60
-	LNURLWDefaultSec = 3600 // 1 hour default for lnurlw (until we claim and know the amount)
+	RateSecPerSat    = 10
+	LNURLWDefaultSec = 600 // 10 minutes default for lnurlw (until we claim and know the amount)
 )
 
 // macPattern validates Calling-Station-Id: hex digits, colons, dashes, or empty.

@@ -27,8 +27,8 @@ import (
 
 // Rate constants.
 const (
-	RateSecPerSat    = 60   // seconds of access per sat
-	LNURLWDefaultSec = 3600 // 1 hour default for lnurlw
+	RateSecPerSat    = 10  // seconds of access per sat (testnuts are free, generous rate)
+	LNURLWDefaultSec = 600 // 10 minutes default for lnurlw
 )
 
 // Patterns.

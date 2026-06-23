@@ -1,0 +1,51 @@
+- generic [active] [ref=e1]:
+  - heading "tollgate-auth" [level=1] [ref=e2]
+  - paragraph [ref=e3]: Ecash for SSH access — try it in your browser
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "How it works" [level=2] [ref=e6]
+      - list [ref=e7]:
+        - listitem [ref=e8]:
+          - text: Get a free
+          - strong [ref=e9]: Cashu token
+          - text: from the testnut faucet (fake Bitcoin, zero value).
+        - listitem [ref=e10]:
+          - text: Click
+          - strong [ref=e11]: Connect
+          - text: to open an SSH session in your browser.
+        - listitem [ref=e12]:
+          - text: You get
+          - strong [ref=e13]: 1 minute per satoshi
+          - text: . An 8-sat token = 8 minutes of shell time.
+        - listitem [ref=e14]:
+          - text: Choose
+          - strong [ref=e15]: Timer mode
+          - text: (countdown) or
+          - strong [ref=e16]: Adventure mode
+          - text: (Crypt of Cashu dungeon crawler).
+      - paragraph [ref=e17]:
+        - text: New to Cashu? It's a Bitcoin ecash system. Tokens are bearer instruments — anyone with the token string can redeem them.
+        - link "Learn more" [ref=e18] [cursor=pointer]:
+          - /url: https://cashu.space
+        - text: . You can also get tokens from
+        - link "the faucet" [ref=e19] [cursor=pointer]:
+          - /url: https://amperstrand.github.io/tollgate-auth/
+        - text: or any Cashu wallet.
+    - generic [ref=e20]:
+      - heading "1. Get a token" [level=2] [ref=e21]
+      - paragraph [ref=e22]:
+        - text: Click to mint a free test token from
+        - link "testnut.cashu.space" [ref=e23] [cursor=pointer]:
+          - /url: https://testnut.cashu.space
+        - text: . Or paste your own.
+      - generic [ref=e24]:
+        - textbox "cashuB... (paste token or click Mint)" [ref=e25]: cashuBo2FteB5odHRwczovL3Rlc3RudXQuY2FzaHUuZXhjaGFuZ2VhdWNzYXRhdIGiYWlIAI6Ai4mswUFhcIGkYWEIYXN4QDRlYTU3NWM3ZmFhYjMzYjBkMDg0NjdjNjRjMDdkMDdiZTY3Mjk2NWY3YTY4YmM3Mzk3MTRiMjM0YTc1NzM4NTZhY1ghA_XCcU2u4BhW1D5SrUW6Epx70L8u9QMAHjNUXVuMZ3G5YWSjYWVYIDKtxpLREOnLG0a7_llM7q2SJRbgVOC09UOe3XWLzjEfYXNYIFbFsSGgSihFEnrdyxGbbHTxKpAKuhXGTHIomVhwXjsAYXJYIPKTzwezmzGShmdtLCvfeMJLkz7iDgpI1zn8Odjdjr4k
+        - button "Mint Free Token" [ref=e36] [cursor=pointer]
+      - generic [ref=e27]:
+        - button "Copy to Clipboard" [ref=e28] [cursor=pointer]
+        - button "Clear" [ref=e29] [cursor=pointer]
+      - generic [ref=e35]: Success! 8-sat token minted (8 minutes of access).
+    - generic [ref=e30]:
+      - heading "2. Connect via browser SSH" [level=2] [ref=e31]
+      - button "Connect" [ref=e33] [cursor=pointer]
+  - generic: Copied!

@@ -1,0 +1,54 @@
+[    4112ms] [ERROR] Refused to get unsafe header "X-Sg-Cs" @ https://www.google.com/search?q=dvmdash.ilve&oq=dvmdash.ilve&gs_lcrp=EgZjaHJvbWUyBggAEEUYOdIBCDI4NDBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8&sei=Who6ao_SJeGmwPAPyYfZ-AM:74
+[    4112ms] [ERROR] Refused to get unsafe header "X-Sorry-Redirect" @ https://www.google.com/search?q=dvmdash.ilve&oq=dvmdash.ilve&gs_lcrp=EgZjaHJvbWUyBggAEEUYOdIBCDI4NDBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8&sei=Who6ao_SJeGmwPAPyYfZ-AM:74
+[    5006ms] [ERROR] Refused to get unsafe header "X-Sg-Cs" @ https://www.google.com/search?q=dvmdash.ilve&oq=dvmdash.ilve&gs_lcrp=EgZjaHJvbWUyBggAEEUYOdIBCDI4NDBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8&sei=Who6ao_SJeGmwPAPyYfZ-AM:74
+[    5006ms] [ERROR] Refused to get unsafe header "X-Sorry-Redirect" @ https://www.google.com/search?q=dvmdash.ilve&oq=dvmdash.ilve&gs_lcrp=EgZjaHJvbWUyBggAEEUYOdIBCDI4NDBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8&sei=Who6ao_SJeGmwPAPyYfZ-AM:74
+[    7953ms] [ERROR] Refused to get unsafe header "X-Sg-Cs" @ https://www.google.com/search?q=dvmdash.ilve&oq=dvmdash.ilve&gs_lcrp=EgZjaHJvbWUyBggAEEUYOdIBCDI4NDBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8&sei=Who6ao_SJeGmwPAPyYfZ-AM:74
+[    7953ms] [ERROR] Refused to get unsafe header "X-Sorry-Redirect" @ https://www.google.com/search?q=dvmdash.ilve&oq=dvmdash.ilve&gs_lcrp=EgZjaHJvbWUyBggAEEUYOdIBCDI4NDBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8&sei=Who6ao_SJeGmwPAPyYfZ-AM:74
+[    9343ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://dvmdash.live/favicon.ico:0
+[   10050ms] [LOG] NDK connected to relays @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   14159ms] [LOG] Starting to load DVMs... @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   14165ms] [LOG] Relay settings updated. Please reload the page for changes to take effect. @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   17211ms] [LOG] All fetch promises resolved {legacyCount: 565, contextCount: 35, encryptedCount: 0} @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   17212ms] [ERROR] Error parsing legacy DVM profile: SyntaxError: Unexpected token 'T', "This is th"... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at x (https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:24525)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18657
+    at Array.map (<anonymous>)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18635 @ https://dvmdash.live/_next/static/chunks/117-de1165d68dea29f3.js:0
+[   17212ms] [ERROR] Error parsing legacy DVM profile: SyntaxError: Unexpected token 'W', "What ever "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at x (https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:24525)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18657
+    at Array.map (<anonymous>)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18635 @ https://dvmdash.live/_next/static/chunks/117-de1165d68dea29f3.js:0
+[   17212ms] [ERROR] Error parsing legacy DVM profile: SyntaxError: Unexpected end of JSON input
+    at JSON.parse (<anonymous>)
+    at x (https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:24525)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18657
+    at Array.map (<anonymous>)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18635 @ https://dvmdash.live/_next/static/chunks/117-de1165d68dea29f3.js:0
+[   17212ms] [ERROR] Error parsing legacy DVM profile: SyntaxError: Unexpected end of JSON input
+    at JSON.parse (<anonymous>)
+    at x (https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:24525)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18657
+    at Array.map (<anonymous>)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18635 @ https://dvmdash.live/_next/static/chunks/117-de1165d68dea29f3.js:0
+[   17213ms] [ERROR] Error parsing legacy DVM profile: SyntaxError: Unexpected token 'C', "Crypto dat"... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at x (https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:24525)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18657
+    at Array.map (<anonymous>)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18635 @ https://dvmdash.live/_next/static/chunks/117-de1165d68dea29f3.js:0
+[   17214ms] [ERROR] Error parsing legacy DVM profile: SyntaxError: Unexpected token 'E', "Echoes inp"... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at x (https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:24525)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18657
+    at Array.map (<anonymous>)
+    at https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:1:18635 @ https://dvmdash.live/_next/static/chunks/117-de1165d68dea29f3.js:0
+[   17216ms] [LOG] Total 594 DVMs loaded @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   17216ms] [LOG] Loading complete @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   17583ms] [LOG] Relay settings updated. Please reload the page for changes to take effect. @ https://dvmdash.live/_next/static/chunks/app/dvms/page-c63637d7c3f2c67f.js:0
+[   18953ms] [ERROR] Failed to load resource: net::ERR_CERT_COMMON_NAME_INVALID @ https://pixel.xx.kg/avatar.png:0
+[   28536ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://milo.antaeus.local/avatar.png:0
+[   92801ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ https://nostr.band/android-chrome-192x192.png:0
+[ 4746211ms] [ERROR] WebSocket connection to 'wss://relay.snort.social/' failed: Error during WebSocket handshake: Unexpected response code: 503 @ https://dvmdash.live/_next/static/chunks/5620042a-cbe3eb88fd179601.js:0
