@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 )
+
+//go:embed index.html
+var indexHTML []byte
 
 const (
 	defaultSSHAddr   = "localhost:2222"
@@ -151,8 +155,8 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=https://amperstrand.github.io/tollgate-auth/webssh.html"></head><body>Redirecting to demo page...</body></html>`))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexHTML)
 	})
 
 	slog.Info("tollgate-webssh starting", "listen", listenAddr, "ssh", defaultSSHAddr)
