@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>tollgate-auth — Browser SSH Demo</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem}
@@ -82,16 +82,17 @@ h1{font-size:1.4rem;margin-bottom:.25rem;color:#fff;text-align:center}
 <div id="terminal-container">
 <div id="terminal"></div>
 </div>
+<pre id="debugLog" style="font-size:10px;color:#666;max-height:100px;overflow:auto;margin-top:5px"></pre>
 </div>
 
 </div>
 
 <div class="copy-toast" id="copyToast">Copied!</div>
 
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <script type="module">
 import { Wallet, getEncodedToken, MintQuoteState } from 'https://esm.sh/@cashu/cashu-ts@4.5.1';
-import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm';
-import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/+esm';
 
 const MINT_URL = 'https://testnut.cashu.exchange';
 const WS_URL = 'wss://nodns.shop/webssh/ws';
@@ -172,11 +173,11 @@ connectBtn.addEventListener('click', () => {
     setStatus(connStatus, 'Connecting...', false);
 
     term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'Menlo, Monaco, "Courier New", monospace' });
-    fitAddon = new FitAddon();
+    fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
-    term.open(document.getElementById('terminal'));
-    fitAddon.fit();
     terminalCard.classList.add('active');
+    term.open(document.getElementById('terminal'));
+    setTimeout(() => fitAddon.fit(), 50);
     term.write('\r\nConnecting to tollgate-auth SSH server...\r\n');
 
     ws = new WebSocket(WS_URL);
@@ -185,14 +186,20 @@ connectBtn.addEventListener('click', () => {
     ws.onopen = () => {
         setStatus(connStatus, 'Authenticating with Cashu token...', false);
         term.write('Authenticating...\r\n');
+        document.getElementById('debugLog').textContent += '[onopen] fired\n';
         ws.send(token);
         connectBtn.style.display = 'none';
         disconnectBtn.style.display = '';
     };
 
     ws.onmessage = (e) => {
-        const data = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : new TextEncoder().encode(e.data);
-        term.write(data);
+        const len = e.data instanceof ArrayBuffer ? e.data.byteLength : e.data.length;
+        document.getElementById('debugLog').textContent += `[onmessage] ${len} bytes\n`;
+        if (typeof e.data === 'string') {
+            term.write(e.data);
+        } else {
+            term.write(new Uint8Array(e.data));
+        }
     };
 
     ws.onerror = () => {

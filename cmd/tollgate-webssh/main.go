@@ -96,6 +96,10 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("webssh session started", "remote", r.RemoteAddr)
 
+	testCtx, testCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	c.Write(testCtx, websocket.MessageText, []byte("\r\n[bridge: connected, waiting for shell output]\r\n"))
+	testCancel()
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -122,7 +126,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			n, err := stdout.Read(buf)
 			if n > 0 {
 				writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				c.Write(writeCtx, websocket.MessageBinary, buf[:n])
+				if wErr := c.Write(writeCtx, websocket.MessageText, buf[:n]); wErr != nil {
+					slog.Error("ws write", "error", wErr, "bytes", n)
+				}
 				cancel()
 			}
 			if err != nil {
