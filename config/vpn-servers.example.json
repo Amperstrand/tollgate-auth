@@ -1,0 +1,8 @@
+{
+  "europa-ks": {
+    "endpoint": "66.92.204.236:51820",
+    "pubkey": "REPLACE_WITH_WG_SERVER_PUBKEY",
+    "subnet": "10.66.42.0/24",
+    "listen_port": 51820
+  }
+}
