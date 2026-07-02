@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,8 +182,9 @@ func getServerPubkey() string {
 }
 
 type wgConnectRequest struct {
-	Token  string `json:"token"`
-	Pubkey string `json:"pubkey"`
+	Token    string `json:"token"`
+	Pubkey   string `json:"pubkey"`
+	ServerID string `json:"server_id"`
 }
 
 type wgConnectResponse struct {
@@ -191,9 +193,11 @@ type wgConnectResponse struct {
 	ServerPubkey   string `json:"server_pubkey"`
 	DNS            string `json:"dns"`
 	ExpiresAt      int64  `json:"expires_at"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	JWT            string `json:"jwt,omitempty"`
 }
 
-func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager) {
+func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager, signer *jwtSigner, registry *serverRegistry) {
 	mux.HandleFunc("/v1/wg/connect", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -229,6 +233,66 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 			return
 		}
 
+		expiresAt := time.Now().Unix() + int64(result.SessionTimeout)
+
+		if req.ServerID != "" && signer != nil && registry != nil {
+			srv, ok := registry.get(req.ServerID)
+			if !ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error": fmt.Sprintf("unknown server_id: %s", req.ServerID),
+				})
+				return
+			}
+
+			parts := strings.SplitN(srv.Subnet, "/", 2)
+			base := parts[0]
+			octets := strings.Split(base, ".")
+			if len(octets) != 4 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid subnet in registry"})
+				return
+			}
+			ipCounter := mgr.nextIP
+			if ipCounter < 2 {
+				ipCounter = 2
+			}
+			mgr.nextIP++
+			clientIP := fmt.Sprintf("%s.%s.%s.%d", octets[0], octets[1], octets[2], ipCounter)
+
+			jwt, err := registry.signSessionFor(signer, req.ServerID, req.Pubkey, clientIP, expiresAt)
+			if err != nil {
+				slog.Error("jwt sign failed", "error", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "failed to sign authorization"})
+				return
+			}
+
+			slog.Info("wg remote session authorized",
+				"server_id", req.ServerID,
+				"pubkey", truncatePubkey(req.Pubkey),
+				"ip", clientIP,
+				"expires_at", expiresAt,
+			)
+
+			resp := wgConnectResponse{
+				ClientIP:       clientIP,
+				SessionTimeout: result.SessionTimeout,
+				ServerPubkey:   srv.Pubkey,
+				DNS:            wgDNS,
+				ExpiresAt:      expiresAt,
+				Endpoint:       srv.Endpoint,
+				JWT:            jwt,
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+
 		tokenHash := ""
 		if len(result.LogMessage) > 0 {
 			tokenHash = result.LogMessage
@@ -257,7 +321,7 @@ func handleWGConnect(mux *http.ServeMux, deps *auth.Dependencies, mgr *wgManager
 			SessionTimeout: result.SessionTimeout,
 			ServerPubkey:   getServerPubkey(),
 			DNS:            wgDNS,
-			ExpiresAt:      time.Now().Unix() + int64(result.SessionTimeout),
+			ExpiresAt:      expiresAt,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

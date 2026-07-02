@@ -443,7 +443,25 @@ func newHTTPServer(addr string, deps *auth.Dependencies, m *metrics, baseDir str
 		json.NewEncoder(w).Encode(resp)
 	})
 
-	handleWGConnect(mux, deps, wgMgr)
+	var signer *jwtSigner
+	jwtKeyPath := config.GetEnv("TOLLGATE_JWT_KEY", baseDir+"/jwt-signing.key")
+	if s, err := loadJWTSigner(jwtKeyPath); err != nil {
+		slog.Warn("JWT signer not loaded (remote server mode disabled)", "error", err, "key_path", jwtKeyPath)
+	} else {
+		signer = s
+		slog.Info("JWT signer loaded", "key_path", jwtKeyPath)
+	}
+
+	registryPath := config.GetEnv("TOLLGATE_VPN_SERVERS", baseDir+"/vpn-servers.json")
+	registry, err := loadServerRegistry(registryPath)
+	if err != nil {
+		slog.Warn("VPN server registry not loaded", "error", err, "path", registryPath)
+		registry = &serverRegistry{servers: make(map[string]vpnsServer)}
+	} else if len(registry.servers) > 0 {
+		slog.Info("VPN server registry loaded", "servers", len(registry.servers), "path", registryPath)
+	}
+
+	handleWGConnect(mux, deps, wgMgr, signer, registry)
 
 	return &http.Server{
 		Addr:         addr,
