@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -27,6 +28,9 @@ import (
 // --- Configuration ---
 
 const (
+	// Port 2222: non-privileged port so the server can start as root
+	// (needed for chroot + useradd), then drop to nobody:nogroup inside
+	// the jail. Port 22 stays free for admin SSH (sshd).
 	Port          = 2222
 	RateSecPerSat = 10
 	BaseDir       = "/opt/cashu-tollgate"
@@ -99,6 +103,12 @@ func main() {
 	}
 
 	ssh.Handle(func(s ssh.Session) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered panic in session handler: %v", r)
+			}
+		}()
+
 		username := s.User()
 		log.Printf("Session request from %s, user=%d chars", s.RemoteAddr(), len(username))
 
@@ -154,21 +164,47 @@ func main() {
 
 		log.Printf("Chroot shell PID=%d for %s", cmd.Process.Pid, guest)
 
-		done := make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
 		cleanupOnce := sync.Once{}
 		cleanup := func() {
 			cleanupOnce.Do(func() {
+				cancel()
 				ptmx.Close()
 				cmd.Process.Kill()
 				cmd.Wait()
-				s.Close()
 				cleanupJail(guest)
 				log.Printf("Session ended: %s", guest)
 			})
 		}
 		defer cleanup()
 
+		// safeWrite wraps s.Write in a recover to catch SSH library
+		// internal "close of closed channel" panics during teardown.
+		safeWrite := func(p []byte) (n int, err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("session write panic: %v", r)
+				}
+			}()
+			return s.Write(p)
+		}
+
+		// safeRead wraps s.Read in a recover for the same reason.
+		safeRead := func(p []byte) (n int, err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("session read panic: %v", r)
+				}
+			}()
+			return s.Read(p)
+		}
+
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered panic in resize goroutine: %v", r)
+				}
+			}()
 			for win := range winCh {
 				setWinsize(ptmx, win.Width, win.Height)
 			}
@@ -176,6 +212,11 @@ func main() {
 
 		// Timer: kill session on timeout
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered panic in timer goroutine: %v", r)
+				}
+			}()
 			select {
 			case <-time.After(time.Duration(seconds) * time.Second):
 				log.Printf("Time's up: %s", guest)
@@ -183,17 +224,60 @@ func main() {
 				cmd.Process.Signal(syscall.SIGTERM)
 				time.Sleep(500 * time.Millisecond)
 				cleanup()
-			case <-done:
+			case <-ctx.Done():
 			}
 		}()
 
+		// SSH → PTY (user input to shell)
 		go func() {
-			io.Copy(ptmx, s)
-			close(done)
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered panic in s→ptmx goroutine: %v", r)
+				}
+			}()
+			buf := make([]byte, 1024)
+			for {
+				n, err := safeRead(buf)
+				if n > 0 {
+					if _, werr := ptmx.Write(buf[:n]); werr != nil {
+						return
+					}
+				}
+				if err != nil {
+					return
+				}
+			}
 		}()
 
-		io.Copy(s, ptmx)
-		close(done)
+		// PTY → SSH (shell output to user) — blocks until shell exits
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered panic in ptmx→s main loop: %v", r)
+				}
+			}()
+			buf := make([]byte, 1024)
+			for {
+				n, err := ptmx.Read(buf)
+				if n > 0 {
+					if _, werr := safeWrite(buf[:n]); werr != nil {
+						return
+					}
+				}
+				if err != nil {
+					return
+				}
+			}
+		}()
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered panic in s.Exit: %v", r)
+				}
+			}()
+			s.Exit(0)
+		}()
 	})
 
 	// Load host keys

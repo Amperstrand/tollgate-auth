@@ -26,8 +26,9 @@ h1{font-size:1.4rem;margin-bottom:.25rem;color:#fff;text-align:center}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .btn.secondary{background:#333;color:#e0e0e0}
 .btn-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem}
-#terminal{border-radius:8px;overflow:hidden;border:1px solid #222}
-#terminal-container{min-height:400px;background:#000;padding:.5rem}
+#terminal{border-radius:8px;overflow:hidden;border:1px solid #222;width:100%;height:400px}
+#terminal-container{background:#000;padding:.5rem}
+#terminal .xterm-screen{height:400px!important}
 .status{font-size:.8rem;color:#666;margin-top:.5rem;text-align:center}
 .terminal-wrapper{display:none}
 .terminal-wrapper.active{display:block}
@@ -100,7 +101,7 @@ h1{font-size:1.4rem;margin-bottom:.25rem;color:#fff;text-align:center}
 import { Wallet, getEncodedToken, MintQuoteState } from 'https://esm.sh/@cashu/cashu-ts@4.5.1';
 
 const MINT_URL = 'https://testnut.cashu.exchange';
-const WS_URL = 'wss://nodns.shop/webssh/ws';
+const WS_URL = 'wss://ssh.cashu.email/ws';
 
 const mintBtn = document.getElementById('mintBtn');
 const copyBtn = document.getElementById('copyBtn');
@@ -148,7 +149,7 @@ mintBtn.addEventListener('click', async () => {
         const token = getEncodedToken({ mint: MINT_URL, proofs });
         tokenInput.value = token;
         connectBtn.disabled = false;
-        document.getElementById('sshCmd').value = `ssh -p 2222 -l ${token} nodns.shop`;
+        document.getElementById('sshCmd').value = `ssh -p 2222 -l ${token} ssh.cashu.email`;
         setStatus(mintStatus, 'Success! 64-sat token minted (about 10 minutes at 10s/sat).', false);
     } catch (e) {
         setStatus(mintStatus, 'Error: ' + e.message, true);
@@ -188,12 +189,16 @@ connectBtn.addEventListener('click', () => {
     connectBtn.disabled = true;
     setStatus(connStatus, 'Connecting...', false);
 
-    term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'Menlo, Monaco, "Courier New", monospace' });
+    term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'Menlo, Monaco, "Courier New", monospace', rendererType: 'dom' });
     fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     terminalCard.classList.add('active');
-    term.open(document.getElementById('terminal'));
-    setTimeout(() => fitAddon.fit(), 50);
+    terminalCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Wait for CSS layout to apply before opening terminal
+    requestAnimationFrame(() => {
+        term.open(document.getElementById('terminal'));
+        requestAnimationFrame(() => fitAddon.fit());
+    });
     term.write('\r\nConnecting to tollgate-auth SSH server...\r\n');
 
     ws = new WebSocket(WS_URL);

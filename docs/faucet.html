@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cashu Test Faucet — Free test ecash tokens</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem}
+h1{font-size:1.6rem;color:#fff;text-align:center;margin-bottom:.25rem}
+.tagline{color:#f7931a;font-size:.95rem;margin-bottom:1rem}
+.warn-banner{background:#1a0a0a;border:1px solid #442020;border-radius:8px;padding:.75rem 1.25rem;margin-bottom:1.5rem;text-align:center;font-size:.85rem;color:#e88;max-width:600px}
+.warn-banner strong{color:#f55}
+.container{max-width:600px;width:100%}
+.card{background:#141414;border:1px solid #222;border-radius:12px;padding:1.5rem;margin-bottom:1rem}
+.card h2{font-size:1rem;margin-bottom:.75rem;color:#fff}
+.info{color:#888;font-size:.85rem;line-height:1.5;margin-bottom:.75rem}
+.info a{color:#f7931a}
+label{display:block;font-size:.8rem;color:#666;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem;margin-top:.75rem}
+select{width:100%;background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:.5rem .75rem;color:#f7931a;font-size:.85rem;outline:none;cursor:pointer}
+select:focus{border-color:#f7931a}
+.amount-row{display:flex;gap:.5rem;margin-top:.5rem}
+.amount-btn{flex:1;background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:.5rem;text-align:center;font-size:.85rem;color:#aaa;cursor:pointer;transition:all .15s}
+.amount-btn:hover{border-color:#555}
+.amount-btn.active{background:#f7931a;color:#000;border-color:#f7931a;font-weight:600}
+.btn{background:#f7931a;color:#000;border:none;border-radius:8px;padding:.75rem 2rem;font-size:1rem;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s;margin-top:1rem}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.status{margin-top:.75rem;font-size:.85rem;color:#888;min-height:1.2em}
+.token-box{background:#0a0a0a;border:1px solid #222;border-radius:6px;padding:.75rem;font-family:'SF Mono','Fira Code',monospace;font-size:.7rem;word-break:break-all;color:#f7931a;max-height:100px;overflow-y:auto;user-select:all;margin-top:.5rem}
+.copy-btn{background:#222;color:#aaa;border:1px solid #333;border-radius:6px;padding:.4rem 1rem;font-size:.8rem;cursor:pointer;margin-top:.5rem;transition:all .15s}
+.copy-btn:hover{background:#333;color:#fff}
+.hidden{display:none}
+.services-title{font-size:.8rem;color:#666;text-transform:uppercase;letter-spacing:.05em;margin:1.5rem 0 .75rem;text-align:center}
+.services-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.75rem;margin-bottom:1.5rem}
+.service-card{background:#141414;border:1px solid #222;border-radius:10px;padding:1rem;text-decoration:none;color:inherit;transition:all .2s}
+.service-card:hover{border-color:#f7931a;transform:translateY(-2px)}
+.service-card .icon{font-size:1.5rem;margin-bottom:.5rem}
+.service-card .name{font-size:.85rem;font-weight:600;color:#fff;margin-bottom:.2rem}
+.service-card .desc{font-size:.75rem;color:#666;line-height:1.3}
+.service-card .url{font-size:.7rem;color:#f7931a;margin-top:.3rem}
+.footer{margin-top:auto;padding-top:2rem;font-size:.75rem;color:#444;text-align:center}
+.footer a{color:#666;text-decoration:none}
+.footer a:hover{color:#f7931a}
+.spin{display:inline-block;width:1rem;height:1rem;border:2px solid #555;border-top-color:#f7931a;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:.5rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<h1>Cashu Test Faucet</h1>
+<p class="tagline">Free test ecash for the Cashu ecosystem</p>
+
+<div class="warn-banner">
+  These tokens are <strong>WORTHLESS</strong>. They are test tokens from fake mints &mdash;
+  <strong>not real Bitcoin</strong>. Use them to try Cashu-powered services without spending money.
+</div>
+
+<div class="container">
+
+<div class="card">
+  <h2>Mint a free token</h2>
+  <p class="info">Pick a test mint, choose an amount, and get a Cashu token you can use at any service that accepts testnuts.</p>
+
+  <label for="mintSelect">Test Mint</label>
+  <select id="mintSelect">
+    <option value="https://testnut.cashu.exchange">testnut.cashu.exchange</option>
+    <option value="https://testnut.cashu.space">testnut.cashu.space</option>
+    <option value="https://nofees.testnut.cashu.space">nofees.testnut.cashu.space</option>
+    <option value="https://fake.thesimplekid.dev">fake.thesimplekid.dev</option>
+  </select>
+
+  <label>Amount (test sats)</label>
+  <div class="amount-row">
+    <div class="amount-btn" data-amt="8">8 sat</div>
+    <div class="amount-btn active" data-amt="16">16 sat</div>
+    <div class="amount-btn" data-amt="32">32 sat</div>
+    <div class="amount-btn" data-amt="64">64 sat</div>
+  </div>
+
+  <button class="btn" id="mintBtn">Mint Free Token</button>
+  <div class="status" id="status"></div>
+
+  <div id="result" class="hidden">
+    <label>Your token</label>
+    <div class="token-box" id="tokenBox"></div>
+    <button class="copy-btn" onclick="copyText('tokenBox', this)">Copy token</button>
+
+    <label>Or use it for SSH access</label>
+    <div class="token-box" id="sshBox" style="color:#4f4;font-size:.75rem"></div>
+    <button class="copy-btn" onclick="copyText('sshBox', this)">Copy SSH command</button>
+  </div>
+</div>
+
+</div>
+
+<p class="services-title">Services you can try with these tokens</p>
+<div class="services-grid" style="max-width:600px;width:100%">
+  <a class="service-card" href="https://ssh.cashu.email">
+    <div class="icon">🖥️</div>
+    <div class="name">SSH Tollgate</div>
+    <div class="desc">Pay-per-minute SSH access. Play terminal games with ecash.</div>
+    <div class="url">ssh.cashu.email</div>
+  </a>
+  <a class="service-card" href="https://cashu.email">
+    <div class="icon">📧</div>
+    <div class="name">Cashu Email</div>
+    <div class="desc">Send and receive emails with ecash authentication.</div>
+    <div class="url">cashu.email</div>
+  </a>
+  <a class="service-card" href="https://drive.cashu.email">
+    <div class="icon">💾</div>
+    <div class="name">Cashu Drive</div>
+    <div class="desc">File storage powered by ecash micropayments.</div>
+    <div class="url">drive.cashu.email</div>
+  </a>
+  <a class="service-card" href="https://dns.cashu.email">
+    <div class="icon">🌐</div>
+    <div class="name">Cashu DNS</div>
+    <div class="desc">DNS management with ecash-gated access.</div>
+    <div class="url">dns.cashu.email</div>
+  </a>
+  <a class="service-card" href="https://relay.cashu.email">
+    <div class="icon">📡</div>
+    <div class="name">Cashu Relay</div>
+    <div class="desc">Nostr relay with ecash authentication. Experimental.</div>
+    <div class="url">relay.cashu.email</div>
+  </a>
+  <div class="service-card" style="opacity:.6;cursor:default">
+    <div class="icon">⚙️</div>
+    <div class="name">Cashu Compute <span style="font-size:.65rem;background:#333;padding:.1rem .4rem;border-radius:3px;color:#888">soon</span></div>
+    <div class="desc">Spin up a real VM with ecash. SSH-as-a-service.</div>
+    <div class="url" style="color:#666">compute.cashu.email</div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="https://cashu.space">Cashu</a> &middot;
+  <a href="https://github.com/cashubtc/cashu">GitHub</a> &middot;
+  <a href="https://github.com/Amperstrand/tollgate-auth">tollgate-auth</a>
+</div>
+
+<script type="module">
+import { Wallet, getEncodedToken, MintQuoteState } from 'https://esm.sh/@cashu/cashu-ts@4.5.1';
+
+let selectedAmount = 16;
+let currentToken = '';
+
+// amount selector
+document.querySelectorAll('.amount-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedAmount = parseInt(btn.dataset.amt);
+  });
+});
+
+const mintBtn = document.getElementById('mintBtn');
+const statusEl = document.getElementById('status');
+const result = document.getElementById('result');
+
+mintBtn.addEventListener('click', async () => {
+  const mintUrl = document.getElementById('mintSelect').value;
+  mintBtn.disabled = true;
+  result.classList.add('hidden');
+  statusEl.innerHTML = '<span class="spin"></span>Connecting to ' + mintUrl.replace('https://','') + '...';
+
+  try {
+    const wallet = new Wallet(mintUrl, 'sat');
+    await wallet.loadMint();
+
+    statusEl.innerHTML = '<span class="spin"></span>Creating mint quote...';
+    const quote = await wallet.createMintQuoteBolt11(selectedAmount);
+
+    statusEl.innerHTML = '<span class="spin"></span>Waiting for auto-payment...';
+    let state = await wallet.checkMintQuoteBolt11(quote.quote);
+    let tries = 0;
+    while (state.state !== MintQuoteState.PAID && tries < 30) {
+      await new Promise(r => setTimeout(r, 1000));
+      state = await wallet.checkMintQuoteBolt11(quote.quote);
+      tries++;
+      statusEl.innerHTML = '<span class="spin"></span>Waiting for payment... (' + tries + 's)';
+    }
+
+    if (state.state !== MintQuoteState.PAID) {
+      throw new Error('Payment timeout — this test mint may be down. Try another mint.');
+    }
+
+    statusEl.innerHTML = '<span class="spin"></span>Minting token...';
+    const proofs = await wallet.mintProofsBolt11(selectedAmount, quote.quote);
+    const token = getEncodedToken({ mint: mintUrl, proofs });
+    currentToken = token;
+
+    const minutes = Math.floor(selectedAmount * 10 / 60);
+    const secs = selectedAmount * 10;
+
+    document.getElementById('tokenBox').textContent = token;
+    document.getElementById('sshBox').textContent = 'ssh -p 2222 -l ' + token + ' ssh.cashu.email';
+
+    result.classList.remove('hidden');
+    statusEl.textContent = 'Done! ' + selectedAmount + ' test sats = ' + secs + 's of game time. (Not real Bitcoin.)';
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    console.error(e);
+  } finally {
+    mintBtn.disabled = false;
+  }
+});
+
+window.copyText = function(id, btn) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+};
+</script>
+</body>
+</html>

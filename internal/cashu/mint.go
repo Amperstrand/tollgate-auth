@@ -41,9 +41,11 @@ func CheckTokenState(tokenData *TokenData) (ProofState, string) {
 
 	reqBody := CheckStateRequest{}
 	for _, p := range tokenData.Proofs {
-		reqBody.Proofs = append(reqBody.Proofs, struct {
-			Secret string `json:"secret"`
-		}{Secret: p.Secret})
+		yBytes, err := HashToCurve(p.Secret)
+		if err != nil {
+			return "", fmt.Sprintf("hash_to_curve failed for proof: %v", err)
+		}
+		reqBody.Ys = append(reqBody.Ys, fmt.Sprintf("%x", yBytes))
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

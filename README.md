@@ -1,17 +1,20 @@
 # tollgate-auth
 
-**Ecash for infrastructure access.** Pay-per-minute SSH and WiFi with [Cashu](https://cashu.space) tokens.
+**Ecash for infrastructure access.** Pay-per-minute SSH, WiFi, and EV charging with [Cashu](https://cashu.space) tokens.
 
 Built as a hackathon project to explore what it looks like when internet infrastructure accepts ecash natively. Part of the [OpenTollGate](https://github.com/OpenTollGate) concept — "ecash for internet access."
 
-Two components, one repo:
+Three components, one repo:
 
 | Component | Protocol | Port | What users get |
 |---|---|---|---|
 | **tollgate-auth-ssh** | SSH | 2222 | Interactive bash shell |
 | **tollgate-auth-radius** | RADIUS (WiFi) | 1812 | Network access via WPA2-Enterprise |
+| **tollgate-auth-ocpi** | OCPI 2.2.1 (EV) | 8093 | EV charging session authorization |
 
-Both accept Cashu ecash tokens (`cashuA...`/`cashuB...`) and LNURL-withdraw codes (`lnurlw...`) as payment. Tokens from [testnut.cashu.space](https://testnut.cashu.space) only (test mint, zero monetary value).
+All three accept Cashu ecash tokens (`cashuA...`/`cashuB...`) as payment and share the same `internal/auth.ProcessAuth` verification pipeline.
+
+**Live OCPI demo:** [ocpi.nodns.shop](https://ocpi.nodns.shop/) — paste a test Cashu token to start the virtual charger.
 
 **Two transport modes:**
 - **UDP 1812** — plain RADIUS with shared secret `tollgate` (standard, all devices)
@@ -219,6 +222,7 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | Binary | Protocol | Port | Purpose |
 |---|---|---|---|
 | `tollgate-daemon` | HTTP + Unix socket | 8091 + /run/tollgate/tollgate.sock | Persistent auth server — primary path for FreeRADIUS and WG |
+| `tollgate-auth-ocpi` | OCPI 2.2.1 (HTTP) | 8093 | EV charging eMSP — authorize, sessions, CDRs, virtual charger |
 | `tollgate-shim` | Exec (called by FreeRADIUS) | - | Bridge: FreeRADIUS exec → daemon socket |
 | `tollgate-auth-radius` | Exec (called by FreeRADIUS) | - | Delegated mode: direct Cashu processing with ledger/CoA |
 | `tollgate-auth-ssh` | SSH | 2222 | Interactive shell — chroot jail, timer, auto-cleanup |
@@ -229,15 +233,10 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 
 | Path | Purpose |
 |---|---|
-| `internal/auth/` | Shared auth pipeline — `ProcessAuth`, `SessionStore`, `AuthRequest/Response` |
-| `internal/cashu/` | Cashu token decode, mint verify, replay guard |
-| `internal/radius/` | RADIUS Class attribute, session state |
-| `internal/fakeverity/` | Token verification and redemption (cdk-cli wrapper) |
-| `config/freeradius/` | FreeRADIUS configs — exec module, EAP, inner-tunnel, clients, RadSec (TLS) |
-| `config/systemd/` | Systemd services — daemon, settle, SSH |
-| `scripts/` | Setup scripts — FreeRADIUS, jail, e2e tests |
-| `docs/index.html` | Faucet — static page that mints free test tokens |
-| `docs/radius-testing.md` | Live demo guide with copy-paste examples |
+| `docs/ocpi-testing.md` | OCPI + Cashu testnut testing guide, OCPPLab onboarding |
+| `docs/ARCHITECTURE.md` | Full system architecture — components, data flows, protocol coverage |
+| `docs/PRODUCTION_READINESS.md` | Production gap analysis, CPO integration paths, prioritized roadmap |
+| `docs/radius-testing.md` | RADIUS/WiFi testing guide with real AP, phone, and CI examples |
 | `docs/radius-payment-models.md` | Session management, accounting, infrastructure use cases |
 | `docs/radius-token-size.md` | Token size analysis, payment approaches, bootstrap spec |
 | `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA |
