@@ -1,5 +1,14 @@
 {
   "dependencies": {
     "@cashu/cashu-ts": "^4.5.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  },
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "playwright:install": "playwright install chromium"
   }
 }

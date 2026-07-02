@@ -1,16 +1,17 @@
-.PHONY: build build-linux build-radius build-settle build-daemon build-shim build-shell deploy deploy-radius deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius build-ocpi build-settle build-daemon build-shim build-shell deploy deploy-radius deploy-ocpi deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
 
 TOLLGATE_RS_DIR ?= $(HOME)/src/tollgate-rs
 
 SSH_BINARY := tollgate-auth-ssh
 RADIUS_BINARY := tollgate-auth-radius
+OCPI_BINARY := tollgate-auth-ocpi
 DAEMON_BINARY := tollgate-daemon
 SHIM_BINARY := tollgate-shim
 SHELL_BINARY := tollgate-shell
 REMOTE_USER := root
 REMOTE_HOST := nodns.shop
 REMOTE_PORT := 22
-REMOTE_DIR := /opt/cashu-tollgate
+REMOTE_DIR := /opt/tollgate-auth
 
 build:
 	go build -o $(SSH_BINARY) ./cmd/tollgate-auth-ssh
@@ -20,6 +21,12 @@ build-linux:
 
 build-radius:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(RADIUS_BINARY) ./cmd/tollgate-auth-radius/
+
+build-ocpi:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(OCPI_BINARY) ./cmd/tollgate-auth-ocpi/
+
+build-ocpi-local:
+	go build -o $(OCPI_BINARY) ./cmd/tollgate-auth-ocpi/
 
 build-settle:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o tollgate-settle ./cmd/tollgate-settle/
@@ -66,6 +73,22 @@ deploy-radius: build-radius
 		'systemctl restart freeradius && \
 		 sleep 2 && \
 		 systemctl status freeradius --no-pager | tail -5'
+
+deploy-ocpi: build-ocpi
+	scp -P $(REMOTE_PORT) $(OCPI_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/$(OCPI_BINARY)
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-auth-ocpi.service $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-auth-ocpi.service
+	scp -P $(REMOTE_PORT) config/caddy/ocpi.conf $(REMOTE_USER)@$(REMOTE_HOST):/etc/caddy/sites-available/ocpi.conf 2>/dev/null || \
+	  scp -P $(REMOTE_PORT) config/caddy/ocpi.conf $(REMOTE_USER)@$(REMOTE_HOST):/tmp/ocpi.conf
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'chmod +x /usr/local/bin/$(OCPI_BINARY) && \
+		 (ln -sf ../sites-available/ocpi.conf /etc/caddy/sites-enabled/ocpi.conf 2>/dev/null || true) && \
+		 (systemctl reload caddy 2>/dev/null || echo "Caddy reload skipped — install config manually if needed") && \
+		 systemctl daemon-reload && \
+		 systemctl enable tollgate-auth-ocpi && \
+		 systemctl restart tollgate-auth-ocpi && \
+		 sleep 2 && \
+		 systemctl is-active tollgate-auth-ocpi && \
+		 echo "OCPI eMSP deployed. Dashboard: https://ocpi.nodns.shop/"'
 
 deploy-daemon: build-daemon build-shim
 	scp -P $(REMOTE_PORT) $(DAEMON_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/bin/$(DAEMON_BINARY)

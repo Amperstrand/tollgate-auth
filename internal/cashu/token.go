@@ -65,11 +65,9 @@ type V3Proof struct {
 	C      string `json:"C"`
 }
 
-// Mint checkstate types
+// Mint checkstate types — NUT-07 requires Ys (hash_to_curve output) not raw secrets.
 type CheckStateRequest struct {
-	Proofs []struct {
-		Secret string `json:"secret"`
-	} `json:"proofs"`
+	Ys []string `json:"Ys"`
 }
 
 type CheckStateResponse struct {

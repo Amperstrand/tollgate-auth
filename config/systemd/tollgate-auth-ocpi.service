@@ -1,0 +1,29 @@
+[Unit]
+Description=Tollgate Auth OCPI 2.2.1 eMSP Receiver
+After=network.target
+Wants=tollgate-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tollgate-auth-ocpi
+Environment=TOLLGATE_OCPI_ADDR=:8093
+Environment=TOLLGATE_OCPI_PUBLIC_URL=https://ocpi.nodns.shop
+Environment=TOLLGATE_OCPI_DASH_URL=https://ocpi.nodns.shop
+Environment=TOLLGATE_OCPI_COUNTRY=NO
+Environment=TOLLGATE_OCPI_PARTY=TGA
+Environment=TOLLGATE_BASE_DIR=/opt/tollgate-auth
+Environment=TOLLGATE_WALLET_DIR=/var/lib/cashu-wallet
+Environment=TOLLGATE_AUTH_MODE=delegated
+Environment=TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121
+EnvironmentFile=/etc/tollgate/secrets.env
+
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=4096
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tollgate-auth /tmp
+
+[Install]
+WantedBy=multi-user.target
