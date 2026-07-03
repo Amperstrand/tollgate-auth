@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"tollgate-auth/internal/auth"
+	"tollgate-auth/internal/ledger"
 )
 
 // Config holds the runtime config for the OCPI server.
@@ -37,10 +38,15 @@ type Server struct {
 	sender   *Sender
 	handlers *Handlers
 	charger  *ChargerState
+	ledger   *ledger.Ledger
 	httpSrv  *http.Server
 }
 
 func NewServer(cfg Config, authDeps *auth.Dependencies) *Server {
+	return NewServerWithLedger(cfg, authDeps, nil)
+}
+
+func NewServerWithLedger(cfg Config, authDeps *auth.Dependencies, lg *ledger.Ledger) *Server {
 	store := newPersistentStore(cfg.DataDir)
 	authz := NewAuthorizer(authDeps, store, cfg.DashboardBase)
 	sender := NewSender(store, cfg.PublicBaseURL+"/ocpi/emsp/"+VersionNumber+"/commands", cfg.OurCountry, cfg.OurParty)
@@ -55,8 +61,9 @@ func NewServer(cfg Config, authDeps *auth.Dependencies) *Server {
 		OurCountry:    cfg.OurCountry,
 		OurParty:      cfg.OurParty,
 		PublicBaseURL: cfg.PublicBaseURL,
+		Ledger:        lg,
 	}
-	return &Server{cfg: cfg, store: store, authz: authz, sender: sender, handlers: h, charger: charger}
+	return &Server{cfg: cfg, store: store, authz: authz, sender: sender, handlers: h, charger: charger, ledger: lg}
 }
 
 // newPersistentStore resolves the on-disk data directory and returns a store

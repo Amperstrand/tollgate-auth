@@ -4,10 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"tollgate-auth/internal/ledger"
 )
 
 // Handlers holds the receiver endpoint handlers and shared state.
@@ -23,6 +26,7 @@ type Handlers struct {
 	// PublicBaseURL is the externally-reachable URL of this OCPI receiver,
 	// e.g. https://tollgate.example.com:8092 — used to build endpoint URLs.
 	PublicBaseURL string
+	Ledger        *ledger.Ledger
 }
 
 // newTokenA generates a 32-char hex token for the bootstrap handshake.
@@ -241,6 +245,15 @@ func (h *Handlers) HandleCDRs(w http.ResponseWriter, r *http.Request) {
 		"cost", cdr.TotalCost,
 		"currency", cdr.Currency,
 	)
+	if h.Ledger != nil {
+		h.Ledger.RecordAccounting(ledger.LedgerEntry{
+			EventType:    ledger.EventAcctStop,
+			MAC:          cdr.AuthID,
+			SessionClass: "ocpi",
+			NASID:        cdr.LocationID,
+			Metadata:     fmt.Sprintf(`{"cdr_id":"%s","kwh":%.4f,"cost":%.2f,"currency":"%s","evse":"%s"}`, cdr.ID, cdr.Kwh, cdr.TotalCost, cdr.Currency, cdr.EvseUID),
+		})
+	}
 	writeJSON(w, OK(nil))
 }
 
