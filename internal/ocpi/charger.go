@@ -10,6 +10,7 @@ import (
 
 	"tollgate-auth/internal/auth"
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/ledger"
 )
 
 // ChargerState simulates a physical EV charger for demo purposes.
@@ -127,6 +128,20 @@ func (s *Server) HandleChargeStart(w http.ResponseWriter, r *http.Request) {
 	s.charger.Since = time.Now()
 	s.charger.Session = session
 	s.charger.mu.Unlock()
+
+	if s.ledger != nil {
+		s.ledger.RecordAuth(ledger.LedgerEntry{
+			EventType:    ledger.EventAuthAccept,
+			MAC:          sessionID,
+			PaymentType:  result.PayType,
+			AmountSat:    result.AmountSat,
+			DurationSec:  result.SessionTimeout,
+			MintURL:      result.MintURL,
+			TokenHash:    tokenHash,
+			SessionClass: "ocpi",
+			NASID:        "virtual-charger-001",
+		})
+	}
 
 	writeJSON(w, OK(ChargeResponse{
 		State:   ChargerCharging,
