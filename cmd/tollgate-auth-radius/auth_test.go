@@ -264,7 +264,7 @@ func TestProcessAuth_MintVerificationFails_Reject(t *testing.T) {
 	}
 }
 
-func TestProcessAuth_RedeemFails_Reject(t *testing.T) {
+func TestProcessAuth_RedeemFails_LogWarning(t *testing.T) {
 	deps, _ := setupTestDeps(t)
 	fv := deps.Verifier.(*fakeverity.FakeVerifier)
 	fv.RedeemErr = errors.New("cdk-cli crashed")
@@ -272,11 +272,8 @@ func TestProcessAuth_RedeemFails_Reject(t *testing.T) {
 	token := testtoken.V4Token(8)
 	result := auth.ProcessAuth(deps, token, "aa:bb:cc:dd:ee:ff", "", "", "", "")
 
-	if result.Accept {
-		t.Fatal("expected Reject")
-	}
-	if !strings.Contains(result.ReplyMessage, "redemption failed") {
-		t.Errorf("ReplyMessage = %q", result.ReplyMessage)
+	if !result.Accept {
+		t.Fatal("expected Accept — redemption failure is non-fatal, replay guard still protects")
 	}
 }
 
