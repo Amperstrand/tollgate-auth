@@ -541,6 +541,35 @@ This is **intentional** — the deployment is designed for open onboarding. Any 
 
 This is **intentional** — the deployment prioritizes frictionless access over brute-force protection. Test tokens are free (zero monetary value), and the replay guard prevents reuse. For production with real-value tokens, implement rate limiting at the daemon or FreeRADIUS layer.
 
+## Deployment Security
+
+**Read [hackathon-tooling/docs/SECURITY_BEST_PRACTICES.md](https://github.com/Amperstrand/hackathon-tooling/blob/main/docs/SECURITY_BEST_PRACTICES.md) before deploying any tollgate service.**
+
+### Current deployment status on nodns.shop
+
+| Service | Runs as | Port binding | Systemd hardened | Status |
+|---|---|---|---|---|
+| `tollgate-auth-ocpi` | `tollgate` user | `127.0.0.1:8093` | Yes | **Secured** |
+| `tollgate-csms` | `tollgate` user | `127.0.0.1:8887` | Yes | **Secured** |
+| `tollgate-auth-ssh` | `root` (documented exception) | `:2222` (public) | No | Needs systemd hardening |
+| `tollgate-daemon` | `root` | `0.0.0.0:8091` | No | Needs non-root + localhost |
+| `tollgate-net` | `root` | `0.0.0.0:2121` | Yes | Needs non-root + localhost |
+| `tollgate-webssh` | `root` | `0.0.0.0:8092` | No | Needs non-root + localhost |
+| OpenCPO (7 containers) | Docker (isolated) | `127.0.0.1` all | Docker isolation | **Secured** |
+
+### What each project must do before next deploy
+
+1. **Create a `tollgate` system user**: `useradd -r -s /usr/sbin/nologin tollgate`
+2. **Add `User=tollgate` to systemd units** (except `tollgate-auth-ssh` which needs root for PAM)
+3. **Add systemd hardening directives**: `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `PrivateDevices`, `ReadWritePaths`
+4. **Bind to `127.0.0.1`** unless the service must be public (SSH, RADIUS, Caddy, WireGuard, DNS)
+5. **Remove default secrets**: Generate all API keys and DB passwords with `openssl rand -base64 32`
+6. **Firewall**: Only allow ports 22, 80, 443, 1812/udp, 2083, 51820/udp, 53
+
+### Why tollgate-auth-ssh runs as root
+
+`tollgate-auth-ssh` creates and deletes system user accounts (`useradd`/`userdel`) for guest shell sessions. This requires root. The chroot jail limits what guests can do, but a future improvement should split this into a privileged account-creation helper (setuid binary) + unprivileged SSH handler.
+
 ## Security Disclaimer
 
 **This software creates ephemeral user accounts with shell access on your server.**
