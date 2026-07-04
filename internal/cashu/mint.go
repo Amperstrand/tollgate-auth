@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -108,7 +109,13 @@ func isSafeMintURL(mintURL string) bool {
 		return false
 	}
 	host := u.Hostname()
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	if host == "localhost" || host == "::1" {
+		return false
+	}
+	if host == "127.0.0.1" && os.Getenv("ALLOW_LOCALHOST_MINT") == "true" {
+		return true
+	}
+	if host == "127.0.0.1" {
 		return false
 	}
 	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "169.254.") {
