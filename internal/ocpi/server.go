@@ -27,7 +27,8 @@ type Config struct {
 	// store (CDRs, prepay records, authorize log, charger state). When empty,
 	// NewServer falls back to $TOLLGATE_BASE_DIR/ocpi-state; if that is also
 	// unset the store is in-memory only and state is lost on restart.
-	DataDir string
+	DataDir    string
+	EurMintURL string
 }
 
 // Server is the OCPI 2.2.1 eMSP receiver + dashboard HTTP server.
@@ -164,6 +165,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/charger/start", s.withChargerPersist(s.HandleChargeStart))
 	mux.HandleFunc("/api/charger/stop", s.withChargerPersist(s.HandleChargeStop))
 	mux.HandleFunc("/api/charger/status", s.HandleChargeStatus)
+	mux.HandleFunc("/api/buy", s.HandleBuy)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
