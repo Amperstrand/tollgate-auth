@@ -44,7 +44,7 @@ func seedLedger(t *testing.T, l *ledger.Ledger, operatorID string) (accepts, rej
 			OperatorID:  operatorID,
 			MAC:         mac,
 			PaymentType: "cashu",
-			AmountSat:   amounts[i],
+			CreditAmount:   amounts[i],
 			DurationSec: amounts[i] * 60,
 			MintURL:     "https://testnut.cashu.space",
 			TokenHash:   fmt.Sprintf("deadbeef%02d", i),
@@ -153,7 +153,7 @@ func TestBuildSettlementReport_NoPII(t *testing.T) {
 		`"total_sat"`,
 		`"accepted_sessions"`,
 		`"rejected_sessions"`,
-		`"average_amount_sat"`,
+		`"average_credit_amount"`,
 		`"period_start"`,
 		`"period_end"`,
 		`"generated_at"`,
@@ -194,8 +194,8 @@ func TestBuildSettlementReport_Aggregation(t *testing.T) {
 		t.Errorf("total_sat = %d, want %d", report.TotalSat, totalSat)
 	}
 	wantAvg := float64(totalSat) / float64(accepts)
-	if report.AverageAmountSat != wantAvg {
-		t.Errorf("average_amount_sat = %.4f, want %.4f", report.AverageAmountSat, wantAvg)
+	if report.AverageCreditAmount != wantAvg {
+		t.Errorf("average_credit_amount = %.4f, want %.4f", report.AverageCreditAmount, wantAvg)
 	}
 }
 
@@ -219,8 +219,8 @@ func TestBuildSettlementReport_EmptyLedger(t *testing.T) {
 	if report.RejectedSessions != 0 {
 		t.Errorf("rejected_sessions = %d, want 0", report.RejectedSessions)
 	}
-	if report.AverageAmountSat != 0 {
-		t.Errorf("average_amount_sat = %.4f, want 0", report.AverageAmountSat)
+	if report.AverageCreditAmount != 0 {
+		t.Errorf("average_credit_amount = %.4f, want 0", report.AverageCreditAmount)
 	}
 	if report.Type != "settlement" {
 		t.Errorf("type = %q, want %q", report.Type, "settlement")
@@ -236,7 +236,7 @@ func TestSettlementReport_JSONFormat(t *testing.T) {
 		TotalSat:         42,
 		AcceptedSessions: 3,
 		RejectedSessions: 1,
-		AverageAmountSat: 14.0,
+		AverageCreditAmount: 14.0,
 		GeneratedAt:      time.Date(2026, 1, 8, 12, 0, 0, 0, time.UTC),
 	}
 
@@ -258,7 +258,7 @@ func TestSettlementReport_JSONFormat(t *testing.T) {
 		"total_sat":          false,
 		"accepted_sessions":  false,
 		"rejected_sessions":  false,
-		"average_amount_sat": false,
+		"average_credit_amount": false,
 		"generated_at":       false,
 	}
 	for k := range decoded {

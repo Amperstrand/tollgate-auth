@@ -33,14 +33,15 @@ type Config struct {
 
 // Server is the OCPI 2.2.1 eMSP receiver + dashboard HTTP server.
 type Server struct {
-	cfg      Config
-	store    *Store
-	authz    *Authorizer
-	sender   *Sender
-	handlers *Handlers
-	charger  *ChargerState
-	ledger   *ledger.Ledger
-	httpSrv  *http.Server
+	cfg       Config
+	store     *Store
+	authz     *Authorizer
+	sender    *Sender
+	handlers  *Handlers
+	charger   *ChargerState
+	ledger    *ledger.Ledger
+	providers *ProviderStore
+	httpSrv   *http.Server
 }
 
 func NewServer(cfg Config, authDeps *auth.Dependencies) *Server {
@@ -55,6 +56,18 @@ func NewServerWithLedger(cfg Config, authDeps *auth.Dependencies, lg *ledger.Led
 	if err := store.LoadState(stateCharger, charger); err != nil {
 		slog.Warn("ocpi charger state load failed; using defaults", "error", err)
 	}
+	var providers *ProviderStore
+	if cfg.DataDir != "" {
+		ps, err := NewProviderStoreWithDir(cfg.DataDir)
+		if err != nil {
+			slog.Warn("provider store init failed; using in-memory", "error", err)
+			providers = NewProviderStore()
+		} else {
+			providers = ps
+		}
+	} else {
+		providers = NewProviderStore()
+	}
 	h := &Handlers{
 		Store:         store,
 		Authz:         authz,
@@ -64,7 +77,7 @@ func NewServerWithLedger(cfg Config, authDeps *auth.Dependencies, lg *ledger.Led
 		PublicBaseURL: cfg.PublicBaseURL,
 		Ledger:        lg,
 	}
-	return &Server{cfg: cfg, store: store, authz: authz, sender: sender, handlers: h, charger: charger, ledger: lg}
+	return &Server{cfg: cfg, store: store, authz: authz, sender: sender, handlers: h, charger: charger, ledger: lg, providers: providers}
 }
 
 // newPersistentStore resolves the on-disk data directory and returns a store
@@ -166,6 +179,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/charger/stop", s.withChargerPersist(s.HandleChargeStop))
 	mux.HandleFunc("/api/charger/status", s.HandleChargeStatus)
 	mux.HandleFunc("/api/buy", s.HandleBuy)
+	mux.HandleFunc("/api/provider/register", s.HandleProviderRegister)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))

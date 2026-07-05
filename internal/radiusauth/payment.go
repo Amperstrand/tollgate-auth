@@ -77,7 +77,7 @@ func IsValidCashuToken(s string) bool {
 	}
 	// After prefix: only base64url chars (A-Z, a-z, 0-9, -, _)
 	for _, c := range s[6:] {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '=') {
 			return false
 		}
 	}

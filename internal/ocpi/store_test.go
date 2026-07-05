@@ -34,7 +34,7 @@ func TestStore_PutAndGetPrepay(t *testing.T) {
 		UID:            "OCPI-ABC12345",
 		CashuTokenHash: "abc12345deadbeef",
 		AllotmentSec:   120,
-		AmountSat:      12,
+		CreditAmount:      12,
 		MintURL:        "https://testnut.cashu.space",
 		ContractID:     "NPC-OCPI-ABC12345",
 		StartedAt:      time.Now(),
@@ -45,7 +45,7 @@ func TestStore_PutAndGetPrepay(t *testing.T) {
 	if !ok {
 		t.Fatal("PutPrepay then GetPrepay: not found")
 	}
-	if got.UID != rec.UID || got.AllotmentSec != rec.AllotmentSec || got.AmountSat != rec.AmountSat {
+	if got.UID != rec.UID || got.AllotmentSec != rec.AllotmentSec || got.CreditAmount != rec.CreditAmount {
 		t.Errorf("GetPrepay returned wrong record: %+v", got)
 	}
 

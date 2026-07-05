@@ -27,8 +27,8 @@ import (
 
 // Rate constants.
 const (
-	RateSecPerSat    = 10  // seconds of access per sat (testnuts are free, generous rate)
-	LNURLWDefaultSec = 600 // 10 minutes default for lnurlw
+	RateSecPerSat    = 10 // RADIUS-only: legacy seconds-per-sat for captive portal timeout. OCPI charger computes time from kWh.
+	LNURLWDefaultSec = 600
 )
 
 // Patterns.
@@ -45,7 +45,8 @@ type AuthResult struct {
 	AcctInterval   int
 	Class          string
 	LogMessage     string
-	AmountSat      int
+	CreditAmount      int
+	Unit           string
 	MintURL        string
 	TokenHash      string
 	PayType        string
@@ -71,6 +72,7 @@ type SessionRecord struct {
 	Guest    string                 `json:"guest"`
 	Mint     string                 `json:"mint"`
 	Amount   int                    `json:"amount"`
+	Unit     string                 `json:"unit"`
 	Started  time.Time              `json:"started"`
 	Duration int                    `json:"duration"` // seconds
 	Source   string                 `json:"source"`   // "username" or "password"
@@ -208,12 +210,13 @@ func ProcessAuth(deps *Dependencies, username, mac, password, clearTextPw, nasID
 				remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
 				return AuthResult{
 					Accept:         true,
-					ReplyMessage:   fmt.Sprintf("Session resumed: %dm remaining (type=%s, amount=%d sat)", int(remaining.Minutes()), rec.PayType, rec.Amount),
+					ReplyMessage:   fmt.Sprintf("Session resumed: %dm remaining (type=%s, amount=%d %s)", int(remaining.Minutes()), rec.PayType, rec.Amount, rec.Unit),
 					SessionTimeout: max(1, int(remaining.Seconds())),
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes())),
-					AmountSat:      rec.Amount,
+					CreditAmount:      rec.Amount,
+					Unit:           rec.Unit,
 					MintURL:        rec.Mint,
 					TokenHash:      rec.Token,
 					PayType:        string(rec.PayType),
@@ -297,7 +300,8 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
-					AmountSat:      rec.Amount,
+					CreditAmount:      rec.Amount,
+					Unit:           rec.Unit,
 					MintURL:        rec.Mint,
 					TokenHash:      rec.Token,
 					PayType:        string(rec.PayType),
@@ -371,6 +375,7 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 		Guest:    "radius-" + thash[:8],
 		Mint:     tokenData.Mint,
 		Amount:   tokenData.Amount,
+		Unit:     tokenData.Unit,
 		Started:  time.Now(),
 		Duration: seconds,
 		Source:   cred.Source,
@@ -381,14 +386,15 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 
 	return AuthResult{
 		Accept: true,
-		ReplyMessage: fmt.Sprintf("Valid Cashu token: %d sat = %dm access from %s",
-			tokenData.Amount, minutes, tokenData.Mint),
+		ReplyMessage: fmt.Sprintf("Valid Cashu token: %d %s = %dm access from %s",
+			tokenData.Amount, tokenData.Unit, minutes, tokenData.Mint),
 		SessionTimeout: seconds,
 		AcctInterval:   60,
 		Class:          classStr,
-		LogMessage: fmt.Sprintf("Accept: session=%s type=cashu amount=%d sat duration=%ds mint=%s source=%s",
-			sessionID, tokenData.Amount, seconds, tokenData.Mint, cred.Source),
-		AmountSat: tokenData.Amount,
+		LogMessage: fmt.Sprintf("Accept: session=%s type=cashu amount=%d %s duration=%ds mint=%s source=%s",
+			sessionID, tokenData.Amount, tokenData.Unit, seconds, tokenData.Mint, cred.Source),
+		CreditAmount: tokenData.Amount,
+		Unit:      tokenData.Unit,
 		MintURL:   tokenData.Mint,
 		TokenHash: thash,
 		PayType:   string(radiusauth.PaymentCashu),
@@ -429,7 +435,7 @@ func processLNURLw(deps *Dependencies, cred radiusauth.PaymentCredential, sessio
 		Class:          classStr,
 		LogMessage: fmt.Sprintf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s \u2014 pass-through accept",
 			sessionID, thash[:16], cred.Source),
-		AmountSat: 0,
+		CreditAmount: 0,
 		MintURL:   "lnurlw-pending",
 		TokenHash: thash,
 		PayType:   string(radiusauth.PaymentLNURLW),
@@ -464,7 +470,7 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (delegated, spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
-					AmountSat:      rec.Amount,
+					CreditAmount:      rec.Amount,
 					MintURL:        rec.Mint,
 					TokenHash:      rec.Token,
 					PayType:        string(rec.PayType),
@@ -532,8 +538,8 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 	classStr := EmitClass(deps.OperatorID, sessionID, thash[:16], deps.HMACKey)
 
 	var displayAmount int
-	if result.AmountSat > 0 {
-		displayAmount = int(result.AmountSat)
+	if result.CreditAmount > 0 {
+		displayAmount = int(result.CreditAmount)
 	} else {
 		displayAmount = minutes
 	}
@@ -553,9 +559,9 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 	deps.Sessions.Save(rec)
 
 	var replyMsg string
-	if result.AmountSat > 0 && result.EffectiveRateSecPerSat > 0 {
+	if result.CreditAmount > 0 && result.EffectiveRateSecPerSat > 0 {
 		replyMsg = fmt.Sprintf("Valid Cashu token: %d sat = %dm access (%ds/sat)",
-			result.AmountSat, minutes, result.EffectiveRateSecPerSat)
+			result.CreditAmount, minutes, result.EffectiveRateSecPerSat)
 	} else {
 		replyMsg = fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes)
 	}
@@ -567,8 +573,8 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 		AcctInterval:   60,
 		Class:          classStr,
 		LogMessage: fmt.Sprintf("Accept: session=%s type=delegated duration=%ds sats=%d source=%s",
-			sessionID, seconds, result.AmountSat, cred.Source),
-		AmountSat: displayAmount,
+			sessionID, seconds, result.CreditAmount, cred.Source),
+		CreditAmount: displayAmount,
 		MintURL:   "delegated",
 		TokenHash: thash,
 		PayType:   string(radiusauth.PaymentCashu),

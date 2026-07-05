@@ -82,7 +82,7 @@ func (a *Authorizer) HandleAuthorize(w http.ResponseWriter, r *http.Request, uid
 		// Accept the prepay. The Cashu was already verified at issue time.
 		a.Store.MarkPrepayAuthorized(uid)
 		allowed = AuthzAllowed
-		reason = fmt.Sprintf("prepay %ds allotment, %d sat from %s", rec.AllotmentSec, rec.AmountSat, rec.MintURL)
+		reason = fmt.Sprintf("prepay %ds allotment, %d sat from %s", rec.AllotmentSec, rec.CreditAmount, rec.MintURL)
 		authRef = safePrefix(rec.CashuTokenHash, 16)
 		return
 	}
@@ -123,7 +123,7 @@ func (a *Authorizer) IssuePrepay(cashuToken string) (*PrepayRecord, error) {
 		CashuTokenHash: tokenHash,
 		AllotmentSec:   result.SessionTimeout,
 		StartedAt:      time.Now(),
-		AmountSat:      result.AmountSat,
+		CreditAmount:      result.CreditAmount,
 		MintURL:        result.MintURL,
 		ContractID:     "NPC-OCPI-" + tokenHash[:8],
 	}
@@ -131,7 +131,7 @@ func (a *Authorizer) IssuePrepay(cashuToken string) (*PrepayRecord, error) {
 	slog.Info("prepay issued",
 		"uid", uid,
 		"allotment_sec", rec.AllotmentSec,
-		"amount_sat", rec.AmountSat,
+		"credit_amount", rec.CreditAmount,
 		"mint", rec.MintURL,
 	)
 	return rec, nil

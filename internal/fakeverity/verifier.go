@@ -23,7 +23,7 @@ type ReplayGuard interface {
 
 type BootstrapResult struct {
 	AllotmentMs            uint64
-	AmountSat              uint64
+	CreditAmount              uint64
 	EffectiveRateSecPerSat uint64
 }
 
@@ -143,7 +143,7 @@ type FakeBootstrapper struct {
 
 func NewFakeBootstrapper() *FakeBootstrapper {
 	return &FakeBootstrapper{
-		Result: &BootstrapResult{AllotmentMs: 80000, AmountSat: 8, EffectiveRateSecPerSat: 10},
+		Result: &BootstrapResult{AllotmentMs: 80000, CreditAmount: 8, EffectiveRateSecPerSat: 10},
 	}
 }
 
@@ -202,7 +202,7 @@ func (p *ProductionBootstrapper) Bootstrap(token string, sessionID string) (*Boo
 	}
 	return &BootstrapResult{
 		AllotmentMs:            state.AllotmentMs,
-		AmountSat:              state.AmountSat,
+		CreditAmount:              state.CreditAmount,
 		EffectiveRateSecPerSat: state.EffectiveRateSecPerSat,
 	}, nil
 }
