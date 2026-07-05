@@ -2,12 +2,14 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -162,12 +164,47 @@ func (m *wgManager) startCleanupLoop() {
 	}()
 }
 
+// wgPubkeyPattern matches a WireGuard Curve25519 public key in base64:
+// exactly 43 base64 chars + 1 padding '=' (32 bytes encoded). We do NOT
+// decode-then-reject here — `wg` will fail on bad input — but pre-validating
+// means we never hand a malformed or attacker-crafted string to a subprocess,
+// and we get a clean error message in the log.
+//
+// Defense-in-depth: req.Pubkey comes from a JSON HTTP body and reaches
+// `exec.Command("wg", "set", ..., "peer", pubkey, ...)` as an argv element.
+// execve keeps argv slots separate (no shell injection), but we still refuse
+// to pass anything that doesn't look like a WireGuard pubkey — protects
+// against future regressions and gives better logging.
+var wgPubkeyPattern = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
+
+// validateWgPubkey returns an error if s is not a well-formed WireGuard
+// base64 Curve25519 public key (44 chars including padding, decodes to 32 bytes).
+func validateWgPubkey(s string) error {
+	if !wgPubkeyPattern.MatchString(s) {
+		return fmt.Errorf("malformed WireGuard pubkey (want 44-char base64): length=%d", len(s))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return fmt.Errorf("pubkey base64 decode failed: %w", err)
+	}
+	if len(decoded) != 32 {
+		return fmt.Errorf("pubkey decoded to %d bytes, want 32", len(decoded))
+	}
+	return nil
+}
+
 func wgAddPeer(pubkey, clientIP string) error {
+	if err := validateWgPubkey(pubkey); err != nil {
+		return fmt.Errorf("wgAddPeer refused bad pubkey: %w", err)
+	}
 	cmd := exec.Command("wg", "set", wgIfName, "peer", pubkey, "allowed-ips", clientIP+"/32")
 	return cmd.Run()
 }
 
 func wgRemovePeer(pubkey string) error {
+	if err := validateWgPubkey(pubkey); err != nil {
+		return fmt.Errorf("wgRemovePeer refused bad pubkey: %w", err)
+	}
 	cmd := exec.Command("wg", "set", wgIfName, "peer", pubkey, "remove")
 	return cmd.Run()
 }

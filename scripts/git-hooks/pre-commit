@@ -67,3 +67,17 @@ if [ -n "$go_secrets" ]; then
 fi
 
 echo "OK: gofmt clean, go vet clean, no secrets detected."
+
+# ─── 4. FreeRADIUS command-injection regression guard ──────────
+# If any config/freeradius/ file is staged, fail on `/bin/sh -c` + `%{...}`.
+# Prevents reintroducing the original shell-wrapped exec module pattern.
+staged_freeradius=$(git diff --cached --name-only --diff-filter=ACM -- 'config/freeradius/*' 2>/dev/null || true)
+if [ -n "$staged_freeradius" ]; then
+    REPO_ROOT="$(git rev-parse --show-toplevel)"
+    if ! "$REPO_ROOT/scripts/check-freeradius-configs.sh" >/dev/null 2>&1; then
+        "$REPO_ROOT/scripts/check-freeradius-configs.sh"
+        echo "FAIL: command-injection pattern reintroduced in config/freeradius/."
+        echo "To bypass: git commit --no-verify (NOT RECOMMENDED — this is a CVE-class fix)"
+        exit 1
+    fi
+fi

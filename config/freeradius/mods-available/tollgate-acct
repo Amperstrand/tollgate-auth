@@ -1,6 +1,23 @@
 # /etc/freeradius/3.0/mods-available/tollgate-acct
 # FreeRADIUS exec module that calls tollgate-auth-radius for accounting forwarding.
 #
+# ─── SECURITY: DO NOT WRAP IN `/bin/sh -c` ─────────────────────────────────
+# The %{...} expansions below are ATTACKER-CONTROLLED RADIUS attributes
+# (Acct-Session-Id, Calling-Station-Id, User-Name, NAS-IP-Address, etc.). A
+# client/NAS can put anything in them. If the `program` line is parsed by a
+# shell (`/bin/sh -c '... "%{Acct-Session-Id}" ...'`), a crafted value escapes
+# its quotes and runs arbitrary commands BEFORE the Go binary starts — Go-side
+# input validation cannot help because the injection happens during shell parsing.
+#
+# This module calls the wrapper at /usr/local/libexec/tollgate-auth-radius-delegated
+# DIRECTLY. FreeRADIUS execve()'s the wrapper with each %{...} expansion as its
+# own argv element; no shell re-parses them. The wrapper only loads
+# /etc/tollgate/secrets.env and sets delegated-mode env vars, then execs the Go
+# binary with "$@" preserved. See:
+#   scripts/tollgate-auth-radius-delegated-wrapper.sh
+#   scripts/check-freeradius-configs.sh   (regression guard)
+# ───────────────────────────────────────────────────────────────────────────
+#
 # FreeRADIUS passes:
 #   %{Acct-Status-Type}      = Start, Interim-Update, or Stop
 #   %{Acct-Session-Id}        = NAS-generated session identifier
@@ -12,17 +29,19 @@
 #   %{Acct-Terminate-Cause}   = reason for session end (Stop only)
 #   %{NAS-IP-Address}         = NAS IP address (for CoA/disconnect)
 #
-# The binary forwards usage to the tollgate-rs session daemon API.
+# The binary forwards usage to the tollgate-net session daemon API.
 # If the session daemon reports access_level="suspended", the binary
 # sends a RADIUS Disconnect-Request to the NAS via radclient.
 #
-# Requires: TOLLGATE_AUTH_MODE=delegated and TOLLGATE_SESSIOND_URL set.
+# Requires: TOLLGATE_AUTH_MODE=delegated and TOLLGATE_SESSIOND_URL set
+# (both exported by the wrapper).
 
-# Secrets (nsec, API key) sourced from /etc/tollgate/secrets.env (NOT in version control).
+# Secrets (nsec, API key) sourced by the wrapper from /etc/tollgate/secrets.env
+# (NOT in version control).
 
 exec tollgate-acct {
     wait = yes
-    program = "/bin/sh -c '. /etc/tollgate/secrets.env && TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 /usr/local/bin/tollgate-auth-radius --accounting \"%{Acct-Status-Type}\" \"%{Acct-Session-Id}\" \"%{Calling-Station-Id}\" \"%{User-Name}\" \"%{Acct-Session-Time}\" \"%{Acct-Input-Octets}\" \"%{Acct-Output-Octets}\" \"%{Acct-Terminate-Cause}\" \"%{NAS-IP-Address}\"'"
+    program = "/usr/local/libexec/tollgate-auth-radius-delegated --accounting %{Acct-Status-Type} %{Acct-Session-Id} %{Calling-Station-Id} %{User-Name} %{Acct-Session-Time} %{Acct-Input-Octets} %{Acct-Output-Octets} %{Acct-Terminate-Cause} %{NAS-IP-Address}"
     output_pairs = reply
     timeout = 15
 }

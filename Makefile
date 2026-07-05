@@ -1,4 +1,4 @@
-.PHONY: build build-linux build-radius build-ocpi build-settle build-daemon build-shim build-shell deploy deploy-radius deploy-ocpi deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs test test-unit test-race test-accounting test-radius-local test-all-available test-e2e clean install-hooks
+.PHONY: build build-linux build-radius build-ocpi build-settle build-daemon build-shim build-shell deploy deploy-radius deploy-ocpi deploy-all deploy-settle deploy-daemon deploy-jail deploy-faucet deploy-radius-config deploy-certs deploy-systemd-units deploy-docker-host-deps test test-unit test-race test-accounting test-radius-local test-all-available test-e2e test-freeradius-config clean install-hooks docker-build docker-build-all docker-up docker-up-dev docker-up-prod docker-down docker-logs docker-logs-follow docker-ps docker-shell docker-settle-run docker-validate
 
 TOLLGATE_RS_DIR ?= $(HOME)/src/tollgate-rs
 
@@ -130,6 +130,8 @@ deploy-radius-config:
 	scp -P $(REMOTE_PORT) config/freeradius/clients.conf $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/clients.conf
 	scp -P $(REMOTE_PORT) config/freeradius/sites-available/inner-tunnel $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/inner-tunnel
 	scp -P $(REMOTE_PORT) config/freeradius/sites-available/radsec $(REMOTE_USER)@$(REMOTE_HOST):/etc/freeradius/3.0/sites-available/radsec
+	scp -P $(REMOTE_PORT) scripts/tollgate-auth-radius-delegated-wrapper.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-auth-radius-delegated-wrapper.sh
+	scp -P $(REMOTE_PORT) scripts/check-freeradius-configs.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/check-freeradius-configs.sh
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
 		'mkdir -p /etc/tollgate && \
 		 if [ ! -f /etc/tollgate/secrets.env ]; then \
@@ -141,6 +143,10 @@ deploy-radius-config:
 		   echo "WARNING: Created /etc/tollgate/secrets.env with empty values." && \
 		   echo "         Edit it to set TOLLGATE_OPERATOR_NSEC and TOLLGATE_API_KEY."; \
 		 fi && \
+		 mkdir -p /usr/local/libexec && \
+		 cp /tmp/tollgate-auth-radius-delegated-wrapper.sh /usr/local/libexec/tollgate-auth-radius-delegated && \
+		 chown root:root /usr/local/libexec/tollgate-auth-radius-delegated && \
+		 chmod 0755 /usr/local/libexec/tollgate-auth-radius-delegated && \
 		 ln -sf ../sites-available/radsec /etc/freeradius/3.0/sites-enabled/radsec 2>/dev/null; \
 		 ln -sf ../mods-available/cashu-exec /etc/freeradius/3.0/mods-enabled/cashu-exec 2>/dev/null; \
 		 ln -sf ../mods-available/cashu-exec-delegated /etc/freeradius/3.0/mods-enabled/cashu-exec-delegated 2>/dev/null; \
@@ -152,6 +158,7 @@ deploy-radius-config:
 		 chown -R root:freerad /etc/freeradius/3.0/certs/radsec && \
 		 chmod 640 /etc/freeradius/3.0/certs/radsec/server.key && \
 		 chmod 644 /etc/freeradius/3.0/certs/radsec/server.crt && \
+		 sh /tmp/check-freeradius-configs.sh /etc/freeradius/3.0 && \
 		 freeradius -XC && systemctl restart freeradius'
 
 deploy-certs:
@@ -166,6 +173,55 @@ deploy-certs:
 		 systemctl daemon-reload && \
 		 systemctl enable sync-caddy-certs.timer && \
 		 /usr/local/sbin/sync-caddy-certs-to-freeradius'
+
+# deploy-systemd-units — sync hardened systemd unit files + drop-in overrides.
+#
+# This target deploys the repo's hardened systemd units (User=tollgate,
+# ProtectSystem=strict, CapabilityBoundingSet, IPAddressDeny for
+# loopback-only services, etc.) and the drop-in overrides for the
+# externally-managed services (tollgate-net, tollgate-csms, tollgate-webssh)
+# that lack a --bind flag in their host binaries.
+#
+# It creates the `tollgate` system user if missing, adds it to the
+# cashu-wallet and freerad supplementary groups, then for each unit:
+#   1. scp the unit / override file to the server
+#   2. daemon-reload
+#   3. restart the service
+#   4. verify it is active
+#
+# Safe to re-run; idempotent.
+deploy-systemd-units:
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'id tollgate >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin tollgate && \
+		 usermod -aG cashu-wallet,freerad tollgate 2>/dev/null || true && \
+		 id tollgate'
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-auth-ssh.service    $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-auth-ssh.service
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-daemon.service      $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-daemon.service
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-auth-ocpi.service   $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-auth-ocpi.service
+	scp -P $(REMOTE_PORT) config/systemd/tollgate-settle.service      $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-settle.service
+	scp -P $(REMOTE_PORT) config/systemd/sync-caddy-certs.service     $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/sync-caddy-certs.service
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'mkdir -p /etc/systemd/system/tollgate-net.service.d    && \
+		 mkdir -p /etc/systemd/system/tollgate-csms.service.d   && \
+		 mkdir -p /etc/systemd/system/tollgate-webssh.service.d && \
+		 systemctl daemon-reload && \
+		 systemctl restart tollgate-auth-ssh tollgate-daemon tollgate-auth-ocpi tollgate-settle sync-caddy-certs.timer && \
+		 sleep 3 && \
+		 for svc in tollgate-auth-ssh tollgate-daemon tollgate-auth-ocpi; do \
+		   printf "%-25s %s\n" "$$svc" "$$(systemctl is-active $$svc)"; \
+		 done'
+	scp -P $(REMOTE_PORT) config/systemd/overrides/tollgate-net.service.d/override.conf    $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-net.service.d/override.conf
+	scp -P $(REMOTE_PORT) config/systemd/overrides/tollgate-csms.service.d/override.conf   $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-csms.service.d/override.conf
+	scp -P $(REMOTE_PORT) config/systemd/overrides/tollgate-webssh.service.d/override.conf $(REMOTE_USER)@$(REMOTE_HOST):/etc/systemd/system/tollgate-webssh.service.d/override.conf
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'systemctl daemon-reload && \
+		 systemctl restart tollgate-net tollgate-csms tollgate-webssh && \
+		 sleep 2 && \
+		 for svc in tollgate-net tollgate-csms tollgate-webssh; do \
+		   printf "%-25s %s\n" "$$svc" "$$(systemctl is-active $$svc)"; \
+		 done && \
+		 echo "---" && \
+		 ss -tlnp | grep -E ":2121|:8092|:8887|:8091|:8093"'
 
 deploy-jail: build-shell
 	scp -P $(REMOTE_PORT) scripts/setup-jail.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/setup-jail.sh
@@ -195,7 +251,11 @@ test-radius-local: ## Run local RADIUS tests (no live server needed)
 
 test-all-available: ## Run all tests that can run locally
 	go test -race ./...
+	scripts/check-freeradius-configs.sh
 	@echo "All local tests passed. For live tests: make test-e2e"
+
+test-freeradius-config: ## Static guard: no /bin/sh -c with %{...} in config/freeradius/
+	scripts/check-freeradius-configs.sh
 
 test-e2e:
 	scp -P $(REMOTE_PORT) scripts/test-radius-e2e.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/test-radius-e2e.sh
@@ -214,3 +274,132 @@ install-hooks: ## Install git pre-commit, commit-msg, and pre-push hooks
 	@echo "  pre-commit: gofmt + go vet + secret scan"
 	@echo "  pre-push:   go test -race ./..."
 	@echo "  commit-msg: ASCII-only, conventional commit format"
+
+# ─── Docker targets ───────────────────────────────────────────────────────
+# These targets build images and run the containerized stack defined in
+# docker/compose/docker-compose.yml. The stack is PLANNING-ONLY as of this
+# commit — no images are published, no containers are run in production.
+# See docs/DOCKER_MIGRATION_ROADMAP.md for the phased migration plan.
+#
+# Prerequisites (host):
+#   - Docker 24+ with buildx
+#   - docker compose v2 (Go-based, ships with Docker Desktop / docker-compose-plugin)
+#   - /opt/tollgate-auth, /opt/cashu-tollgate, /var/lib/cashu-wallet exist on host
+#   - /etc/tollgate/secrets.env exists with TOLLGATE_OPERATOR_NSEC and TOLLGATE_API_KEY
+#   - For FreeRADIUS: RadSec TLS certs synced to /etc/freeradius/3.0/certs/letsencrypt/
+
+COMPOSE_DIR := docker/compose
+COMPOSE_BASE := $(COMPOSE_DIR)/docker-compose.yml
+COMPOSE_DEV  := $(COMPOSE_DIR)/docker-compose.dev.yml
+COMPOSE_PROD := $(COMPOSE_DIR)/docker-compose.prod.yml
+
+# Default to dev overrides if no environment is specified. Override with
+# COMPOSE_ENV=prod to use prod overrides.
+COMPOSE_ENV ?= dev
+COMPOSE_FILES := -f $(COMPOSE_BASE)
+ifeq ($(COMPOSE_ENV),prod)
+  COMPOSE_FILES += -f $(COMPOSE_PROD)
+else
+  COMPOSE_FILES += -f $(COMPOSE_DEV)
+endif
+
+# Service list — kept in sync with docker/compose/docker-compose.yml.
+# Add new services here when they are added to the compose file.
+DOCKER_SERVICES := tollgate-daemon tollgate-auth-ocpi tollgate-csms tollgate-webssh freeradius tollgate-settle
+
+# Build a single service image.
+# Usage: make docker-build SVC=tollgate-daemon
+docker-build:
+	@if [ -z "$(SVC)" ]; then echo "Usage: make docker-build SVC=<service-name>"; exit 1; fi
+	docker compose $(COMPOSE_FILES) build $(SVC)
+
+# Build ALL service images. Used by CI to verify Dockerfiles compile cleanly.
+docker-build-all:
+	@for svc in $(DOCKER_SERVICES); do \
+	  echo "=== Building $$svc ==="; \
+	  docker compose $(COMPOSE_FILES) build $$svc || exit 1; \
+	done
+	@echo "All images built successfully."
+
+# Validate Dockerfile + compose syntax without building. Fast CI gate.
+docker-validate:
+	@echo "=== Validating compose files ==="
+	docker compose -f $(COMPOSE_BASE) config -q
+	docker compose -f $(COMPOSE_BASE) -f $(COMPOSE_DEV) config -q
+	docker compose -f $(COMPOSE_BASE) -f $(COMPOSE_PROD) config -q
+	@echo "compose files OK"
+	@echo "=== Verifying Dockerfiles exist ==="
+	@for svc in tollgate-auth-ocpi tollgate-csms tollgate-webssh tollgate-daemon tollgate-settle freeradius; do \
+	  test -f docker/$$svc/Dockerfile || { echo "MISSING: docker/$$svc/Dockerfile"; exit 1; }; \
+	done
+	@echo "All Dockerfiles present."
+
+# Bring up the dev stack (everything except FreeRADIUS, which needs --profile radius)
+docker-up: docker-build-all
+	docker compose $(COMPOSE_FILES) up -d
+	@echo ""
+	@echo "Stack is up. Useful commands:"
+	@echo "  make docker-logs       # tail all logs"
+	@echo "  make docker-ps         # show running containers"
+	@echo "  make docker-down       # stop everything"
+
+# Explicit prod-mode up — same as docker-up but with prod overrides + radius profile.
+docker-up-prod:
+	COMPOSE_ENV=prod docker compose $(COMPOSE_FILES) --profile radius up -d
+	@echo ""
+	@echo "Production stack is up (with FreeRADIUS)."
+
+# Convenience alias — start everything including FreeRADIUS in dev mode.
+docker-up-dev:
+	docker compose -f $(COMPOSE_BASE) -f $(COMPOSE_DEV) --profile radius up -d
+
+# Stop and remove containers (volumes preserved).
+docker-down:
+	docker compose $(COMPOSE_FILES) down
+	@echo "Containers stopped. Volumes preserved — use 'docker compose down -v' to wipe state."
+
+# Tail logs from all services.
+docker-logs:
+	docker compose $(COMPOSE_FILES) logs --tail=100
+
+docker-logs-follow:
+	docker compose $(COMPOSE_FILES) logs -f
+
+# Show running containers + key health info.
+docker-ps:
+	@docker compose $(COMPOSE_FILES) ps
+	@echo ""
+	@echo "=== Listening ports (host side) ==="
+	@docker compose $(COMPOSE_FILES) ps --format json 2>/dev/null | \
+	  grep -oE '"Publishers":\[[^]]+\]' | grep -oE '"PublishedPort":[0-9]+' | sort -u || true
+
+# Get a shell in a running container (uses alpine sh since distroless has none).
+# Usage: make docker-shell SVC=tollgate-daemon
+docker-shell:
+	@if [ -z "$(SVC)" ]; then echo "Usage: make docker-shell SVC=<service-name>"; exit 1; fi
+	@# Distroless images have no shell — fall back to `docker run --rm -it <image> /bin/sh`
+	@# by re-running with an alpine base. For now, this only works on alpine-based images
+	@# (tollgate-daemon, tollgate-settle). For distroless images, use `docker exec` with
+	@# an explicit binary like `ls`, `cat`, `env`.
+	docker exec -it $(SVC) /bin/sh || \
+	  echo "No shell in $$(SVC) (distroless). Try: docker exec $(SVC) ls -la /opt/tollgate-auth"
+
+# Manually trigger a settlement run (oneshot).
+docker-settle-run:
+	docker compose -f $(COMPOSE_BASE) --profile run-settle run --rm tollgate-settle
+
+# Deploy host-side Docker dependencies: shim wrapper, cert sync script,
+# deploy-containers.sh. Idempotent. Run after the first Docker install
+# OR after rebuilding the server from scratch.
+deploy-docker-host-deps:
+	scp -P $(REMOTE_PORT) scripts/tollgate-shim-tcp-wrapper.sh $(REMOTE_USER)@$(REMOTE_HOST):/tmp/tollgate-shim-tcp-wrapper.sh
+	scp -P $(REMOTE_PORT) scripts/sync-caddy-certs.sh $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/sbin/sync-caddy-certs-to-freeradius
+	scp -P $(REMOTE_PORT) docker/deploy-containers.sh $(REMOTE_USER)@$(REMOTE_HOST):/usr/local/sbin/tollgate-deploy-containers
+	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
+		'mkdir -p /usr/local/libexec && \
+		 mv /tmp/tollgate-shim-tcp-wrapper.sh /usr/local/libexec/tollgate-shim-tcp-wrapper.sh && \
+		 chown root:root /usr/local/libexec/tollgate-shim-tcp-wrapper.sh && \
+		 chmod 0755 /usr/local/libexec/tollgate-shim-tcp-wrapper.sh && \
+		 chmod +x /usr/local/sbin/sync-caddy-certs-to-freeradius /usr/local/sbin/tollgate-deploy-containers && \
+		 echo "OK: host-side Docker dependencies installed:" && \
+		 ls -la /usr/local/libexec/tollgate-shim-tcp-wrapper.sh /usr/local/sbin/sync-caddy-certs-to-freeradius /usr/local/sbin/tollgate-deploy-containers'

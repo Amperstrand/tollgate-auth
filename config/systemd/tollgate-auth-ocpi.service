@@ -1,3 +1,10 @@
+# tollgate-auth-ocpi — OCPI 2.2.1 eMSP receiver.
+#
+# Privilege model:
+#   Runs as the unprivileged `tollgate` user. Listens on 127.0.0.1:8093 only
+#   (caddy reverse-proxies public traffic to https://ocpi.nodns.shop/). Talks
+#   to tollgate-net at http://127.0.0.1:2121 over loopback for delegated
+#   token verification. Writes ledger/session files under /opt/tollgate-auth.
 [Unit]
 Description=Tollgate Auth OCPI 2.2.1 eMSP Receiver
 After=network.target
@@ -5,8 +12,11 @@ Wants=tollgate-daemon.service
 
 [Service]
 Type=simple
+User=tollgate
+Group=tollgate
+SupplementaryGroups=cashu-wallet
 ExecStart=/usr/local/bin/tollgate-auth-ocpi
-Environment=TOLLGATE_OCPI_ADDR=:8093
+Environment=TOLLGATE_OCPI_ADDR=127.0.0.1:8093
 Environment=TOLLGATE_OCPI_PUBLIC_URL=https://ocpi.nodns.shop
 Environment=TOLLGATE_OCPI_DASH_URL=https://ocpi.nodns.shop
 Environment=TOLLGATE_OCPI_COUNTRY=NO
@@ -21,9 +31,31 @@ Restart=on-failure
 RestartSec=3
 LimitNOFILE=4096
 
+# Security hardening — unprivileged
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/opt/tollgate-auth /tmp
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

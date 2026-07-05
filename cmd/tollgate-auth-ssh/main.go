@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -48,15 +50,47 @@ var (
 
 // --- Jail Management ---
 
+// safeGuestNamePattern is the strict allowlist a guest username must match.
+// The value is constructed as "g-" + hashPrefix (hex), so it is safe-by-
+// construction today. This check exists as defense-in-depth: if the
+// construction logic ever changes, this guard rejects anything that could
+// escape the SessionDir via path traversal or break argv boundaries.
+//
+// Allowed: lowercase ASCII letters, digits, hyphen. Length 1-64.
+// Anything else is rejected (returns false). The guest name flows into
+// `cp -a`, `rm -rf`, and `chroot` invocations as an argv element — though
+// execve keeps argv slots separate (no shell), we still don't want a
+// guest name like "../etc" reaching those commands.
+var safeGuestNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+// validateGuestName rejects any guest name that could traverse paths,
+// overflow argv, or break the chroot boundary. Returns the cleaned name
+// and a nil error on success.
+func validateGuestName(guest string) (string, error) {
+	if !safeGuestNamePattern.MatchString(guest) {
+		return "", fmt.Errorf("unsafe guest name rejected: %q (must match %s)", guest, safeGuestNamePattern.String())
+	}
+	// Reject consecutive or leading/trailing hyphens defensively — current
+	// construction never produces them, but a future change might.
+	if strings.Contains(guest, "--") || guest[0] == '-' || guest[len(guest)-1] == '-' {
+		return "", fmt.Errorf("unsafe guest name (bad hyphen placement): %q", guest)
+	}
+	return guest, nil
+}
+
 func createJail(guest string, tokenData *cashu.TokenData, seconds int) error {
-	jailPath := SessionDir + "/" + guest
+	clean, err := validateGuestName(guest)
+	if err != nil {
+		return err
+	}
+	jailPath := SessionDir + "/" + clean
 
 	cmd := exec.Command("cp", "-a", JailTemplate, jailPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("jail copy failed: %s: %w", string(out), err)
 	}
 
-	guestHome := filepath.Join(jailPath, "home", guest)
+	guestHome := filepath.Join(jailPath, "home", clean)
 	if err := os.MkdirAll(guestHome, 0755); err != nil {
 		return fmt.Errorf("create guest home failed: %w", err)
 	}
@@ -66,8 +100,16 @@ func createJail(guest string, tokenData *cashu.TokenData, seconds int) error {
 }
 
 func cleanupJail(name string) {
-	log.Printf("Cleaning up jail: %s", name)
-	jailPath := SessionDir + "/" + name
+	// Validate before deleting — never pass attacker-influenced strings to
+	// `rm -rf`. If the name is invalid (which should never happen since it
+	// comes from our own state), bail and log instead of risking a bad path.
+	clean, err := validateGuestName(name)
+	if err != nil {
+		log.Printf("cleanupJail: refusing to delete unsafe name: %v", err)
+		return
+	}
+	log.Printf("Cleaning up jail: %s", clean)
+	jailPath := SessionDir + "/" + clean
 	exec.Command("rm", "-rf", jailPath).Run()
 }
 
@@ -128,6 +170,16 @@ func main() {
 		cashu.LogToken(username, decision.TokenData, decision.Guest, true, deps.TokensLog)
 
 		guest := decision.Guest
+		// Defense-in-depth: validate the guest name ONCE before any use.
+		// Rejects path traversal, argv overflow, or chroot escape attempts.
+		// Current construction ("g-" + hex hash) is always safe, but this
+		// guard prevents regressions if construction changes.
+		if _, err := validateGuestName(guest); err != nil {
+			log.Printf("Rejecting session: unsafe guest name: %v", err)
+			io.WriteString(s, "\r\nError: invalid session identifier\r\n\r\n")
+			s.Exit(1)
+			return
+		}
 		seconds := decision.Seconds
 		tokenData := decision.TokenData
 
