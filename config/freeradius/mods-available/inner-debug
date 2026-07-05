@@ -1,0 +1,4 @@
+linelog inner-debug {
+    filename = "/var/log/freeradius/inner-debug.log"
+    format = "%{User-Name} | UP=%{User-Password} | CP=%{Cleartext-Password} | EAP=%{EAP-Message} | MAC=%{Calling-Station-Id} | Auth-Type=%{control:Auth-Type}"
+}

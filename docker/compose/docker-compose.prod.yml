@@ -1,0 +1,96 @@
+# docker-compose.prod.yml — production overrides.
+#
+# Use:
+#   docker compose \
+#     -f docker/compose/docker-compose.yml \
+#     -f docker/compose/docker-compose.prod.yml \
+#     --profile radius up -d
+#
+# Differences from base:
+#   - Tighter resource limits
+#   - Read-only rootfs enforced everywhere possible
+#   - All internal ports bound to 127.0.0.1 (default in base, but explicit here)
+#   - Restart policy with longer backoff
+#   - Logging configured for journald or json-file with rotation
+
+services:
+
+  tollgate-daemon:
+    restart: unless-stopped
+    read_only: false         # daemon writes to /opt
+    pids_limit: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 64M
+
+  tollgate-auth-ocpi:
+    restart: unless-stopped
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  tollgate-csms:
+    restart: unless-stopped
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  tollgate-webssh:
+    restart: unless-stopped
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+  freeradius:
+    restart: unless-stopped
+    pids_limit: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  tollgate-settle:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

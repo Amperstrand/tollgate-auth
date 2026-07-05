@@ -1,0 +1,4 @@
+linelog outer-debug {
+    filename = /var/log/freeradius/outer-debug.log
+    format = '%t: OUTER USER="%{User-Name}" CALLING="%{Calling-Station-Id}" CALLED="%{Called-Station-Id}" EAP="%{EAP-Message}"'
+}

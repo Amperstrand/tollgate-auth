@@ -1,0 +1,64 @@
+# Exclude everything not needed for Docker builds.
+# Goal: minimize build context → faster builds, smaller attack surface in the
+# image cache, no chance of leaking local state into a published image.
+
+# VCS
+.git
+.gitignore
+.github
+.codegraph
+.omo
+.agent-notes
+.playwright-mcp
+
+# Local builds — these must be rebuilt inside the image, never copied in
+tollgate-auth-ssh
+tollgate-auth-radius
+tollgate-auth-radius.linux-*
+tollgate-auth-ocpi
+tollgate-auth-ocpi.local
+tollgate-csms
+tollgate-daemon
+tollgate-shim
+tollgate-shell
+tollgate-webssh
+tollgate-wg
+tollgate-settle
+csms-test
+tollgate-auth-ocpi
+
+# Test artifacts / e2e state
+test-results
+.playwright-mcp
+node_modules
+package.json
+package-lock.json
+playwright.config.ts
+e2e
+
+# Documentation and large images that aren't needed at build time
+docs/*.png
+docs/*.jpg
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+
+# Local development state — NEVER bake into an image
+.env
+.env.local
+*.local
+secrets.env
+
+# OS / IDE noise
+.DS_Store
+.vscode
+.idea
+*.swp
+*~
+timeleft
+
+# Misc project files not relevant to container builds
+README.md
+LICENSE
