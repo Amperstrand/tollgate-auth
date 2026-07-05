@@ -222,7 +222,7 @@ func (l *Ledger) RevenueSummary(operatorID string, start, end time.Time) (*Reven
 		case EventAuthAccept:
 			report.TotalSessions++
 			report.AcceptedSessions++
-			report.TotalSat += e.AmountSat
+			report.TotalSat += e.CreditAmount
 		case EventAuthReject:
 			report.TotalSessions++
 			report.RejectedSessions++
@@ -284,7 +284,7 @@ func (l *Ledger) RevenueByNASID(nasID string, start, end time.Time) (*RevenueRep
 		case EventAuthAccept:
 			report.TotalSessions++
 			report.AcceptedSessions++
-			report.TotalSat += e.AmountSat
+			report.TotalSat += e.CreditAmount
 		case EventAuthReject:
 			report.TotalSessions++
 			report.RejectedSessions++

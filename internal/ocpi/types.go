@@ -143,32 +143,37 @@ type AuthorizeResponse struct {
 
 // Session is a minimal OCPI Session DTO (subset we receive).
 type Session struct {
-	ID          string     `json:"id"`
-	Started     time.Time  `json:"start_datetime"`
-	Stopped     *time.Time `json:"stop_datetime,omitempty"`
-	Kwh         float64    `json:"kwh"`
-	AuthID      string     `json:"auth_id"`
-	AuthMethod  string     `json:"auth_method,omitempty"`
-	LocationID  string     `json:"location_id"`
-	EvseUID     string     `json:"evse_uid,omitempty"`
-	ConnectorID string     `json:"connector_id,omitempty"`
-	Currency    string     `json:"currency,omitempty"`
-	TotalCost   float64    `json:"total_cost,omitempty"`
-	Status      string     `json:"status"`
-	LastUpdated time.Time  `json:"last_updated"`
+	ID           string     `json:"id"`
+	Started      time.Time  `json:"start_datetime"`
+	Stopped      *time.Time `json:"stop_datetime,omitempty"`
+	Kwh          float64    `json:"kwh"`
+	AuthID       string     `json:"auth_id"`
+	AuthMethod   string     `json:"auth_method,omitempty"`
+	LocationID   string     `json:"location_id"`
+	EvseUID      string     `json:"evse_uid,omitempty"`
+	ConnectorID  string     `json:"connector_id,omitempty"`
+	Currency     string     `json:"currency,omitempty"`
+	TotalCost    float64    `json:"total_cost,omitempty"`
+	CreditAmount int        `json:"credit_amount,omitempty"`
+	Unit         string     `json:"unit,omitempty"`
+	Status       string     `json:"status"`
+	LastUpdated  time.Time  `json:"last_updated"`
 }
 
 // CDR is a minimal OCPI Charge Detail Record (subset we receive).
 type CDR struct {
-	ID          string    `json:"id"`
-	Started     time.Time `json:"start_date"`
-	Stopped     time.Time `json:"stop_date"`
-	AuthID      string    `json:"auth_id"`
-	LocationID  string    `json:"location_id"`
-	EvseUID     string    `json:"evse_uid,omitempty"`
-	ConnectorID string    `json:"connector_id,omitempty"`
-	Kwh         float64   `json:"total_kwh"`
-	TotalCost   float64   `json:"total_cost"`
-	Currency    string    `json:"currency,omitempty"`
-	LastUpdated time.Time `json:"last_updated"`
+	ID           string    `json:"id"`
+	Started      time.Time `json:"start_date"`
+	Stopped      time.Time `json:"stop_date"`
+	AuthID       string    `json:"auth_id"`
+	LocationID   string    `json:"location_id"`
+	EvseUID      string    `json:"evse_uid,omitempty"`
+	ConnectorID  string    `json:"connector_id,omitempty"`
+	Kwh          float64   `json:"total_kwh"`
+	TotalCost    float64   `json:"total_cost"`
+	Currency     string    `json:"currency,omitempty"`
+	CreditAmount int       `json:"credit_amount,omitempty"`
+	CreditUsed   float64   `json:"credit_used,omitempty"`
+	Unit         string    `json:"unit,omitempty"`
+	LastUpdated  time.Time `json:"last_updated"`
 }

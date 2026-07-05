@@ -274,7 +274,7 @@ func handleLNURLw(cred radiusauth.PaymentCredential, sessionID string, sessions 
 		EventType:    ledger.EventAuthAccept,
 		MAC:          sessionID,
 		PaymentType:  "lnurlw",
-		AmountSat:    LNURLWDefaultSec / RateSecPerSat,
+		CreditAmount:    LNURLWDefaultSec / RateSecPerSat,
 		DurationSec:  LNURLWDefaultSec,
 		TokenHash:    thash,
 		ReplyMessage: fmt.Sprintf("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60),
@@ -346,9 +346,9 @@ func handleDelegatedReconnection(sessionID string) bool {
 // buildDelegatedReplyMessage formats the Reply-Message for delegated mode,
 // showing transparency (sats + effective rate) when enriched fields are available.
 func buildDelegatedReplyMessage(state *sessiond.SessionState, minutes int) string {
-	if state.AmountSat > 0 && state.EffectiveRateSecPerSat > 0 {
+	if state.CreditAmount > 0 && state.EffectiveRateSecPerSat > 0 {
 		return fmt.Sprintf("Valid Cashu token: %d sat → %dm access (%ds/sat)",
-			state.AmountSat, minutes, state.EffectiveRateSecPerSat)
+			state.CreditAmount, minutes, state.EffectiveRateSecPerSat)
 	}
 	return fmt.Sprintf("Valid Cashu token: %dm access (delegated)", minutes)
 }
@@ -430,13 +430,13 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 
 	// Use enriched fields when available, fall back gracefully for legacy servers
 	var displayAmount int
-	var ledgerAmountSat int
-	if state.AmountSat > 0 {
-		displayAmount = int(state.AmountSat)
-		ledgerAmountSat = int(state.AmountSat)
+	var ledgerCreditAmount int
+	if state.CreditAmount > 0 {
+		displayAmount = int(state.CreditAmount)
+		ledgerCreditAmount = int(state.CreditAmount)
 	} else {
 		displayAmount = minutes
-		ledgerAmountSat = 0
+		ledgerCreditAmount = 0
 	}
 
 	rec := &SessionRecord{
@@ -456,13 +456,13 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 	}
 
 	log.Printf("Accept: session=%s type=delegated duration=%ds sats=%d source=%s",
-		sessionID, seconds, ledgerAmountSat, cred.Source)
+		sessionID, seconds, ledgerCreditAmount, cred.Source)
 
 	recordLedgerAuth(ledger.LedgerEntry{
 		EventType:    ledger.EventAuthAccept,
 		MAC:          sessionID,
 		PaymentType:  "delegated",
-		AmountSat:    ledgerAmountSat,
+		CreditAmount:    ledgerCreditAmount,
 		DurationSec:  seconds,
 		TokenHash:    thash,
 		ReplyMessage: buildDelegatedReplyMessage(state, minutes),

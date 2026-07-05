@@ -49,7 +49,7 @@ func TestHandleAuthorize_PrepayAllowed(t *testing.T) {
 		UID:            "OCPI-AB12CD34",
 		CashuTokenHash: "abc12345def67890abc12345def67890abc12345def67890abc12345def67890",
 		AllotmentSec:   120,
-		AmountSat:      12,
+		CreditAmount:      12,
 		MintURL:        "https://testnut.cashu.space",
 	})
 	authz := &Authorizer{Store: store, InfoBase: "http://dash.example/"}

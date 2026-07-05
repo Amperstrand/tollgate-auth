@@ -189,7 +189,7 @@ const dashboardHTML = `<!doctype html>
         {{if eq .ChargerState "CHARGING"}}
         <div class="charger-meter">
           <span id="live-kwh">{{printf "%.3f" .LiveKwh}}</span><span class="unit"> kWh</span>
-          <span class="power" id="charger-power">{{if .Session}}{{.Session.PowerKw}}{{else}}7.4{{end}} kW · {{if .Session}}{{.Session.AmountSat}} sat paid{{end}}</span>
+          <span class="power" id="charger-power">{{if .Session}}{{.Session.PowerKw}}{{else}}7.4{{end}} kW · {{if .Session}}{{.Session.CreditAmount}} {{.Session.Unit}} credit{{end}}</span>
         </div>
         {{else}}
         <div class="muted" style="margin-top:0.25rem">Ready. Paste a Cashu token to plug in and charge.</div>
@@ -265,7 +265,7 @@ const dashboardHTML = `<!doctype html>
         <tr>
           <td class="mono">{{.UID}}</td>
           <td class="mono muted">{{.ContractID}}</td>
-          <td>{{.AmountSat}}</td>
+          <td>{{.CreditAmount}}</td>
           <td>{{fmtDur .AllotmentSec}}</td>
           <td>{{if .AuthorizedAt}}<span class="badge ok">yes</span>{{else}}<span class="muted">no</span>{{end}}</td>
           <td>{{if .Used}}<span class="badge warn">used</span>{{else}}<span class="badge ok">live</span>{{end}}</td>
@@ -431,7 +431,7 @@ document.getElementById('prepay-form').addEventListener('submit', async (e) => {
       '<div class="result">' +
         '<strong>OCPI Token UID:</strong> <code>' + r.uid + '</code><br>' +
         '<strong>Allotment:</strong> ' + Math.floor(r.allotment_sec/60) + ' min (' + r.allotment_sec + 's)<br>' +
-        '<strong>Paid:</strong> ' + r.amount_sat + ' sat from ' + r.mint_url + '<br>' +
+        '<strong>Credit:</strong> ' + r.credit_amount + ' ' + (r.unit || 'sat') + ' from ' + r.mint_url + '<br>' +
         '<strong>Contract:</strong> <code>' + r.contract_id + '</code>' +
       '</div>';
     document.getElementById('cashu').value = '';

@@ -29,7 +29,7 @@ func TestRecordAuth_Accept(t *testing.T) {
 		OperatorID:   "op-test",
 		MAC:          "aa:bb:cc:dd:ee:ff",
 		PaymentType:  "cashu",
-		AmountSat:    8,
+		CreditAmount:    8,
 		DurationSec:  480,
 		MintURL:      "https://testnut.cashu.space",
 		TokenHash:    "abc123",
@@ -50,8 +50,8 @@ func TestRecordAuth_Accept(t *testing.T) {
 	if e.EventType != EventAuthAccept {
 		t.Errorf("expected event_type %q, got %q", EventAuthAccept, e.EventType)
 	}
-	if e.AmountSat != 8 {
-		t.Errorf("expected amount_sat 8, got %d", e.AmountSat)
+	if e.CreditAmount != 8 {
+		t.Errorf("expected credit_amount 8, got %d", e.CreditAmount)
 	}
 	if e.Timestamp == "" {
 		t.Error("expected non-empty timestamp")
@@ -215,7 +215,7 @@ func TestQueryByMAC(t *testing.T) {
 		entry := LedgerEntry{
 			EventType: EventAuthAccept,
 			MAC:       mac1,
-			AmountSat: i + 1,
+			CreditAmount: i + 1,
 		}
 		if err := l.RecordAuth(entry); err != nil {
 			t.Fatalf("RecordAuth %d: %v", i, err)
@@ -246,7 +246,7 @@ func TestQueryByOperator(t *testing.T) {
 			EventType:  EventAuthAccept,
 			OperatorID: "op-alpha",
 			MAC:        fmt.Sprintf("aa:bb:cc:dd:ee:%02x", i),
-			AmountSat:  5,
+			CreditAmount:  5,
 		}); err != nil {
 			t.Fatalf("RecordAuth op-alpha: %v", err)
 		}
@@ -257,7 +257,7 @@ func TestQueryByOperator(t *testing.T) {
 		EventType:  EventAuthAccept,
 		OperatorID: "op-beta",
 		MAC:        "ff:ff:ff:ff:ff:ff",
-		AmountSat:  10,
+		CreditAmount:  10,
 	}); err != nil {
 		t.Fatalf("RecordAuth op-beta: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestGetActiveSession_Active(t *testing.T) {
 		EventType:   EventAuthAccept,
 		MAC:         mac,
 		TokenHash:   tokenHash,
-		AmountSat:   8,
+		CreditAmount:   8,
 		DurationSec: 480,
 	}); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
@@ -304,8 +304,8 @@ func TestGetActiveSession_Active(t *testing.T) {
 	if session.EventType != EventAuthAccept {
 		t.Errorf("expected %q, got %q", EventAuthAccept, session.EventType)
 	}
-	if session.AmountSat != 8 {
-		t.Errorf("expected amount_sat 8, got %d", session.AmountSat)
+	if session.CreditAmount != 8 {
+		t.Errorf("expected credit_amount 8, got %d", session.CreditAmount)
 	}
 }
 
@@ -321,7 +321,7 @@ func TestGetActiveSession_Stopped(t *testing.T) {
 		EventType: EventAuthAccept,
 		MAC:       mac,
 		TokenHash: tokenHash,
-		AmountSat: 8,
+		CreditAmount: 8,
 	}); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestRevenueSummary(t *testing.T) {
 			EventType:  EventAuthAccept,
 			OperatorID: operatorID,
 			MAC:        fmt.Sprintf("aa:bb:cc:dd:ee:%02x", i),
-			AmountSat:  10,
+			CreditAmount:  10,
 		}); err != nil {
 			t.Fatalf("RecordAuth accept: %v", err)
 		}
@@ -452,7 +452,7 @@ func TestLedgerConcurrentWrites(t *testing.T) {
 				EventType:  EventAuthAccept,
 				OperatorID: "op-concurrent",
 				MAC:        fmt.Sprintf("aa:bb:cc:dd:ee:%02x", idx),
-				AmountSat:  idx + 1,
+				CreditAmount:  idx + 1,
 			}
 			if err := l.RecordAuth(entry); err != nil {
 				errors <- fmt.Errorf("goroutine %d: %w", idx, err)
@@ -507,7 +507,7 @@ func TestLedger_PersistsAcrossReopen(t *testing.T) {
 	entry := LedgerEntry{
 		EventType: EventAuthAccept,
 		MAC:       "aa:bb:cc:dd:ee:ff",
-		AmountSat: 5,
+		CreditAmount: 5,
 	}
 	if err := l1.RecordAuth(entry); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
@@ -528,7 +528,7 @@ func TestLedger_PersistsAcrossReopen(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry after reopen, got %d", len(entries))
 	}
-	if entries[0].AmountSat != 5 {
-		t.Errorf("expected amount 5, got %d", entries[0].AmountSat)
+	if entries[0].CreditAmount != 5 {
+		t.Errorf("expected amount 5, got %d", entries[0].CreditAmount)
 	}
 }

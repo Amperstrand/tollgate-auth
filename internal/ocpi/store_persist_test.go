@@ -100,7 +100,7 @@ func TestStoreWithDir_PutPrepay_PersistsAndReloads(t *testing.T) {
 		UID:            "OCPI-PREPAY-1",
 		CashuTokenHash: "deadbeef1234abcd",
 		AllotmentSec:   600,
-		AmountSat:      60,
+		CreditAmount:      60,
 		MintURL:        "https://testnut.cashu.space",
 		ContractID:     "NPC-OCPI-1",
 		StartedAt:      time.Now().UTC().Truncate(time.Second),
@@ -114,7 +114,7 @@ func TestStoreWithDir_PutPrepay_PersistsAndReloads(t *testing.T) {
 		t.Fatal("prepay not reloaded after reopen")
 	}
 	if got.UID != want.UID || got.AllotmentSec != want.AllotmentSec ||
-		got.AmountSat != want.AmountSat || got.MintURL != want.MintURL ||
+		got.CreditAmount != want.CreditAmount || got.MintURL != want.MintURL ||
 		!got.StartedAt.Equal(want.StartedAt) {
 		t.Errorf("reloaded prepay = %+v, want %+v", got, want)
 	}

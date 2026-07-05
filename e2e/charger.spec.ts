@@ -60,7 +60,7 @@ test.describe('OCPI eMSP Dashboard', () => {
     const startBody = await startResp.json();
     expect(startBody.status_code).toBe(1000);
     expect(startBody.data.state).toBe('CHARGING');
-    expect(startBody.data.session.amount_sat).toBe(5);
+    expect(startBody.data.session.credit_amount).toBe(5);
 
     await page.goto('/');
     await expect(page.locator('.charger-box')).toHaveClass(/CHARGING/);

@@ -19,7 +19,7 @@ type SettlementReport struct {
 	TotalSat         int       `json:"total_sat"`
 	AcceptedSessions int       `json:"accepted_sessions"`
 	RejectedSessions int       `json:"rejected_sessions"`
-	AverageAmountSat float64   `json:"average_amount_sat"`
+	AverageCreditAmount float64   `json:"average_credit_amount"`
 	GeneratedAt      time.Time `json:"generated_at"`
 }
 
@@ -43,7 +43,7 @@ func BuildSettlementReport(l *ledger.Ledger, operatorID string, start, end time.
 		TotalSat:         rev.TotalSat,
 		AcceptedSessions: rev.AcceptedSessions,
 		RejectedSessions: rev.RejectedSessions,
-		AverageAmountSat: rev.AverageAmount,
+		AverageCreditAmount: rev.AverageAmount,
 		GeneratedAt:      time.Now().UTC(),
 	}, nil
 }

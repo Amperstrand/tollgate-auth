@@ -10,11 +10,14 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"tollgate-auth/internal/cashu"
 )
 
 type BuyRequest struct {
-	AmountEur float64 `json:"amount_eur"`
-	Phone     string  `json:"phone,omitempty"`
+	AmountEur    float64 `json:"amount_eur"`
+	Phone        string  `json:"phone,omitempty"`
+	ProviderNpub string  `json:"provider_npub,omitempty"`
 }
 
 type BuyResponse struct {
@@ -23,6 +26,7 @@ type BuyResponse struct {
 	MintURL      string `json:"mint_url"`
 	QuoteID      string `json:"quote_id"`
 	PaymentState string `json:"payment_state"`
+	ProviderNpub string `json:"provider_npub,omitempty"`
 }
 
 func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
@@ -50,16 +54,26 @@ func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
 	if mintURL == "" {
 		mintURL = "http://127.0.0.1:3340"
 	}
-	walletDir := "/var/lib/cashu-wallet"
-	amountSat := int(body.AmountEur * 100)
+	amountCents := int(body.AmountEur * 100)
 
-	slog.Info("buy request", "amount_eur", body.AmountEur, "amount_sat", amountSat, "phone", body.Phone)
+	slog.Info("buy request", "amount_eur", body.AmountEur, "amount_cents", amountCents, "phone", body.Phone, "provider", body.ProviderNpub)
 
-	token, err := mintViaCdkCli(mintURL, walletDir, amountSat)
+	token, err := mintEurToken(mintURL, amountCents)
 	if err != nil {
-		slog.Error("buy: cdk-cli mint failed", "error", err)
+		slog.Error("buy: mint failed", "error", err)
 		writeJSON(w, Err(StatusClientError, "mint failed: "+err.Error()))
 		return
+	}
+
+	if body.ProviderNpub != "" {
+		tokenHash := cashu.TokenHash(token)
+		s.providers.PutTokenProvider(&TokenProvider{
+			TokenHash:    tokenHash,
+			ProviderNpub: body.ProviderNpub,
+			Amount:       amountCents,
+			Unit:         "eur",
+		})
+		slog.Info("buy: token bound to provider", "provider", body.ProviderNpub, "token_hash_prefix", tokenHash[:16])
 	}
 
 	slog.Info("buy success", "amount_eur", body.AmountEur, "token_prefix", safePrefix(token, 30))
@@ -68,60 +82,53 @@ func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
 		AmountEur:    fmt.Sprintf("%.2f", body.AmountEur),
 		MintURL:      mintURL,
 		PaymentState: "PAID",
+		ProviderNpub: body.ProviderNpub,
 	}))
 }
 
-func mintViaCdkCli(mintURL, walletDir string, amountSat int) (string, error) {
-	cmd := exec.Command("cdk-cli",
+// mintEurToken mints EUR-denominated Cashu tokens via cdk-cli using a throwaway
+// wallet directory. A fresh temp wallet per call avoids state pollution: each
+// buy gets a clean mint→send cycle, so the wallet balance is always exactly the
+// requested amount and the send never fails with "insufficient funds".
+func mintEurToken(mintURL string, amountCents int) (string, error) {
+	walletDir, err := os.MkdirTemp("", "cashu-buy-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp wallet: %w", err)
+	}
+	defer os.RemoveAll(walletDir)
+
+	mintCmd := exec.Command("cdk-cli",
 		"--work-dir", walletDir,
-		"--unit", "sat",
-		"mint", mintURL, strconv.Itoa(amountSat),
-		"tollgate buy endpoint",
+		"--unit", "eur",
+		"mint", mintURL, strconv.Itoa(amountCents),
+		"tollgate buy",
 		"--wait-duration", "10",
 	)
-	cmd.Env = []string{"HOME=/tmp", "PATH=" + os.Getenv("PATH")}
-	output, err := cmd.CombinedOutput()
+	mintCmd.Env = []string{"HOME=/tmp", "PATH=" + os.Getenv("PATH")}
+	mintOut, err := mintCmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("cdk-cli failed: %w: %s", err, string(output))
+		return "", fmt.Errorf("cdk-cli mint failed: %w: %s", err, safePrefix(string(mintOut), 300))
+	}
+	if !strings.Contains(string(mintOut), "Received") && !strings.Contains(string(mintOut), "Minted") {
+		return "", fmt.Errorf("mint did not complete: %s", safePrefix(string(mintOut), 300))
 	}
 
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "cashuA") || strings.HasPrefix(line, "cashuB") {
-			line = strings.TrimRight(line, "=\n\r ")
-			return line, nil
-		}
-	}
-
-	if strings.Contains(string(output), "Received") {
-		token, err := sendFromWallet(walletDir, amountSat)
-		if err != nil {
-			return "", fmt.Errorf("minted but send failed: %w", err)
-		}
-		return token, nil
-	}
-
-	return "", fmt.Errorf("cdk-cli produced no token: %s", safePrefix(string(output), 200))
-}
-
-func sendFromWallet(walletDir string, amountSat int) (string, error) {
-	cmd := exec.Command("cdk-cli",
+	sendCmd := exec.Command("cdk-cli",
 		"--work-dir", walletDir,
-		"--unit", "sat",
-		"send", "--amount", strconv.Itoa(amountSat),
-		"--mint-url", "http://127.0.0.1:3340",
+		"--unit", "eur",
+		"send", "--amount", strconv.Itoa(amountCents),
+		"--mint-url", mintURL,
 	)
-	cmd.Env = []string{"HOME=/tmp", "PATH=" + os.Getenv("PATH")}
-	output, err := cmd.CombinedOutput()
+	sendCmd.Env = []string{"HOME=/tmp", "PATH=" + os.Getenv("PATH")}
+	sendOut, err := sendCmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("cdk-cli send failed: %w: %s", err, string(output))
+		return "", fmt.Errorf("cdk-cli send failed: %w: %s", err, safePrefix(string(sendOut), 300))
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(sendOut), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "cashuA") || strings.HasPrefix(line, "cashuB") {
-			line = strings.TrimRight(line, "=\n\r ")
 			return line, nil
 		}
 	}
-	return "", fmt.Errorf("cdk-cli send produced no token: %s", safePrefix(string(output), 200))
+	return "", fmt.Errorf("send produced no token: %s", safePrefix(string(sendOut), 300))
 }

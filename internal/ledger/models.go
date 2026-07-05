@@ -25,7 +25,8 @@ type LedgerEntry struct {
 	MAC            string    `json:"mac"`
 	SessionClass   string    `json:"session_class,omitempty"`
 	PaymentType    string    `json:"payment_type,omitempty"`
-	AmountSat      int       `json:"amount_sat,omitempty"`
+	CreditAmount      int       `json:"credit_amount,omitempty"`
+	Unit              string    `json:"unit,omitempty"`
 	DurationSec    int       `json:"duration_sec,omitempty"`
 	MintURL        string    `json:"mint_url,omitempty"`
 	TokenHash      string    `json:"token_hash,omitempty"`

@@ -16,7 +16,7 @@ func TestHandleAuthorize_ReplayAfterUse(t *testing.T) {
 		UID:            "OCPI-REPLAY1",
 		CashuTokenHash: "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
 		AllotmentSec:   300,
-		AmountSat:      5,
+		CreditAmount:      5,
 		MintURL:        "https://testnut.cashu.space",
 	})
 	authz := &Authorizer{Store: store, InfoBase: "http://dash.example/"}
@@ -212,7 +212,7 @@ func TestStoreWithDir_PersistsChargerState(t *testing.T) {
 		Session: &LiveSession{
 			ID:        "sess-persist",
 			TokenUID:  "OCPI-PERSIST",
-			AmountSat: 5,
+			CreditAmount: 5,
 		},
 	}
 
