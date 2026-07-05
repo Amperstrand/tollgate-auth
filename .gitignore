@@ -3,16 +3,25 @@ cashu-tollgate
 *.exe
 .env
 .omo/
+.sisyphus/
 
-# Binaries
+# Binaries (root-level only — leading / prevents matching subdirectories)
 /tollgate-auth-radius
 /tollgate-auth-radius.linux-*
 /tollgate-auth-ssh
 /tollgate-auth-ssh.linux-*
+/tollgate-auth-ocpi
 /tollgate-daemon
 /tollgate-shim
 /tollgate-wg
 /tollgate-settle
+/tollgate-shell
+/tollgate-webssh
+/tollgate-csms
+/tollgate-auth-ocpi.local
+/tollgateroot*
+/signyourfirmware*
+/timeleft
 
 # Build artifacts
 *.pyc
@@ -36,55 +45,36 @@ package-lock.json
 *.tiff
 *.webp
 *.heic
-
-tollgate-shell
-tollgate-webssh
+!docs/*.png
 
 # Test and dev artifacts
 .playwright-mcp/
 test-results/
-node_modules/
 *.webm
-tollgate-auth-ocpi
-tollgate-auth-ssh
-tollgate-auth-radius
-tollgate-daemon
-tollgate-shim
-tollgate-shell
-.omo/
-.sisyphus/
-tollgate-auth-radius.linux-*
-tollgate-settle
-tollgate-webssh
-tollgate-wg
-timeleft
 .agent-notes/
-*.png
-!docs/*.png
+.codegraph
 .wrangler/
 .dev.vars
 tmp/
-.env
 *.zip
-test
-.codegraph
-faucet-cashu-email-check.png
-ssh-cashu-email-check.png
-ssh-connected*.png
-ssh-e2e*.png
-phone-wifi-settings.png
-dashboard-*.png
-nostr-events.png
-run-detail.png
-run19*.png
-run20*.png
-wallet-after-login.png
-wallet-after-send.png
-wallet-auth-screen.png
-easee-*.png
-landing-*.png
-tollgate-auth-radius
-tollgateroot*
-signyourfirmware*
-psbt.raw
-signyourfirmware*
+
+# Specific screenshots (root-level only)
+/faucet-cashu-email-check.png
+/ssh-cashu-email-check.png
+/ssh-connected*.png
+/ssh-e2e*.png
+/phone-wifi-settings.png
+/dashboard-*.png
+/nostr-events.png
+/run-detail.png
+/run19*.png
+/run20*.png
+/wallet-after-login.png
+/wallet-after-send.png
+/wallet-auth-screen.png
+/easee-*.png
+/landing-*.png
+
+# Test binary
+/test
+/psbt.raw
