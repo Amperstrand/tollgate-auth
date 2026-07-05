@@ -1,0 +1,53 @@
+# docker-compose.dev.yml — local development overrides.
+#
+# Use:
+#   docker compose \
+#     -f docker/compose/docker-compose.yml \
+#     -f docker/compose/docker-compose.dev.yml up -d
+#
+# Differences from base:
+#   - Source mounted as volume for hot reload (binary still needs rebuild)
+#   - Resource limits removed
+#   - Ports published on 0.0.0.0 for cross-platform access (macOS, WSL2)
+#   - webssh points to host.docker.internal:2222 (macOS Docker Desktop)
+#   - freeradius profile auto-enabled for full-stack local testing
+
+services:
+
+  tollgate-daemon:
+    environment:
+      TOLLGATE_AUTH_MODE: "local"
+      # Use mock mint for dev
+      TOLLGATE_DEV_MODE: "1"
+    deploy: !reset null
+
+  tollgate-auth-ocpi:
+    environment:
+      TOLLGATE_OCPI_PUBLIC_URL: "http://localhost:8093"
+    deploy: !reset null
+
+  tollgate-csms:
+    ports:
+      # Bind on all interfaces for dev access from host browser
+      - "8887:8887"
+
+  tollgate-webssh:
+    environment:
+      # macOS Docker Desktop: host.docker.internal resolves to the host.
+      # Linux: set to the docker bridge gateway IP (default 172.17.0.1).
+      TOLLGATE_SSH_ADDR: "host.docker.internal:2222"
+    ports:
+      - "8092:8092"
+
+  # Enable FreeRADIUS by default in dev (no need for --profile radius)
+  freeradius:
+    profiles: !reset null
+    network_mode: !reset null
+    networks: [tollgate]
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+      - "2083:2083/tcp"
+    environment:
+      # In dev use TCP for shim → daemon (no shared-volume dance)
+      TOLLGATE_SOCKET: "tcp://tollgate-daemon:8094"

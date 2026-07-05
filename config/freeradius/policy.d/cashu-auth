@@ -1,0 +1,18 @@
+# Cashu/LNURLw payment validation policy
+# Called from authorize section of default site and inner-tunnel
+#
+# Session-Timeout is set by the Go binary (tollgate-auth-radius) via
+# exec module stdout. Do NOT override it here.
+cashu-payment {
+    if ((User-Name =~ /^cashu[AB]/) ||         (User-Password =~ /^cashu[AB]/) ||         (User-Name =~ /^lnurlw/) ||         (User-Name =~ /^LNURLW/) ||         (User-Password =~ /^lnurlw/) ||         (User-Password =~ /^LNURLW/)) {
+        cashu-auth
+        if (ok) {
+            update control {
+                Auth-Type := Accept
+            }
+        }
+        else {
+            reject
+        }
+    }
+}

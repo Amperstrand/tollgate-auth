@@ -1,0 +1,125 @@
+# .github/workflows/docker-build.yml — build and publish Docker images for tollgate-auth.
+#
+# On every push to main and on every PR:
+#   1. Verifies all Dockerfiles build cleanly (catches regressions)
+#   2. Tags images with git SHA + 'latest' (for main)
+#   3. Pushes to GitHub Container Registry (GHCR) — requires the repo
+#      to have "Improved container support" enabled (default for public repos)
+#
+# After this workflow runs successfully on main, deploy to prod becomes:
+#   ssh root@nodns.shop
+#   docker pull ghcr.io/amperstrand/tollgate-daemon:latest
+#   docker restart tollgate-daemon-docker
+#
+# To roll back:
+#   docker pull ghcr.io/amperstrand/tollgate-daemon:<previous-git-sha>
+#   docker stop tollgate-daemon-docker
+#   docker run ... ghcr.io/amperstrand/tollgate-daemon:<previous-git-sha>
+
+name: docker-build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - '.dockerignore'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - '.dockerignore'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - tollgate-auth-ocpi
+          - tollgate-csms
+          - tollgate-webssh
+          - tollgate-daemon
+          - tollgate-settle
+          - freeradius
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve tags
+        id: tags
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE="${IMAGE_PREFIX}/${{ matrix.service }}"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # PR: build only, no push. Tag locally so we can verify build.
+            echo "tags=${{ matrix.service }}:pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "push=false" >> $GITHUB_OUTPUT
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "tags=${IMAGE}:${SHORT_SHA},${IMAGE}:latest" >> $GITHUB_OUTPUT
+            echo "push=true" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${{ matrix.service }}:${GITHUB_REF_NAME}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "push=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and optionally push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.tags.outputs.push == 'true' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Report status
+        if: always()
+        run: |
+          echo "### Docker build: ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "Tags: \`${{ steps.tags.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Pushed: ${{ steps.tags.outputs.push }}" >> $GITHUB_STEP_SUMMARY
+
+  # Single source of truth: if all images built, declare the workflow passed.
+  summary:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          echo "### Docker build matrix result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          for svc in tollgate-auth-ocpi tollgate-csms tollgate-webssh tollgate-daemon tollgate-settle freeradius; do
+            echo "| $svc | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          done
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "FAIL: at least one image failed to build"
+            exit 1
+          fi

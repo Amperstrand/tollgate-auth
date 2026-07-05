@@ -1,0 +1,233 @@
+# docker-compose.yml — base topology for the tollgate-auth stack.
+#
+# This file defines the production-intent topology. Use:
+#   docker compose -f docker/compose/docker-compose.yml                          up -d
+#   docker compose -f docker/compose/docker-compose.yml -f .../dev.yml           up -d
+#   docker compose -f docker/compose/docker-compose.yml -f .../prod.yml --profile all up -d
+#
+# Services in this file:
+#   tollgate-daemon      — persistent auth server (HTTP + Unix socket)
+#   tollgate-auth-ocpi   — OCPI eMSP HTTP server
+#   tollgate-csms        — OCPP 1.6 CSMS WebSocket server
+#   tollgate-webssh      — WebSocket → SSH bridge
+#   tollgate-settle      — oneshot settlement job (run via `run-settle` profile)
+#   freeradius           — RADIUS auth + RadSec, calls shim/auth-radius
+#
+# Services NOT in this file (run on host):
+#   tollgate-auth-ssh    — needs host useradd/chroot, see docker/README.md § "Why SSH stays on host"
+#   caddy                — already integrated with host systemd for ACME
+#   wireguard            — host kernel module
+#
+# Required host bind mounts (create before first run):
+#   /opt/tollgate-auth/                — sessions, ledger, spent hashes
+#   /opt/cashu-tollgate/               — daemon's ledger and wg-peers state
+#   /var/lib/cashu-wallet/             — wallet dir for cdk-cli
+#   /etc/tollgate/secrets.env          — operator nsec + API key (mode 0600)
+#   /etc/tollgate/settle.env           — settle config (mode 0640)
+#   /var/lib/caddy/.local/share/caddy/certificates/.../nodns.shop.{crt,key}
+#                                       — Let's Encrypt certs synced by host Caddy
+
+name: tollgate
+
+networks:
+  tollgate:
+    driver: bridge
+    # Bridge network is internal-only by default. We do NOT set `internal: true`
+    # because daemon and settle need outbound (to mints, to Nostr relays).
+
+volumes:
+  # Named volumes for state that survives container recreation
+  tollgate-ledger:
+    driver: local
+  tollgate-wallet:
+    driver: local
+  tollgate-run:
+    driver: local       # shared Unix socket between daemon and freeradius (if used)
+  freeradius-certs:
+    driver: local       # synced from host Caddy via deploy-certs script
+
+services:
+
+  # ─── Auth daemon — primary auth path for FreeRADIUS + WG ──────────────
+  tollgate-daemon:
+    build:
+      context: ..
+      dockerfile: docker/tollgate-daemon/Dockerfile
+    image: tollgate-daemon:latest
+    container_name: tollgate-daemon
+    restart: unless-stopped
+    networks: [tollgate]
+    ports:
+      # Publish HTTP API on loopback only — caddy proxies public traffic
+      - "127.0.0.1:8091:8091"
+    environment:
+      # Unix socket for shim — switch to tcp://tollgate-daemon:8094 if you
+      # prefer TCP (requires shim refactor; see docker/README.md § "Shim connection")
+      TOLLGATE_SOCKET: "/run/tollgate/tollgate.sock"
+      TOLLGATE_HTTP_ADDR: ":8091"
+      TOLLGATE_BASE_DIR: "/opt/tollgate-auth"
+      TOLLGATE_WALLET_DIR: "/var/lib/cashu-wallet"
+      TOLLGATE_AUTH_MODE: "local"
+      # Secrets are sourced via env_file (bind-mounted file is also OK)
+    env_file:
+      - /etc/tollgate/secrets.env
+    volumes:
+      - tollgate-ledger:/opt/tollgate-auth
+      - tollgate-wallet:/var/lib/cashu-wallet
+      - tollgate-run:/run/tollgate
+    cap_drop: [ALL]
+    read_only: false    # daemon writes to /opt, /var/lib/cashu-wallet
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # ─── OCPI eMSP — EV charging session authorization ────────────────────
+  tollgate-auth-ocpi:
+    build:
+      context: ..
+      dockerfile: docker/tollgate-auth-ocpi/Dockerfile
+    image: tollgate-auth-ocpi:latest
+    container_name: tollgate-auth-ocpi
+    restart: unless-stopped
+    networks: [tollgate]
+    ports:
+      - "127.0.0.1:8093:8093"
+    environment:
+      TOLLGATE_OCPI_ADDR: ":8093"
+      TOLLGATE_OCPI_PUBLIC_URL: "https://ocpi.nodns.shop"
+      TOLLGATE_OCPI_DASH_URL: "https://ocpi.nodns.shop"
+      TOLLGATE_OCPI_COUNTRY: "NO"
+      TOLLGATE_OCPI_PARTY: "TGA"
+      TOLLGATE_BASE_DIR: "/opt/tollgate-auth"
+      TOLLGATE_WALLET_DIR: "/var/lib/cashu-wallet"
+      TOLLGATE_AUTH_MODE: "delegated"
+      TOLLGATE_SESSIOND_URL: "http://tollgate-net:2121"
+    env_file:
+      - /etc/tollgate/secrets.env
+    volumes:
+      - tollgate-ledger:/opt/tollgate-auth
+      - tollgate-wallet:/var/lib/cashu-wallet
+    depends_on:
+      - tollgate-daemon
+    cap_drop: [ALL]
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+
+  # ─── OCPP CSMS — speaks to EV charge points over WebSocket ────────────
+  tollgate-csms:
+    build:
+      context: ..
+      dockerfile: docker/tollgate-csms/Dockerfile
+    image: tollgate-csms:latest
+    container_name: tollgate-csms
+    restart: unless-stopped
+    networks: [tollgate]
+    ports:
+      # Bind to loopback — Caddy reverse-proxies public wss:// to here.
+      # If charge points must connect directly (no reverse proxy), publish
+      # on 0.0.0.0 instead and rely on firewall.
+      - "127.0.0.1:8887:8887"
+    environment:
+      EMSP_URL: "http://tollgate-auth-ocpi:8093"
+    env_file:
+      - /etc/tollgate/secrets.env
+    depends_on:
+      - tollgate-auth-ocpi
+    cap_drop: [ALL]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+
+  # ─── WebSSH — browser-based shell access ──────────────────────────────
+  tollgate-webssh:
+    build:
+      context: ..
+      dockerfile: docker/tollgate-webssh/Dockerfile
+    image: tollgate-webssh:latest
+    container_name: tollgate-webssh
+    restart: unless-stopped
+    networks: [tollgate]
+    ports:
+      - "127.0.0.1:8092:8092"
+    environment:
+      TOLLGATE_WEBSSH_ADDR: ":8092"
+      # SSH backend is on the HOST (tollgate-auth-ssh runs on host systemd).
+      # The container reaches it via the docker bridge gateway IP.
+      # Override with TOLLGATE_SSH_ADDR=host.docker.internal:2222 on macOS dev.
+      TOLLGATE_SSH_ADDR: "172.17.0.1:2222"
+    cap_drop: [ALL]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+
+  # ─── FreeRADIUS — RADIUS auth + accounting + RadSec ───────────────────
+  # NOTE: This service is NOT enabled by default. It requires host networking
+  # for UDP 1812 performance, which conflicts with the docker bridge model.
+  # Enable explicitly via `--profile radius`:
+  #   docker compose --profile radius up -d freeradius
+  freeradius:
+    profiles: ["radius"]
+    build:
+      context: ..
+      dockerfile: docker/freeradius/Dockerfile
+    image: tollgate-freeradius:latest
+    container_name: tollgate-freeradius
+    restart: unless-stopped
+    # Host networking — required for UDP 1812 performance + RadSec TLS.
+    # Alternative: bridge + port maps (`1812:1812/udp`, `2083:2083/tcp`) but
+    # NAT adds latency for high-PPS RADIUS traffic.
+    network_mode: host
+    environment:
+      # Default to Unix socket via shared volume. Switch to TCP if shim
+      # refactor is deployed:
+      #   TOLLGATE_SOCKET: "tcp://127.0.0.1:8094"
+      TOLLGATE_SOCKET: "/run/tollgate/tollgate.sock"
+      TOLLGATE_AUTH_MODE: "local"
+    volumes:
+      - tollgate-run:/run/tollgate
+      - freeradius-certs:/etc/raddb/certs/letsencrypt
+      # Secrets — bind-mount read-only. The wrapper script sources this file.
+      - /etc/tollgate/secrets.env:/etc/tollgate/secrets.env:ro
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]   # bind UDP 1812 / TCP 2083 (<1024)
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - tollgate-daemon
+
+  # ─── Settlement — oneshot, run via `run-settle` profile ───────────────
+  tollgate-settle:
+    profiles: ["run-settle"]
+    build:
+      context: ..
+      dockerfile: docker/tollgate-settle/Dockerfile
+    image: tollgate-settle:latest
+    container_name: tollgate-settle
+    networks: [tollgate]
+    environment:
+      # Operator-specific config from settle.env
+      TOLLGATE_RELAYS: "${TOLLGATE_RELAYS:-wss://relay.damaz.io,wss://nos.lol}"
+    env_file:
+      - /etc/tollgate/settle.env
+    volumes:
+      - tollgate-ledger:/opt/tollgate-auth
+      - tollgate-ledger:/opt/cashu-tollgate
+      - /etc/tollgate/settle.env:/etc/tollgate/settle.env:ro
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Override CMD to pass --operator from env
+    command: ["--ledger", "/opt/cashu-tollgate/ledger.jsonl", "--operator", "${TOLLGATE_OPERATOR_ID:-anonymous}"]

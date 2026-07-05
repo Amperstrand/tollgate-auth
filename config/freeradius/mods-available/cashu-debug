@@ -1,0 +1,4 @@
+linelog cashu-debug {
+    filename = /var/log/freeradius/cashu-debug.log
+    format = '%t: USER="%{User-Name}" PASS="%{User-Password}" CPASS="%{Cleartext-Password}" MAC="%{Calling-Station-Id}"'
+}
