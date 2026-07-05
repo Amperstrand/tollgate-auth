@@ -103,6 +103,41 @@ See [docs/radius-testing.md](docs/radius-testing.md) for the full testing guide 
 
 ### Deploy to your own server
 
+**Two supported deployment modes — pick one:**
+
+#### Option A — Docker (recommended for new deployments)
+
+Isolated containers, atomic rollback via image tags, easier local dev.
+
+```bash
+git clone https://github.com/Amperstrand/tollgate-auth.git
+cd tollgate-auth
+
+# 1. Build all 6 service images (5 min first time)
+make docker-build-all
+
+# 2. Set up host directories and stub secrets
+sudo scripts/docker-dev-init.sh
+
+# 3. Bring up the full stack
+make docker-up-dev
+
+# 4. Verify
+make docker-logs-follow     # Ctrl-C to detach
+curl http://127.0.0.1:8091/healthz
+```
+
+See [docs/DEV_WITH_DOCKER.md](docs/DEV_WITH_DOCKER.md) for the local-dev workflow and [docs/MIGRATION_RUNBOOK.md](docs/MIGRATION_RUNBOOK.md) for production-grade deployment steps.
+
+**What's NOT in containers** (host systemd):
+- `tollgate-auth-ssh` (needs `useradd`/`chroot`)
+- `caddy` (ACME integration)
+- `tollgate-net`, `tollgate-eur-mint` (separate repos, separate deployment story)
+
+#### Option B — systemd (the original deployment, still fully supported)
+
+Binaries run on the host under hardened systemd units with `ProtectSystem=strict`, `CapabilityBoundingSet`, `IPAddressDeny`, unprivileged `tollgate` user.
+
 ```bash
 git clone https://github.com/Amperstrand/tollgate-auth.git
 cd tollgate-auth
@@ -111,6 +146,19 @@ make deploy
 ```
 
 See [Install](#install) for the full setup guide, or the [Operator Deployment Guide](docs/operator-guide.md) for end-to-end instructions including AP flashing with Nostr identity, payment flow, revenue attribution, and upgrade paths.
+
+#### Which should you pick?
+
+| Want... | Pick |
+|---|---|
+| Strongest isolation between services | Docker (filesystem overlay per container) |
+| Easiest local dev (full stack on a laptop) | Docker (`make docker-up-dev`) |
+| Atomic rollback | Docker (`docker run <prev-image>`) |
+| Simplest ops story (one host, one process model) | systemd |
+| No new dependencies on the server | systemd |
+| Compatibility with the audit-hardened config from June 2025 | either (both apply the same hardening) |
+
+The Docker deployment was added in July 2025. The systemd deployment was hardened in the June–July 2025 security audit. Both modes apply the same defense-in-depth (unprivileged users, capability bounding, network filtering, syscall filtering). Docker adds filesystem isolation; systemd adds mature operations tooling. They're comparable in security posture.
 
 ## Architecture
 
@@ -241,6 +289,8 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `docs/radius-token-size.md` | Token size analysis, payment approaches, bootstrap spec |
 | `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA |
 | `docs/tollgate-rs-deprecation-and-migration.md` | Go payment stack deprecation plan — file inventory, deprecation map, phased migration |
+| `docs/SECURITY_AUDIT.md` | Full security audit report — Window 1 (FreeRADIUS + Go) and Window 2 (defense in depth + privilege reduction) findings with root cause, fix, and verification per item |
+| `docs/DOCKER_MIGRATION_ROADMAP.md` | Phased plan to migrate from systemd-managed host binaries to Docker containers — what's easy, what's hard, network/persistence/secret models |
 
 ### Supported transports
 
@@ -516,7 +566,11 @@ Cashu V4 tokens with DLEQ proofs are 378 bytes, exceeding FreeRADIUS's `diameter
 
 ## Security Audit
 
-A security audit was completed on the FreeRADIUS config and Go binary layers. 6 vulnerabilities were found and fixed:
+Two audit windows have been completed. The full consolidated report is at [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md).
+
+### Window 1 — FreeRADIUS + Go binary (June 2025)
+
+6 findings, all fixed:
 
 | Finding | Severity | Status |
 |---------|----------|--------|
@@ -528,6 +582,25 @@ A security audit was completed on the FreeRADIUS config and Go binary layers. 6 
 | BlastRADIUS (CVE-2024-3596) mitigations disabled | INFO | **Not vulnerable** — EAP-TTLS forces Message-Authenticator per RFC 2869 |
 
 **Key finding**: Both FreeRADIUS's exec module and Go's `exec.Command` use `execve()` directly (no shell). Arguments cannot escape their argv slot. The original `users` file `Exec-Program-Wait` entries DID go through shell interpretation — those have been removed.
+
+### Window 2 — Defense in depth + privilege reduction (July 2025)
+
+10 findings (1 HIGH regression-introduced, 4 MEDIUM, 5 LOW), all fixed:
+
+| Finding | Severity | Status |
+|---------|----------|--------|
+| FreeRADIUS `/bin/sh -c` with `%{...}` attribute expansion (regression of W1) | HIGH | **Fixed** — wrapper script + 3-layer regression guard |
+| `/etc/tollgate/settle.env` world-readable, contained `TOLLGATE_OPERATOR_NSEC` | MEDIUM | **Fixed** — `0640 root:tollgate` |
+| `tollgate-daemon` graceful-shutdown loop (accept spin on closed socket) | MEDIUM | **Fixed** — `errors.Is(err, net.ErrClosed)` |
+| `tollgate-settle` ran as root unnecessarily | MEDIUM | **Fixed** — migrated to `tollgate` user |
+| 5 internal services bound to `0.0.0.0` (publicly reachable) | MEDIUM | **Fixed** — env var changes + systemd `IPAddressDeny` BPF filter |
+| Repo systemd units lacked `User=` (drifted from prod) | LOW | **Fixed** — synced, deploy target added |
+| No systemd hardening directives (ProtectSystem, caps, syscalls) | LOW | **Fixed** — full hardening matrix applied |
+| SSH jail paths from hash-derived strings (no validation) | LOW | **Fixed** — regex validator + 25 tests |
+| WireGuard pubkey passed to `wg` without format validation | LOW | **Fixed** — base64+length validator + tests |
+| No regression guard for FreeRADIUS shell-injection pattern | LOW | **Fixed** — pre-commit + CI + server-side guard |
+
+See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) for root cause, fix detail, and verification per finding. See [docs/DOCKER_MIGRATION_ROADMAP.md](docs/DOCKER_MIGRATION_ROADMAP.md) for the longer-term plan to containerize the deployment for stronger isolation.
 
 ## Intentional Design Decisions
 
@@ -545,30 +618,39 @@ This is **intentional** — the deployment prioritizes frictionless access over 
 
 **Read [hackathon-tooling/docs/SECURITY_BEST_PRACTICES.md](https://github.com/Amperstrand/hackathon-tooling/blob/main/docs/SECURITY_BEST_PRACTICES.md) before deploying any tollgate service.**
 
-### Current deployment status on nodns.shop
+### Current deployment status on nodns.shop (post-July 2025 audit)
 
-| Service | Runs as | Port binding | Systemd hardened | Status |
+All services hardened. Privilege reduced where possible, network locked to loopback, capabilities bounded, syscall filter applied. As of July 5 2025, 5 services run in Docker containers (for stronger isolation); the remaining services stay on host systemd because they need host integration (`useradd`, `chroot`, ACME, kernel modules).
+
+| Service | Mode | Runs as | Port binding | Status |
 |---|---|---|---|---|
-| `tollgate-auth-ocpi` | `tollgate` user | `127.0.0.1:8093` | Yes | **Secured** |
-| `tollgate-csms` | `tollgate` user | `127.0.0.1:8887` | Yes | **Secured** |
-| `tollgate-auth-ssh` | `root` (documented exception) | `:2222` (public) | No | Needs systemd hardening |
-| `tollgate-daemon` | `root` | `0.0.0.0:8091` | No | Needs non-root + localhost |
-| `tollgate-net` | `root` | `0.0.0.0:2121` | Yes | Needs non-root + localhost |
-| `tollgate-webssh` | `root` | `0.0.0.0:8092` | No | Needs non-root + localhost |
-| OpenCPO (7 containers) | Docker (isolated) | `127.0.0.1` all | Docker isolation | **Secured** |
+| `tollgate-auth-ocpi` | **Docker container** | UID 994 (tollgate) | `127.0.0.1:8093` | **Secured** |
+| `tollgate-csms` | **Docker container** | nonroot (65534) | `127.0.0.1:8887` | **Secured** |
+| `tollgate-auth-ssh` | systemd | `root` (justified — needs `chroot`+`useradd`) | `:2222` (public) | **Secured** (caps bounded to `CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_KILL`) |
+| `tollgate-daemon` | **Docker container** | UID 994 (tollgate) | `127.0.0.1:8091` HTTP, `127.0.0.1:18094` TCP socket | **Secured** |
+| `tollgate-net` | systemd | `tollgate` | `0.0.0.0:2121` (filtered to loopback via BPF) | **Secured** |
+| `tollgate-webssh` | **Docker container** | nonroot (65534) | `127.0.0.1:8092` | **Secured** |
+| `tollgate-settle` | systemd timer → **Docker container** | UID 994 (tollgate) | n/a (oneshot) | **Secured** |
+| `freeradius` | **Docker container** (host networking) | freerad (UID 101) | `0.0.0.0:1812/udp`, `0.0.0.0:2083` (intentional) | **Secured** |
+| `caddy` | systemd | `caddy` | `:80`, `:443`, `127.0.0.1:2019` | **Secured** |
+| `sync-caddy-certs` (timer) | systemd | `root` (justified — restarts containers) | n/a | **Secured** |
+| OpenCPO (7 containers) | Docker (separate stack) | Docker-isolated | `127.0.0.1` all | **Secured** |
+| `tollgate-eur-mint` | systemd | tollgate | loopback | **Secured** |
 
-### What each project must do before next deploy
+**Migration history**: June 2025 audit hardened systemd units; July 5 2025 migrated 5 services to Docker containers while preserving all hardening. Both deployment modes (Docker + systemd) are documented in [Quick Start](#quick-start) above. See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) for the full audit report and [docs/DOCKER_MIGRATION_POSTMORTEM.md](docs/DOCKER_MIGRATION_POSTMORTEM.md) for what we learned during the container migration.
 
-1. **Create a `tollgate` system user**: `useradd -r -s /usr/sbin/nologin tollgate`
-2. **Add `User=tollgate` to systemd units** (except `tollgate-auth-ssh` which needs root for PAM)
-3. **Add systemd hardening directives**: `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `PrivateDevices`, `ReadWritePaths`
-4. **Bind to `127.0.0.1`** unless the service must be public (SSH, RADIUS, Caddy, WireGuard, DNS)
-5. **Remove default secrets**: Generate all API keys and DB passwords with `openssl rand -base64 32`
-6. **Firewall**: Only allow ports 22, 80, 443, 1812/udp, 2083, 51820/udp, 53
+### Hardening matrix applied to every unit
 
-### Why tollgate-auth-ssh runs as root
+`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `ProtectHostname`, `ProtectProc=invisible`, `RestrictSUIDSGID`, `RemoveIPC`, `RestrictRealtime`, `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `CapabilityBoundingSet=` (empty for unprivileged, 4 caps for SSH), `SystemCallFilter=@system-service`, `SystemCallArchitectures=native`. For Docker containers: `--cap-drop=ALL`, `read_only: true` where possible, `--restart unless-stopped`, bind-mounted state dirs owned by matching UIDs.
 
-`tollgate-auth-ssh` creates and deletes system user accounts (`useradd`/`userdel`) for guest shell sessions. This requires root. The chroot jail limits what guests can do, but a future improvement should split this into a privileged account-creation helper (setuid binary) + unprivileged SSH handler.
+### Why tollgate-auth-ssh runs as root (and stays on host systemd)
+
+`tollgate-auth-ssh` creates and deletes system user accounts (`useradd`/`userdel`) for guest shell sessions, calls `chroot(2)`, and manages PTYs. This requires root AND host integration that doesn't containerize cleanly. The `CapabilityBoundingSet` restricts it to exactly the 4 capabilities it needs:
+- `CAP_SYS_CHROOT` — chroot into the jail
+- `CAP_SETUID` / `CAP_SETGID` — drop to `nobody:nogroup` inside the jail
+- `CAP_KILL` — SIGTERM the chrooted shell on session timeout
+
+A future improvement would split this into a privileged account-creation helper (setuid binary) + unprivileged SSH handler. See [docs/DOCKER_MIGRATION_ROADMAP.md](docs/DOCKER_MIGRATION_ROADMAP.md) Phase 4 for the longer-term plan.
 
 ## Security Disclaimer
 
@@ -721,13 +803,26 @@ The core concept is validated — Cashu tokens work as RADIUS credentials. Secur
 - **Multi-proof token sizes** — unknown whether no-DLEQ scales past 64 sat
 - **clients.conf accepts 0.0.0.0/0** — should restrict to AP's IP address
 
-**Resolved in security audit** (2025-06-12):
+**Resolved in security audit Window 1** (2025-06-12):
 - ~~BlastRADIUS mitigations disabled~~ — **NOT vulnerable** (EAP-TTLS forces Message-Authenticator)
 - ~~Token replay race condition~~ — **FIXED** (`CheckAndMark()` with flock)
 - ~~Command injection surface~~ — **FIXED** (strict allowlist validators, execve confirmed safe)
 - ~~SSRF via mint URL~~ — **FIXED** (`isSafeMintURL()` blocks private IPs)
 - ~~Legacy users file shell injection~~ — **FIXED** (removed Exec-Program-Wait)
 - ~~File permissions 0644~~ — **FIXED** (changed to 0600)
+
+**Resolved in security audit Window 2** (2025-07-05):
+- ~~FreeRADIUS `/bin/sh -c` with `%{...}` attribute expansion (regression)~~ — **FIXED** (wrapper script + 3-layer regression guard)
+- ~~`/etc/tollgate/settle.env` world-readable, contained `TOLLGATE_OPERATOR_NSEC`~~ — **FIXED** (`0640 root:tollgate`)
+- ~~`tollgate-daemon` graceful-shutdown loop~~ — **FIXED** (`errors.Is(err, net.ErrClosed)`)
+- ~~`tollgate-settle` ran as root unnecessarily~~ — **FIXED** (migrated to `tollgate` user)
+- ~~5 internal services bound to `0.0.0.0`~~ — **FIXED** (env vars + systemd `IPAddressDeny`)
+- ~~SSH jail paths lacked input validation~~ — **FIXED** (regex validator + 25 tests)
+- ~~WireGuard pubkey passed to `wg` without validation~~ — **FIXED** (base64+length validator)
+- ~~No systemd hardening directives~~ — **FIXED** (full matrix applied to every unit)
+- ~~Repo systemd units drifted from prod~~ — **FIXED** (synced, `make deploy-systemd-units` target added)
+
+See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) for the full audit report.
 
 ## Related
 
