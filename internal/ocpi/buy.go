@@ -50,6 +50,15 @@ func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auth := verifyNIP98(r)
+	if auth.Valid {
+		if body.ProviderNpub != "" && body.ProviderNpub != auth.PubKeyHex {
+			writeJSON(w, Err(StatusClientError, "provider_npub does not match authenticated pubkey"))
+			return
+		}
+		body.ProviderNpub = auth.PubKeyHex
+	}
+
 	mintURL := s.cfg.EurMintURL
 	if mintURL == "" {
 		mintURL = "http://127.0.0.1:3340"
@@ -91,6 +100,9 @@ func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
 // buy gets a clean mint→send cycle, so the wallet balance is always exactly the
 // requested amount and the send never fails with "insufficient funds".
 func mintEurToken(mintURL string, amountCents int) (string, error) {
+	if !strings.HasPrefix(mintURL, "http://") && !strings.HasPrefix(mintURL, "https://") {
+		return "", fmt.Errorf("mint URL must start with http:// or https://")
+	}
 	walletDir, err := os.MkdirTemp("", "cashu-buy-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp wallet: %w", err)
