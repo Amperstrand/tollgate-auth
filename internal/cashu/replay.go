@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -31,7 +30,7 @@ func (r *ReplayGuard) IsSpent(thash string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), thash)
+	return containsLine(data, thash)
 }
 
 // MarkSpent records a token hash as spent.
@@ -71,7 +70,7 @@ func (r *ReplayGuard) CheckAndMark(thash string) bool {
 	if err != nil {
 		return true
 	}
-	if bytes.Contains(data, []byte(thash)) {
+	if containsLine(data, thash) {
 		return true // already spent
 	}
 
@@ -82,7 +81,17 @@ func (r *ReplayGuard) CheckAndMark(thash string) bool {
 	return false // not previously spent, now marked
 }
 
-// LogToken appends a token attempt to the JSONL log file.
+// containsLine checks if data contains thash as an exact line match.
+// This replaces the previous strings.Contains approach which could produce
+// false positives when one hash was a substring of another.
+func containsLine(data []byte, thash string) bool {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if bytes.Equal(line, []byte(thash)) {
+			return true
+		}
+	}
+	return false
+}
 func LogToken(tokenStr string, tokenData *TokenData, guest string, accepted bool, logFile string) {
 	LogTokenWithError(tokenStr, tokenData, guest, accepted, "", logFile)
 }
