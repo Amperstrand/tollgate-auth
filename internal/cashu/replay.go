@@ -2,6 +2,7 @@ package cashu
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log"
@@ -31,7 +32,13 @@ func (r *ReplayGuard) IsSpent(thash string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), thash)
+	target := []byte(thash)
+	for _, line := range strings.Split(string(data), "\n") {
+		if subtle.ConstantTimeCompare([]byte(line), target) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // MarkSpent records a token hash as spent.
@@ -71,8 +78,11 @@ func (r *ReplayGuard) CheckAndMark(thash string) bool {
 	if err != nil {
 		return true
 	}
-	if bytes.Contains(data, []byte(thash)) {
-		return true // already spent
+	target := []byte(thash)
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if subtle.ConstantTimeCompare(line, target) == 1 {
+			return true // already spent
+		}
 	}
 
 	// Seek to end and write

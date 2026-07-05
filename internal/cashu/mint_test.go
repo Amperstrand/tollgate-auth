@@ -209,15 +209,12 @@ func TestIsSafeMintURL_Boundary172Range(t *testing.T) {
 
 // --- CheckState types serialization ---
 
+// Regression guard for the malformed-checkstate fix: NUT-07 requires {"Ys":[...]}
+// not {"proofs":[{"secret":...}]}.
 func TestCheckStateRequest_Serialization(t *testing.T) {
-	req := CheckStateRequest{}
-	req.Proofs = append(req.Proofs,
-		struct {
-			Secret string `json:"secret"`
-		}{Secret: "secret1"},
-		struct {
-			Secret string `json:"secret"`
-		}{Secret: "secret2"})
+	req := CheckStateRequest{
+		Ys: []string{"02599b9ea0a1ad4143706c2a5a4a568ce442dd4313e1cf1f7f0b58a317c1a355ee"},
+	}
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -225,18 +222,30 @@ func TestCheckStateRequest_Serialization(t *testing.T) {
 	}
 
 	var parsed struct {
-		Proofs []struct {
-			Secret string `json:"secret"`
-		} `json:"proofs"`
+		Ys     []string       `json:"Ys"`
+		Proofs json.RawMessage `json:"proofs"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if len(parsed.Proofs) != 2 {
-		t.Fatalf("expected 2 proofs, got %d", len(parsed.Proofs))
+	if len(parsed.Ys) != 1 || parsed.Ys[0] != "02599b9ea0a1ad4143706c2a5a4a568ce442dd4313e1cf1f7f0b58a317c1a355ee" {
+		t.Errorf("Ys = %v, want single Y hex", parsed.Ys)
 	}
-	if parsed.Proofs[0].Secret != "secret1" {
-		t.Errorf("proof[0].Secret = %q, want secret1", parsed.Proofs[0].Secret)
+	if parsed.Proofs != nil {
+		t.Errorf("expected no proofs field (must use Ys per NUT-07), got %s", string(parsed.Proofs))
+	}
+}
+
+func TestHashToCurve_ProducesCompressedPubkey(t *testing.T) {
+	y, err := HashToCurve("test_secret")
+	if err != nil {
+		t.Fatalf("HashToCurve: %v", err)
+	}
+	if len(y) != 33 {
+		t.Fatalf("expected 33-byte compressed pubkey, got %d", len(y))
+	}
+	if y[0] != 0x02 && y[0] != 0x03 {
+		t.Fatalf("first byte = %#x, want 0x02 or 0x03", y[0])
 	}
 }
 

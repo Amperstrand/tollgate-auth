@@ -4,6 +4,8 @@ go 1.25.0
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260611214214-c4534c716026
+	github.com/btcsuite/btcd/btcec/v2 v2.3.4
+	github.com/coder/websocket v1.8.13
 	github.com/creack/pty v1.1.21
 	github.com/fxamacker/cbor/v2 v2.7.0
 	github.com/gliderlabs/ssh v0.3.7
@@ -14,10 +16,8 @@ require (
 require (
 	github.com/ImVexed/fasturl v0.0.0-20230304231329-4e41488060f3 // indirect
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
-	github.com/coder/websocket v1.8.13 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
