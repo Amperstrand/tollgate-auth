@@ -36,7 +36,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  # Docker tags must be lowercase — GitHub org is "Amperstrand" (capital A)
+  IMAGE_PREFIX: ghcr.io/amperstrand
 
 jobs:
   build:
