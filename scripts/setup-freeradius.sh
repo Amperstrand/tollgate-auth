@@ -31,6 +31,19 @@ echo ">>> Installing accounting exec module (tollgate-acct)..."
 cp "$SCRIPT_DIR/../config/freeradius/mods-available/tollgate-acct" "$CONF_DIR/mods-available/tollgate-acct"
 ln -sf ../mods-available/tollgate-acct "$CONF_DIR/mods-enabled/tollgate-acct"
 
+# --- delegated-mode wrapper (SECURITY) ---
+# FreeRADIUS exec modules call this directly instead of `/bin/sh -c '... %{} ...'`.
+# RADIUS attributes are attacker-controlled; if they ever reach a shell parser
+# they enable arbitrary command execution before the Go binary starts. The
+# wrapper keeps argv boundaries intact and only loads secrets + sets env vars.
+# See scripts/check-freeradius-configs.sh for the regression guard.
+echo ">>> Installing delegated-mode wrapper (tollgate-auth-radius-delegated)..."
+mkdir -p /usr/local/libexec
+cp "$SCRIPT_DIR/../scripts/tollgate-auth-radius-delegated-wrapper.sh" \
+   /usr/local/libexec/tollgate-auth-radius-delegated
+chown root:root /usr/local/libexec/tollgate-auth-radius-delegated
+chmod 0755 /usr/local/libexec/tollgate-auth-radius-delegated
+
 # --- EAP config (TTLS+PAP + PEAP+MSCHAPv2 with self-signed cert) ---
 echo ">>> Generating self-signed TLS certificate for radius.nodns.shop..."
 CERT_DIR="$CONF_DIR/certs"
@@ -90,6 +103,13 @@ cat > /etc/cron.d/tollgate-radius-cleanup << 'CRON'
 # Every 5 minutes, clean up expired RADIUS sessions
 */5 * * * * root find /opt/tollgate-auth/radius-sessions -name "*.json" -mmin +60 -delete 2>/dev/null ; find /opt/cashu-tollgate/radius-sessions -name "*.json" -mmin +60 -delete 2>/dev/null
 CRON
+
+echo ">>> Validating FreeRADIUS config..."
+if ! freeradius -XC; then
+    echo "ERROR: FreeRADIUS config validation failed. Not restarting."
+    echo "       Fix the errors above and re-run scripts/setup-freeradius.sh."
+    exit 1
+fi
 
 echo ">>> Restarting FreeRADIUS..."
 systemctl restart freeradius

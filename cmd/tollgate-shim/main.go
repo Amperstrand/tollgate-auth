@@ -113,10 +113,22 @@ func main() {
 }
 
 // sendRequest connects to the daemon, sends the request, and reads the response.
-func sendRequest(socketPath string, req auth.AuthRequest) (*auth.AuthResponse, error) {
-	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+//
+// The daemon address comes from TOLLGATE_SOCKET (or -socket flag). It may be:
+//
+//   - A filesystem path: "/run/tollgate/tollgate.sock"
+//     → dials Unix socket
+//   - "tcp://host:port"
+//     → dials TCP (used in Docker deployments where the daemon lives in a
+//     separate container and sharing a Unix-socket volume is undesirable)
+//
+// Default (no scheme) is Unix socket, preserving backwards compatibility
+// with existing deployments.
+func sendRequest(socketAddr string, req auth.AuthRequest) (*auth.AuthResponse, error) {
+	network, address := parseSocketAddress(socketAddr)
+	conn, err := net.DialTimeout(network, address, 5*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
+		return nil, fmt.Errorf("connect %s://%s: %w", network, address, err)
 	}
 	defer conn.Close()
 
@@ -150,6 +162,22 @@ func sendRequest(socketPath string, req auth.AuthRequest) (*auth.AuthResponse, e
 	}
 
 	return &resp, nil
+}
+
+// parseSocketAddress splits a TOLLGATE_SOCKET value into (network, address)
+// for net.Dial. Recognizes "tcp://" and "unix://" schemes explicitly; a bare
+// path (containing no "://") is treated as a Unix socket path for backwards
+// compatibility.
+func parseSocketAddress(s string) (network, address string) {
+	switch {
+	case strings.HasPrefix(s, "tcp://"):
+		return "tcp", strings.TrimPrefix(s, "tcp://")
+	case strings.HasPrefix(s, "unix://"):
+		return "unix", strings.TrimPrefix(s, "unix://")
+	default:
+		// Bare path — treat as Unix socket (legacy behavior).
+		return "unix", s
+	}
 }
 
 // replyMessage outputs a Reply-Message attribute to stdout.

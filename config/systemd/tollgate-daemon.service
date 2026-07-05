@@ -1,3 +1,20 @@
+# tollgate-daemon — persistent auth server for FreeRADIUS + WireGuard.
+#
+# Privilege model:
+#   Runs as the unprivileged `tollgate` user. Listens on 127.0.0.1:8091 only
+#   (caddy reverse-proxies public traffic). The Unix socket at
+#   /run/tollgate/tollgate.sock is mode 0750 owned by tollgate:freerad so
+#   the FreeRADIUS-exec'd shim (running as freerad) can connect.
+#
+#   Needs group `freerad` (for socket peer) and group `cashu-wallet` (added
+#   to tollgate user at provisioning time) so cdk-cli can write to the wallet
+#   directory at /var/lib/cashu-wallet.
+#
+#   WireGuard peer management (wg set ...) is done via exec.Command — the
+#   `tollgate` user is given limited sudo or CAP_NET_ADMIN via a separate
+#   helper if/when WG is enabled in this binary. Currently wgAddPeer uses
+#   the unprivileged `wg` binary which only works if the user owns the
+#   interface (typical deployment: WG is handled by a sibling service).
 [Unit]
 Description=Tollgate Auth Daemon (persistent RADIUS auth server)
 After=network.target
@@ -5,27 +22,51 @@ Wants=freeradius.service
 
 [Service]
 Type=simple
+User=tollgate
+Group=tollgate
+SupplementaryGroups=freerad cashu-wallet
 ExecStart=/usr/local/bin/tollgate-daemon
 Environment=TOLLGATE_SOCKET=/run/tollgate/tollgate.sock
-Environment=TOLLGATE_HTTP_ADDR=:8091
+Environment=TOLLGATE_HTTP_ADDR=127.0.0.1:8091
 Environment=TOLLGATE_BASE_DIR=/opt/cashu-tollgate
 Environment=TOLLGATE_WALLET_DIR=/var/lib/cashu-wallet
 Environment=TOLLGATE_AUTH_MODE=local
 EnvironmentFile=/etc/tollgate/secrets.env
 
-Group=freerad
 RuntimeDirectory=tollgate
 RuntimeDirectoryMode=0750
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=4096
 
-# Security hardening
+# Security hardening — unprivileged
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/opt/cashu-tollgate /tmp /var/lib/cashu-wallet
-PrivateTmp=false
-# Cannot use PrivateDevices — cdk-cli may need /dev/null etc.
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Loopback-only: HTTP API is reverse-proxied by caddy, daemon does not need
+# to accept external connections. Outbound allowed to mints (Cashu redeem).
+IPAddressDeny=any
+IPAddressAllow=localhost
+# No capabilities — runs fully unprivileged
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

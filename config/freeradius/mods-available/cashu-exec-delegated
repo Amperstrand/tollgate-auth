@@ -1,13 +1,30 @@
 # /etc/freeradius/3.0/mods-available/cashu-exec-delegated
-# Delegated mode: forwards token to tollgate-rs (tollgate-net:2121) for redemption.
+# Delegated mode: forwards token to tollgate-net (127.0.0.1:2121) for redemption.
 # Routes here when User-Name starts with "ci-delegated" (see inner-tunnel routing).
+#
+# ─── SECURITY: DO NOT WRAP IN `/bin/sh -c` ─────────────────────────────────
+# The %{...} expansions below are ATTACKER-CONTROLLED RADIUS attributes
+# (User-Name, User-Password, Calling-Station-Id, Cleartext-Password). A client
+# can put anything in them. If the `program` line is parsed by a shell
+# (`/bin/sh -c '... "%{User-Name}" ...'`), a crafted value escapes its quotes
+# and runs arbitrary commands BEFORE the Go binary starts — Go-side input
+# validation cannot help because the injection happens during shell parsing.
+#
+# This module calls the wrapper at /usr/local/libexec/tollgate-auth-radius-delegated
+# DIRECTLY. FreeRADIUS execve()'s the wrapper with each %{...} expansion as its
+# own argv element; no shell re-parses them. The wrapper only loads
+# /etc/tollgate/secrets.env and sets delegated-mode env vars, then execs the Go
+# binary with "$@" preserved. See:
+#   scripts/tollgate-auth-radius-delegated-wrapper.sh
+#   scripts/check-freeradius-configs.sh   (regression guard)
+# ───────────────────────────────────────────────────────────────────────────
 
-# Secrets (nsec, API key) are sourced from /etc/tollgate/secrets.env
+# Secrets (nsec, API key) are sourced by the wrapper from /etc/tollgate/secrets.env
 # which is NOT stored in version control. See Makefile deploy-radius-config.
 
 exec cashu-auth-delegated {
     wait = yes
-    program = "/bin/sh -c '. /etc/tollgate/secrets.env && TOLLGATE_AUTH_MODE=delegated TOLLGATE_SESSIOND_URL=http://127.0.0.1:2121 /usr/local/bin/tollgate-auth-radius \"%{User-Name}\" \"%{Calling-Station-Id}\" \"%{User-Password}\" \"%{Cleartext-Password}\"'"
+    program = "/usr/local/libexec/tollgate-auth-radius-delegated %{User-Name} %{Calling-Station-Id} %{User-Password} %{Cleartext-Password}"
     output_pairs = reply
     timeout = 15
 }

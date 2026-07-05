@@ -1,3 +1,15 @@
+# tollgate-settle — weekly settlement job.
+#
+# Runs as a oneshot triggered by tollgate-settle.timer.
+#
+# Privilege model:
+#   Runs as the unprivileged `tollgate` user. Reads the ledger JSONL files
+#   under /opt/tollgate-auth/ and /opt/cashu-tollgate/, decodes settlement
+#   reports, and publishes encrypted Nostr DMs (NIP-17) to operators via
+#   outbound wss:// to relays. Source code (cmd/tollgate-settle/main.go)
+#   performs NO privileged syscalls, NO exec.Command, NO chown/chmod.
+#   Previous deployment ran this as root — that was unnecessary and has
+#   been corrected.
 [Unit]
 Description=Tollgate Settlement (weekly revenue notification)
 After=network-online.target
@@ -5,12 +17,40 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=tollgate
+Group=tollgate
 ExecStart=/usr/local/sbin/run-settle.sh
 EnvironmentFile=-/etc/tollgate/settle.env
 
-# Hardening
-PrivateTmp=true
+# Security hardening — unprivileged
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/cashu-tollgate
+ReadWritePaths=/opt/tollgate-auth /opt/cashu-tollgate
+PrivateTmp=true
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+# Needs AF_INET for outbound wss:// to Nostr relays (no listening sockets).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# NOTE: Cannot use IPAddressDeny here — settle must reach public Nostr
+# relays (wss://relay.damaz.io, wss://nos.lol). The service does NOT listen
+# on any port (oneshot, outbound-only), so there is no inbound attack
+# surface to restrict. Defense-in-depth comes from the unprivileged user,
+# ProtectSystem=strict, and SystemCallFilter.
+# No capabilities
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+# Long-running settlement can take a while; allow generous timeout
+TimeoutStartSec=300

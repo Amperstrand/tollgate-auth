@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -145,25 +147,31 @@ func main() {
 		}
 	}()
 
-	// --- Remove stale socket ---
-	if err := os.Remove(*socketPath); err != nil && !os.IsNotExist(err) {
-		slog.Error("cannot remove stale socket", "socket", *socketPath, "error", err)
-		os.Exit(1)
+	socketNetwork, socketAddr := parseSocketAddress(*socketPath)
+	if socketNetwork == "unix" {
+		if err := os.Remove(socketAddr); err != nil && !os.IsNotExist(err) {
+			slog.Error("cannot remove stale socket", "socket", socketAddr, "error", err)
+			os.Exit(1)
+		}
 	}
 
-	// --- Listen on Unix socket ---
-	listener, err := net.Listen("unix", *socketPath)
+	listener, err := net.Listen(socketNetwork, socketAddr)
 	if err != nil {
-		slog.Error("socket listen", "socket", *socketPath, "error", err)
+		slog.Error("socket listen", "network", socketNetwork, "socket", socketAddr, "error", err)
 		os.Exit(1)
 	}
 
-	// Socket permissions: freerad user needs read/write.
-	os.Chmod(*socketPath, 0660)
+	// Unix sockets use filesystem permissions (mode 0660, group freerad) for
+	// access control. TCP relies on loopback binding + firewall — there is no
+	// chmod equivalent, so we skip the chmod call when listening on TCP.
+	if socketNetwork == "unix" {
+		os.Chmod(socketAddr, 0660)
+	}
 	socketReady.Store(true)
 
 	slog.Info("daemon starting",
-		"socket", *socketPath,
+		"network", socketNetwork,
+		"socket", socketAddr,
 		"http", *httpAddr,
 		"mode", authMode,
 		"operator", opCtx.Account.ID,
@@ -198,7 +206,9 @@ func main() {
 			slog.Warn("in-flight auth requests did not complete within timeout")
 		}
 
-		os.Remove(*socketPath)
+		if socketNetwork == "unix" {
+			os.Remove(socketAddr)
+		}
 		slog.Info("Shutdown complete")
 		close(shutdownComplete)
 	}()
@@ -222,8 +232,37 @@ func main() {
 	}
 }
 
+// isClosedErr reports whether err is the "listener closed" error returned
+// by Accept() after listener.Close() is called (typically during shutdown).
+//
+// We must use errors.Is rather than == because net.Listener.Accept wraps
+// net.ErrClosed inside a *net.OpError whose Error() string is
+// "accept <addr>: use of closed network connection" (with a prefix). A bare
+// == comparison or exact-string match against "use of closed network
+// connection" would NOT match, causing the accept loop to spin forever
+// logging the same closed-socket error — which previously prevented
+// graceful shutdown and forced systemd to SIGKILL after TimeoutStopSec.
 func isClosedErr(err error) bool {
-	return err != nil && (err == net.ErrClosed || err.Error() == "use of closed network connection")
+	return err != nil && errors.Is(err, net.ErrClosed)
+}
+
+// parseSocketAddress splits a TOLLGATE_SOCKET value into (network, address)
+// for net.Listen / net.Dial. Recognizes "tcp://" and "unix://" schemes
+// explicitly; a bare path (containing no "://") is treated as a Unix socket
+// path for backwards compatibility with the canonical systemd deployment
+// (TOLLGATE_SOCKET=/run/tollgate/tollgate.sock).
+//
+// Container deployments set TOLLGATE_SOCKET=tcp://0.0.0.0:8094 so the shim
+// in the FreeRADIUS container can reach the daemon over the Docker bridge.
+func parseSocketAddress(s string) (network, address string) {
+	switch {
+	case strings.HasPrefix(s, "tcp://"):
+		return "tcp", strings.TrimPrefix(s, "tcp://")
+	case strings.HasPrefix(s, "unix://"):
+		return "unix", strings.TrimPrefix(s, "unix://")
+	default:
+		return "unix", s
+	}
 }
 
 // handleSocketConn handles a single Unix socket connection: read one JSON
@@ -285,7 +324,7 @@ func handleSocketConn(conn net.Conn, deps *auth.Dependencies, m *metrics) {
 }
 
 // logAuthOutcome emits a structured slog line for an auth attempt. The
-// amount_sat and mint fields are sourced from the persisted session record
+// credit_amount and mint fields are sourced from the persisted session record
 // (written synchronously by auth.ProcessAuth on accept) so rejected requests
 // report zero/empty values.
 func logAuthOutcome(mac string, result auth.AuthResult, elapsed time.Duration, deps *auth.Dependencies) {
@@ -306,7 +345,7 @@ func logAuthOutcome(mac string, result auth.AuthResult, elapsed time.Duration, d
 	slog.Info("auth request",
 		"outcome", outcome,
 		"duration_ms", elapsed.Milliseconds(),
-		"amount_sat", amountSat,
+		"credit_amount", amountSat,
 		"session_timeout", result.SessionTimeout,
 		"mac", redact.LogSafe(redact.Truncate(mac, 32)),
 		"mint", mint,
@@ -324,7 +363,7 @@ func recordAuthLedger(deps *auth.Dependencies, result auth.AuthResult, nasID, cl
 		NASIP:        clientIP,
 		MAC:          mac,
 		PaymentType:  result.PayType,
-		AmountSat:    result.AmountSat,
+		CreditAmount: result.CreditAmount,
 		DurationSec:  result.SessionTimeout,
 		MintURL:      result.MintURL,
 		TokenHash:    result.TokenHash,

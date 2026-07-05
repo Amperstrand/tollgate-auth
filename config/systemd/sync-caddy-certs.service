@@ -1,3 +1,11 @@
+# sync-caddy-certs — periodic cert sync from Caddy's ACME state to FreeRADIUS.
+#
+# Privilege model:
+#   Runs as root. The script reads Caddy's ACME state (root-only readable
+#   in some setups), copies the certs into /etc/freeradius/3.0/certs/letsencrypt/,
+#   chowns them to root:freerad, and runs `systemctl restart freeradius`.
+#   Root is required for: chown to root:freerad, systemctl restart, writing
+#   under /etc/freeradius. This is a trusted admin-script path.
 [Unit]
 Description=Sync Caddy Let's Encrypt certs to FreeRADIUS
 After=network.target caddy.service freeradius.service
@@ -5,6 +13,28 @@ Wants=caddy.service
 
 [Service]
 Type=oneshot
+User=root
 ExecStart=/usr/local/sbin/sync-caddy-certs-to-freeradius
-PrivateTmp=true
+
+# Hardening — root but constrained
 NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/freeradius/3.0/certs
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+# No network needed (reads local cert files only, then restarts freeradius)
+RestrictAddressFamilies=AF_UNIX
+# Root needed for chown + systemctl; keep all caps but bound the syscall set
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
