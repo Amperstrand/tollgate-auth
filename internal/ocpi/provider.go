@@ -18,16 +18,16 @@ type Provider struct {
 }
 
 type TokenProvider struct {
-	TokenHash   string    `json:"token_hash"`
-	ProviderNpub string   `json:"provider_npub"`
-	Amount      int       `json:"amount"`
-	Unit        string    `json:"unit"`
-	CreatedAt   time.Time `json:"created_at"`
+	TokenHash    string    `json:"token_hash"`
+	ProviderNpub string    `json:"provider_npub"`
+	Amount       int       `json:"amount"`
+	Unit         string    `json:"unit"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type ProviderStore struct {
-	mu       sync.RWMutex
-	dataDir  string
+	mu        sync.RWMutex
+	dataDir   string
 	providers map[string]*Provider
 	tokenMap  map[string]*TokenProvider
 }
@@ -182,6 +182,14 @@ func (s *Server) HandleProviderRegister(w http.ResponseWriter, r *http.Request) 
 	if body.Npub == "" {
 		writeJSON(w, Err(StatusClientError, "npub is required"))
 		return
+	}
+
+	auth := verifyNIP98(r)
+	if auth.Valid {
+		if body.Npub != auth.PubKeyHex {
+			writeJSON(w, Err(StatusClientError, "npub does not match authenticated pubkey"))
+			return
+		}
 	}
 
 	s.providers.PutProvider(&Provider{
