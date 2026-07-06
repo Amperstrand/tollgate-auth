@@ -17,18 +17,15 @@ import (
 
 // Config holds the runtime config for the OCPI server.
 type Config struct {
-	ListenAddr     string // ":8092"
-	PublicBaseURL  string // "https://tollgate.example.com:8092" — advertised in version_details
-	OurCountry     string // ISO 3166-1 alpha-2, e.g. "NO"
-	OurParty       string // ISO 15118 eMA ID party, e.g. "TGA"
-	BootstrapToken string // Token A; if empty, any token accepted (PoC only)
-	DashboardBase  string // base URL advertised to drivers in authorize info_url
-	// DataDir, when set, enables file-backed persistence for the in-memory
-	// store (CDRs, prepay records, authorize log, charger state). When empty,
-	// NewServer falls back to $TOLLGATE_BASE_DIR/ocpi-state; if that is also
-	// unset the store is in-memory only and state is lost on restart.
-	DataDir    string
-	EurMintURL string
+	ListenAddr     string
+	PublicBaseURL  string
+	OurCountry     string
+	OurParty       string
+	BootstrapToken string
+	DashboardBase  string
+	DataDir        string
+	EurMintURL     string
+	Pricing        map[string]float64
 }
 
 // Server is the OCPI 2.2.1 eMSP receiver + dashboard HTTP server.
@@ -52,6 +49,9 @@ func NewServerWithLedger(cfg Config, authDeps *auth.Dependencies, lg *ledger.Led
 	store := newPersistentStore(cfg.DataDir)
 	authz := NewAuthorizer(authDeps, store, cfg.DashboardBase)
 	sender := NewSender(store, cfg.PublicBaseURL+"/ocpi/emsp/"+VersionNumber+"/commands", cfg.OurCountry, cfg.OurParty)
+	for unit, price := range cfg.Pricing {
+		PricePerKwh[unit] = price
+	}
 	charger := NewChargerState()
 	if err := store.LoadState(stateCharger, charger); err != nil {
 		slog.Warn("ocpi charger state load failed; using defaults", "error", err)

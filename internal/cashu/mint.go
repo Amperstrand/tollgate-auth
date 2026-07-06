@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -100,6 +101,9 @@ func VerifyWithMint(tokenData *TokenData) (bool, string) {
 // isSafeMintURL blocks SSRF attempts by rejecting private/internal IP ranges.
 // The mint URL comes from the decoded Cashu token, which is attacker-controlled.
 func isSafeMintURL(mintURL string) bool {
+	if os.Getenv("ALLOW_LOCALHOST_MINT") == "true" {
+		return true
+	}
 	if !strings.HasPrefix(mintURL, "https://") && !strings.HasPrefix(mintURL, "http://") {
 		return false
 	}

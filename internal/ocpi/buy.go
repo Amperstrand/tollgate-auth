@@ -1,6 +1,7 @@
 package ocpi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"tollgate-auth/internal/cashu"
 )
@@ -67,7 +69,10 @@ func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("buy request", "amount_eur", body.AmountEur, "amount_cents", amountCents, "phone", body.Phone, "provider", body.ProviderNpub)
 
-	token, err := mintEurToken(mintURL, amountCents)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	token, err := mintEurToken(ctx, mintURL, amountCents)
 	if err != nil {
 		slog.Error("buy: mint failed", "error", err)
 		writeJSON(w, Err(StatusClientError, "mint failed: "+err.Error()))
@@ -99,7 +104,7 @@ func (s *Server) HandleBuy(w http.ResponseWriter, r *http.Request) {
 // wallet directory. A fresh temp wallet per call avoids state pollution: each
 // buy gets a clean mint→send cycle, so the wallet balance is always exactly the
 // requested amount and the send never fails with "insufficient funds".
-func mintEurToken(mintURL string, amountCents int) (string, error) {
+func mintEurToken(ctx context.Context, mintURL string, amountCents int) (string, error) {
 	if !strings.HasPrefix(mintURL, "http://") && !strings.HasPrefix(mintURL, "https://") {
 		return "", fmt.Errorf("mint URL must start with http:// or https://")
 	}
@@ -109,7 +114,7 @@ func mintEurToken(mintURL string, amountCents int) (string, error) {
 	}
 	defer os.RemoveAll(walletDir)
 
-	mintCmd := exec.Command("cdk-cli",
+	mintCmd := exec.CommandContext(ctx, "cdk-cli",
 		"--work-dir", walletDir,
 		"--unit", "eur",
 		"mint", mintURL, strconv.Itoa(amountCents),
@@ -125,7 +130,7 @@ func mintEurToken(mintURL string, amountCents int) (string, error) {
 		return "", fmt.Errorf("mint did not complete: %s", safePrefix(string(mintOut), 300))
 	}
 
-	sendCmd := exec.Command("cdk-cli",
+	sendCmd := exec.CommandContext(ctx, "cdk-cli",
 		"--work-dir", walletDir,
 		"--unit", "eur",
 		"send", "--amount", strconv.Itoa(amountCents),
