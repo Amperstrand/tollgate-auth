@@ -65,7 +65,10 @@ type V3Proof struct {
 	C      string `json:"C"`
 }
 
-// Mint checkstate types — NUT-07 requires Ys (hash_to_curve output) not raw secrets.
+// Mint checkstate types.
+// NUT-07: /v1/checkstate expects Ys = hex(hash_to_curve(secret)) per NUT-12,
+// NOT the raw secrets. Previous versions posted {"proofs":[{"secret":...}]}
+// which the mint cannot interpret — see hashcurve.go and mint.go.
 type CheckStateRequest struct {
 	Ys []string `json:"Ys"`
 }
