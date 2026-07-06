@@ -41,7 +41,11 @@ build-shell:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(SHELL_BINARY) ./cmd/tollgate-shell/
 
 deploy: build-linux
-	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY)
+	LOCAL_SHA=$$(sha256sum $(SSH_BINARY) | cut -d' ' -f1) && \
+	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY) && \
+	REMOTE_SHA=$$(ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) "sha256sum /tmp/$(SSH_BINARY)" | cut -d' ' -f1) && \
+	if [ "$$LOCAL_SHA" != "$$REMOTE_SHA" ]; then echo "FAIL: checksum mismatch ($$LOCAL_SHA != $$REMOTE_SHA)"; exit 1; fi && \
+	echo "OK: binary verified ($${LOCAL_SHA:0:12})" && \
 	ssh -p $(REMOTE_PORT) $(REMOTE_USER)@$(REMOTE_HOST) \
 		'systemctl stop tollgate-auth-ssh && \
 		 cp /tmp/$(SSH_BINARY) $(REMOTE_DIR)/$(SSH_BINARY) && \
