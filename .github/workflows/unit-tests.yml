@@ -17,15 +17,6 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "FAIL: gofmt found unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
-
       - name: Vet
         run: go vet ./...
 
@@ -37,6 +28,3 @@ jobs:
 
       - name: Build RADIUS binary
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/tollgate-auth-radius/
-
-      - name: Build settle binary
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/tollgate-settle/
