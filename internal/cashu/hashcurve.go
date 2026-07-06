@@ -3,7 +3,6 @@ package cashu
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -20,8 +19,8 @@ import (
 // non-cdk mints may compute Y differently. Test mints like testnut.cashu.space
 // run cdk-mintd and accept the algorithm here.
 //
-// We expose this function so callers can build correct NUT-07 /v1/checkstate
-// requests: the mint looks up proof state keyed by Y, not by the raw secret.
+// Exposed so callers build correct NUT-07 /v1/checkstate requests: the mint
+// looks up proof state keyed by Y, not by the raw secret.
 func HashToCurve(secret string) ([]byte, error) {
 	secretBytes := []byte(secret)
 	for counter := uint32(0); counter < 65536; counter++ {
@@ -33,7 +32,7 @@ func HashToCurve(secret string) ([]byte, error) {
 		xHash := h.Sum(nil)
 
 		compressed := make([]byte, 33)
-		compressed[0] = 0x02 // even-y parity
+		compressed[0] = 0x02
 		copy(compressed[1:], xHash)
 
 		pk, err := btcec.ParsePubKey(compressed)
@@ -44,6 +43,3 @@ func HashToCurve(secret string) ([]byte, error) {
 	}
 	return nil, fmt.Errorf("hash_to_curve: did not converge for secret %q", secret)
 }
-
-// errHashToCurveFailed is returned if HashToCurve cannot produce a Y.
-var errHashToCurveFailed = errors.New("hash_to_curve failed")
