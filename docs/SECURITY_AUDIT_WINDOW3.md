@@ -67,6 +67,16 @@ The 4 audit agents (running on GLM-4.5-air after rate-limit fallbacks) produced 
 **Risk:** If a guest can somehow access /proc (e.g. busybox has a /proc-aware applet), they could enumerate host processes. Currently mitigated: jail template has no /proc mount, harden-host.sh sets hidepid=2, iptables blocks outbound for nobody.  
 **Fix for production:** Use `systemd-nspawn` or `nsenter` to create PID/mount/network namespaces around the chroot. Documented as Phase 4 of the Docker roadmap.
 
+**Update (post tollgate-shell audit):** The jail contains a SINGLE binary (`tollgate-shell`, 901 lines of Go) that is a terminal arcade game — not a general-purpose shell. Source audit found:
+- Zero `exec.Command` / `os.Exec` / `syscall.*` calls — cannot spawn processes
+- Zero file operations (`os.Open`, `os.Create`, `os.ReadFile`) — cannot read/write files
+- Zero network operations (`net.`, `http.`, `dial`) — cannot make connections
+- Zero unsafe/cgo/reflect — no memory corruption possible
+- Only 5 imports (`fmt`, `math/rand`, `os`, `strings`, `time`) — all standard library
+- Environment access limited to 5 display-only vars (amount, duration, mint, guest, start time) — no secrets
+
+**Status: ACCEPTED RISK.** The chroot provides filesystem isolation. The binary itself provides process isolation (single-purpose game, no escape paths). Host hardening provides network and resource isolation. Namespace isolation would be redundant defense-in-depth for a binary with zero file/network/exec capabilities. Revisit only if `tollgate-shell` gains features that increase its attack surface.
+
 #### M5. SCP deploy without binary integrity verification
 **File:** `Makefile` deploy targets  
 **Pattern:** `scp binary root@host:/path` — no checksum verification after transfer  
