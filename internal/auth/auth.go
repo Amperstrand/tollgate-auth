@@ -45,7 +45,7 @@ type AuthResult struct {
 	AcctInterval   int
 	Class          string
 	LogMessage     string
-	CreditAmount      int
+	CreditAmount   int
 	Unit           string
 	MintURL        string
 	TokenHash      string
@@ -215,7 +215,7 @@ func ProcessAuth(deps *Dependencies, username, mac, password, clearTextPw, nasID
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnection: session=%s active (%dm remaining), accepting", sessionID, int(remaining.Minutes())),
-					CreditAmount:      rec.Amount,
+					CreditAmount:   rec.Amount,
 					Unit:           rec.Unit,
 					MintURL:        rec.Mint,
 					TokenHash:      rec.Token,
@@ -300,7 +300,7 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
-					CreditAmount:      rec.Amount,
+					CreditAmount:   rec.Amount,
 					Unit:           rec.Unit,
 					MintURL:        rec.Mint,
 					TokenHash:      rec.Token,
@@ -394,10 +394,10 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 		LogMessage: fmt.Sprintf("Accept: session=%s type=cashu amount=%d %s duration=%ds mint=%s source=%s",
 			sessionID, tokenData.Amount, tokenData.Unit, seconds, tokenData.Mint, cred.Source),
 		CreditAmount: tokenData.Amount,
-		Unit:      tokenData.Unit,
-		MintURL:   tokenData.Mint,
-		TokenHash: thash,
-		PayType:   string(radiusauth.PaymentCashu),
+		Unit:         tokenData.Unit,
+		MintURL:      tokenData.Mint,
+		TokenHash:    thash,
+		PayType:      string(radiusauth.PaymentCashu),
 	}
 }
 
@@ -436,9 +436,9 @@ func processLNURLw(deps *Dependencies, cred radiusauth.PaymentCredential, sessio
 		LogMessage: fmt.Sprintf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s \u2014 pass-through accept",
 			sessionID, thash[:16], cred.Source),
 		CreditAmount: 0,
-		MintURL:   "lnurlw-pending",
-		TokenHash: thash,
-		PayType:   string(radiusauth.PaymentLNURLW),
+		MintURL:      "lnurlw-pending",
+		TokenHash:    thash,
+		PayType:      string(radiusauth.PaymentLNURLW),
 	}
 }
 
@@ -470,7 +470,8 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 					AcctInterval:   60,
 					Class:          rec.Class,
 					LogMessage:     fmt.Sprintf("Reconnect: session=%s recovered (delegated, spent token, %ds remaining)", sessionID, max(1, int(remaining.Seconds()))),
-					CreditAmount:      rec.Amount,
+					CreditAmount:   rec.Amount,
+					Unit:           rec.Unit,
 					MintURL:        rec.Mint,
 					TokenHash:      rec.Token,
 					PayType:        string(rec.PayType),
@@ -550,6 +551,7 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 		Guest:    "radius-delegated-" + thash[:8],
 		Mint:     "delegated",
 		Amount:   displayAmount,
+		Unit:     tokenData.Unit,
 		Started:  time.Now(),
 		Duration: seconds,
 		Source:   cred.Source,
@@ -575,8 +577,9 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 		LogMessage: fmt.Sprintf("Accept: session=%s type=delegated duration=%ds sats=%d source=%s",
 			sessionID, seconds, result.CreditAmount, cred.Source),
 		CreditAmount: displayAmount,
-		MintURL:   "delegated",
-		TokenHash: thash,
-		PayType:   string(radiusauth.PaymentCashu),
+		Unit:         tokenData.Unit,
+		MintURL:      "delegated",
+		TokenHash:    thash,
+		PayType:      string(radiusauth.PaymentCashu),
 	}
 }

@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"fiatjaf.com/nostr"
 )
 
 const nip98Kind = nostr.KindHTTPAuth
+
+const nip98MaxAge = 60 * time.Second
+const nip98MaxFuture = 30 * time.Second
 
 type nip98Result struct {
 	PubKeyHex string
@@ -41,24 +45,24 @@ func verifyNIP98(r *http.Request) nip98Result {
 		return nip98Result{}
 	}
 
+	age := time.Since(evt.CreatedAt.Time())
+	if age > nip98MaxAge || age < -nip98MaxFuture {
+		return nip98Result{}
+	}
+
 	if !evt.VerifySignature() {
 		return nip98Result{}
 	}
 
 	uTag := evt.Tags.Find("u")
-	if uTag == nil {
+	if uTag == nil || len(uTag) < 2 {
 		return nip98Result{}
 	}
 
-	expectedPath := r.URL.Path
-	if r.Host != "" {
-		if strings.Contains(uTag[1], r.Host) {
-			return nip98Result{PubKeyHex: evt.PubKey.Hex(), Valid: true}
-		}
-	}
-	if uTag[1] == expectedPath || strings.HasSuffix(uTag[1], expectedPath) {
-		return nip98Result{PubKeyHex: evt.PubKey.Hex(), Valid: true}
+	expectedURL := "https://" + r.Host + r.URL.Path
+	if uTag[1] != expectedURL && uTag[1] != r.URL.Path {
+		return nip98Result{}
 	}
 
-	return nip98Result{}
+	return nip98Result{PubKeyHex: evt.PubKey.Hex(), Valid: true}
 }
