@@ -2,10 +2,12 @@ package cashu
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,7 +32,13 @@ func (r *ReplayGuard) IsSpent(thash string) bool {
 	if err != nil {
 		return false
 	}
-	return containsLine(data, thash)
+	target := []byte(thash)
+	for _, line := range strings.Split(string(data), "\n") {
+		if subtle.ConstantTimeCompare([]byte(line), target) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // MarkSpent records a token hash as spent.
@@ -70,8 +78,11 @@ func (r *ReplayGuard) CheckAndMark(thash string) bool {
 	if err != nil {
 		return true
 	}
-	if containsLine(data, thash) {
-		return true // already spent
+	target := []byte(thash)
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if subtle.ConstantTimeCompare(line, target) == 1 {
+			return true // already spent
+		}
 	}
 
 	// Seek to end and write
@@ -81,17 +92,7 @@ func (r *ReplayGuard) CheckAndMark(thash string) bool {
 	return false // not previously spent, now marked
 }
 
-// containsLine checks if data contains thash as an exact line match.
-// This replaces the previous strings.Contains approach which could produce
-// false positives when one hash was a substring of another.
-func containsLine(data []byte, thash string) bool {
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		if bytes.Equal(line, []byte(thash)) {
-			return true
-		}
-	}
-	return false
-}
+// LogToken appends a token attempt to the JSONL log file.
 func LogToken(tokenStr string, tokenData *TokenData, guest string, accepted bool, logFile string) {
 	LogTokenWithError(tokenStr, tokenData, guest, accepted, "", logFile)
 }
