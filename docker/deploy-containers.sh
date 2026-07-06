@@ -14,28 +14,30 @@
 set -euo pipefail
 
 # Image tags — two strategies:
-#   1. GHCR (default): ghcr.io/amperstrand/tollgate-X:latest — pulled from
+#   1. Latest (default): ghcr.io/amperstrand/tollgate-X:latest — pulled from
 #      the CI workflow on every push to main.
-#   2. Local (override): set USE_LOCAL_IMAGES=1 to use locally-built :test
-#      tags. Useful for dev, testing, and pre-registry deployment.
-# Override tag via env var: IMAGE_TAG=<sha> ./deploy-containers.sh
+#   2. Versioned (override): ghcr.io/amperstrand/tollgate-X:<git-sha> —
+#      pinned for rollback to a known-good image.
+# Override via env var: IMAGE_TAG=<sha> ./deploy-containers.sh
 IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/amperstrand}"
 
-if [ "${USE_LOCAL_IMAGES:-0}" = "1" ]; then
+IMAGE_WEBSSH="${IMAGE_PREFIX}/tollgate-webssh:${IMAGE_TAG}"
+IMAGE_CSMS="${IMAGE_PREFIX}/tollgate-csms:${IMAGE_TAG}"
+IMAGE_OCIPI="${IMAGE_PREFIX}/tollgate-auth-ocpi:${IMAGE_TAG}"
+IMAGE_DAEMON="${IMAGE_PREFIX}/tollgate-daemon:${IMAGE_TAG}"
+IMAGE_FREERADIUS="${IMAGE_PREFIX}/tollgate-freeradius:${IMAGE_TAG}"
+IMAGE_SETTLE="${IMAGE_PREFIX}/tollgate-settle:${IMAGE_TAG}"
+
+# Legacy fallback: if IMAGE_PREFIX is overridden to empty, use local :test tags
+# (matches the original migration's ad-hoc build convention).
+if [ -z "$IMAGE_PREFIX" ]; then
   IMAGE_WEBSSH="tollgate-tollgate-webssh:test"
   IMAGE_CSMS="tollgate-csms:test"
   IMAGE_OCIPI="tollgate-auth-ocpi:test"
   IMAGE_DAEMON="tollgate-daemon:test"
   IMAGE_FREERADIUS="freeradius:test"
   IMAGE_SETTLE="tollgate-tollgate-settle:test"
-else
-  IMAGE_PREFIX="ghcr.io/amperstrand"
-  IMAGE_WEBSSH="${IMAGE_PREFIX}/tollgate-webssh:${IMAGE_TAG}"
-  IMAGE_CSMS="${IMAGE_PREFIX}/tollgate-csms:${IMAGE_TAG}"
-  IMAGE_OCIPI="${IMAGE_PREFIX}/tollgate-auth-ocpi:${IMAGE_TAG}"
-  IMAGE_DAEMON="${IMAGE_PREFIX}/tollgate-daemon:${IMAGE_TAG}"
-  IMAGE_FREERADIUS="${IMAGE_PREFIX}/tollgate-freeradius:${IMAGE_TAG}"
-  IMAGE_SETTLE="${IMAGE_PREFIX}/tollgate-settle:${IMAGE_TAG}"
 fi
 
 # Common restart policy
