@@ -10,16 +10,14 @@ This is Window 3 of the security audit. Windows 1 and 2 are in [SECURITY_AUDIT.m
 
 ## Executive summary
 
-The audit found **0 CRITICAL, 0 HIGH, 5 MEDIUM, 8 LOW** vulnerabilities after critical triage. Several agent-flagged findings were downgraded or dismissed as false positives after verification against the actual code.
+The audit found **0 CRITICAL, 0 HIGH, 5 MEDIUM, 8 LOW** vulnerabilities after critical triage. All 5 MEDIUM findings have been fixed or closed. 5 of 8 LOW findings have been fixed. The remaining 3 are documented as production-readiness items.
 
-The codebase is **secure for a hackathon/test deployment**. Before production with real Bitcoin, address the MEDIUM findings (especially cdk-cli checksum verification and OCPI mintURL validation).
-
-| Severity | Count | Action |
+| Severity | Count | Status |
 |---|---|---|
 | CRITICAL | 0 | — |
 | HIGH | 0 | — |
-| MEDIUM | 5 | Fix before production |
-| LOW | 8 | Fix when convenient |
+| MEDIUM | 5 | **All fixed or closed** |
+| LOW | 8 | **5 fixed, 3 documented for production** |
 | FALSE POSITIVE | 6 | Agent findings dismissed after verification |
 
 ---
