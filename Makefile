@@ -407,3 +407,63 @@ deploy-docker-host-deps:
 		 chmod +x /usr/local/sbin/sync-caddy-certs-to-freeradius /usr/local/sbin/tollgate-deploy-containers && \
 		 echo "OK: host-side Docker dependencies installed:" && \
 		 ls -la /usr/local/libexec/tollgate-shim-tcp-wrapper.sh /usr/local/sbin/sync-caddy-certs-to-freeradius /usr/local/sbin/tollgate-deploy-containers'
+
+# ─── Hacker demo targets ──────────────────────────────────────────────────
+# One-command demo: build, start, verify, show examples.
+# Usage: make demo
+
+demo: docker-build-all
+	@echo ""
+	@echo "============================================"
+	@echo "  TOLLGATE-AUTH DEMO STACK"
+	@echo "  Cashu ecash for WiFi / SSH / EV charging"
+	@echo "============================================"
+	@echo ""
+	@echo "Starting containers..."
+	@docker compose -f $(COMPOSE_BASE) -f $(COMPOSE_DEV) --profile radius up -d 2>&1 || true
+	@echo ""
+	@echo "Waiting for services to start..."
+	@sleep 5
+	@echo ""
+	@echo "=== Status ==="
+	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "tollgate|freeradius|NAMES"
+	@echo ""
+	@echo "=== Health checks ==="
+	@curl -sf http://127.0.0.1:8091/healthz 2>/dev/null && echo " (daemon OK)" || echo "  daemon: NOT READY"
+	@echo ""
+	@echo "============================================"
+	@echo "  TRY THESE COMMANDS:"
+	@echo "============================================"
+	@echo ""
+	@echo "  make logs              # tail all service logs"
+	@echo "  make demo-auth         # send a test RADIUS auth"
+	@echo "  make demo-status       # show container status + health"
+	@echo ""
+	@echo "  curl http://127.0.0.1:8091/healthz"
+	@echo "  curl http://127.0.0.1:8091/metrics"
+	@echo "  curl http://127.0.0.1:8093/    # OCPI eMSP"
+	@echo "  curl http://127.0.0.1:8092/    # WebSSH"
+	@echo ""
+	@echo "  RADIUS auth test:"
+	@echo "    radtest cashuBfake anything 127.0.0.1 0 tollgate"
+	@echo ""
+	@echo "  Visit the faucet for free test tokens:"
+	@echo "    https://amperstrand.github.io/tollgate-auth/"
+	@echo "============================================"
+
+# Tail all service logs in one stream.
+logs:
+	docker compose -f $(COMPOSE_BASE) -f $(COMPOSE_DEV) logs -f --tail=50
+
+# Quick status check.
+demo-status:
+	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "tollgate|freeradius|NAMES"
+	@echo ""
+	@curl -sf http://127.0.0.1:8091/healthz 2>/dev/null && echo " (daemon)" || echo "  daemon: DOWN"
+	@curl -sf -o /dev/null -w "  ocpi: HTTP %{http_code}\n" http://127.0.0.1:8093/ 2>/dev/null || echo "  ocpi: DOWN"
+	@curl -sf -o /dev/null -w "  webssh: HTTP %{http_code}\n" http://127.0.0.1:8092/ 2>/dev/null || echo "  webssh: DOWN"
+
+# Send a test RADIUS auth (reject expected — fake token).
+demo-auth:
+	@echo "Sending test RADIUS auth with fake Cashu token..."
+	@radtest cashuBfake anything 127.0.0.1 0 tollgate 2>&1 | grep -E "Received|Reply-Message|Session-Timeout" || echo "(radtest not installed — install freeradius-utils)"
