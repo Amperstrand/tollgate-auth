@@ -19,7 +19,7 @@ type SessionClass struct {
 	MAC        string `json:"mac"` // session identifier (Calling-Station-Id)
 	TokenHash  string `json:"th"`  // first 16 chars of token hash
 	Timestamp  int64  `json:"ts"`  // unix seconds
-	Nonce      string `json:"n"`   // 8 random hex chars
+	Nonce      string `json:"n"`   // 32 random hex chars
 }
 
 const (
@@ -37,7 +37,7 @@ func NewSessionClass(operatorID, mac, tokenHash string) *SessionClass {
 		MAC:        mac,
 		TokenHash:  tokenHash,
 		Timestamp:  time.Now().Unix(),
-		Nonce:      randomHex(4),
+		Nonce:      randomHex(16),
 	}
 }
 

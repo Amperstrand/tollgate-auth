@@ -183,12 +183,23 @@ func EmitClass(operatorID, sessionID, tokenHash string, hmacKey []byte) string {
 	return signed
 }
 
+func sanitizeLogField(s string) string {
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	for _, c := range s {
+		if c < 0x20 || c == 0x7f {
+			return "[contains control chars]"
+		}
+	}
+	return s
+}
+
 // ProcessAuth contains all auth logic.
 // Returns AuthResult instead of calling os.Exit or printing to stdout.
 // This is the unified entry point used by both the exec binary and the daemon.
 func ProcessAuth(deps *Dependencies, username, mac, password, clearTextPw, nasID, clientIP string) AuthResult {
 	if strings.HasPrefix(nasID, "npub1") && len(nasID) == 63 {
-		log.Printf("Operator AP npub from NAS-Identifier: %s", nasID)
+		log.Printf("Operator AP npub from NAS-Identifier: %s", sanitizeLogField(nasID))
 	}
 
 	if !MacPattern.MatchString(mac) {
@@ -368,11 +379,11 @@ func processCashu(deps *Dependencies, cred radiusauth.PaymentCredential, session
 		log.Printf("WARN: cashu redemption failed (%s), accepting with replay guard only: %v", cred.Source, err)
 	}
 
-	classStr := EmitClass(deps.OperatorID, sessionID, thash[:16], deps.HMACKey)
+	classStr := EmitClass(deps.OperatorID, sessionID, thash[:32], deps.HMACKey)
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
-		Guest:    "radius-" + thash[:8],
+		Guest:    "radius-" + thash[:16],
 		Mint:     tokenData.Mint,
 		Amount:   tokenData.Amount,
 		Unit:     tokenData.Unit,
@@ -412,11 +423,11 @@ func processLNURLw(deps *Dependencies, cred radiusauth.PaymentCredential, sessio
 		}
 	}
 
-	classStr := EmitClass(deps.OperatorID, sessionID, thash[:16], deps.HMACKey)
+	classStr := EmitClass(deps.OperatorID, sessionID, thash[:32], deps.HMACKey)
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
-		Guest:    "radius-lnurlw-" + thash[:8],
+		Guest:    "radius-lnurlw-" + thash[:16],
 		Mint:     "lnurlw-pending",
 		Amount:   LNURLWDefaultSec / RateSecPerSat,
 		Started:  time.Now(),
@@ -536,7 +547,7 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 		}
 	}
 
-	classStr := EmitClass(deps.OperatorID, sessionID, thash[:16], deps.HMACKey)
+	classStr := EmitClass(deps.OperatorID, sessionID, thash[:32], deps.HMACKey)
 
 	var displayAmount int
 	if result.CreditAmount > 0 {
@@ -548,7 +559,7 @@ func processCashuDelegated(deps *Dependencies, cred radiusauth.PaymentCredential
 	rec := &SessionRecord{
 		MAC:      sessionID,
 		Token:    thash,
-		Guest:    "radius-delegated-" + thash[:8],
+		Guest:    "radius-delegated-" + thash[:16],
 		Mint:     "delegated",
 		Amount:   displayAmount,
 		Unit:     tokenData.Unit,

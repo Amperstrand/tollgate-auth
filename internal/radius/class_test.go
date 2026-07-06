@@ -21,8 +21,8 @@ func TestNewSessionClass(t *testing.T) {
 	if sc.Timestamp <= 0 {
 		t.Errorf("Timestamp = %d, want positive unix time", sc.Timestamp)
 	}
-	if len(sc.Nonce) != 8 {
-		t.Errorf("Nonce = %q (%d chars), want 8 hex chars", sc.Nonce, len(sc.Nonce))
+	if len(sc.Nonce) != 32 {
+		t.Errorf("Nonce = %q (%d chars), want 32 hex chars", sc.Nonce, len(sc.Nonce))
 	}
 	// Verify nonce is valid hex.
 	_, err := hex.DecodeString(sc.Nonce)

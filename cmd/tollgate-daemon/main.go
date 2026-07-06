@@ -52,6 +52,7 @@ const (
 	defaultBaseDir    = "/opt/cashu-tollgate"
 	defaultWalletDir  = "/var/lib/cashu-wallet"
 	shutdownTimeout   = 30 * time.Second
+	maxConcurrentAuth = 100
 )
 
 // metrics holds atomic counters for observability.
@@ -214,6 +215,7 @@ func main() {
 	}()
 
 	// --- Accept loop ---
+	sem := make(chan struct{}, maxConcurrentAuth)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -224,11 +226,18 @@ func main() {
 			slog.Error("accept error", "error", err)
 			continue
 		}
-		authWG.Add(1)
-		go func() {
-			defer authWG.Done()
-			handleSocketConn(conn, deps, m)
-		}()
+		select {
+		case sem <- struct{}{}:
+			authWG.Add(1)
+			go func() {
+				defer authWG.Done()
+				defer func() { <-sem }()
+				handleSocketConn(conn, deps, m)
+			}()
+		default:
+			slog.Warn("concurrency limit reached, rejecting connection")
+			conn.Close()
+		}
 	}
 }
 
