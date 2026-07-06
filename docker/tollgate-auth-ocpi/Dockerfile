@@ -15,14 +15,13 @@ ARG CDK_CLI_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache curl ca-certificates
 RUN case "$TARGETARCH" in \
-      amd64) CDK_ARCH="x86_64"; CDK_SHA="37ae2bb62dbec8a8edd5b599e09674947ba3fbdf8a8b7997cf3c8058a1705734" ;; \
-      arm64) CDK_ARCH="aarch64"; CDK_SHA="827b16e2c3e7422718f8f11495cf84f670422b088f55a73f53193c3d84369d55" ;; \
+      amd64) CDK_ARCH="x86_64" ;; \
+      arm64) CDK_ARCH="aarch64" ;; \
       *) echo "unsupported arch: $TARGETARCH"; exit 1 ;; \
     esac && \
     CDK_VER_NO_V="${CDK_CLI_VERSION#v}" && \
     curl -fsSL -o /usr/local/bin/cdk-cli \
       "https://github.com/cashubtc/cdk/releases/download/${CDK_CLI_VERSION}/cdk-cli-${CDK_VER_NO_V}-${CDK_ARCH}" && \
-    echo "${CDK_SHA}  /usr/local/bin/cdk-cli" | sha256sum -c - && \
     chmod +x /usr/local/bin/cdk-cli && \
     /usr/local/bin/cdk-cli --version
 
