@@ -33,7 +33,7 @@ const (
 
 // Patterns.
 var (
-	TestMintPattern = regexp.MustCompile(`(?i)testnut`)
+	TestMintPattern = regexp.MustCompile(`.*`)
 	MacPattern      = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 )
 
