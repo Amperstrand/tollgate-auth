@@ -36,6 +36,7 @@ type LiveSession struct {
 
 const (
 	ChargerAvailable = "AVAILABLE"
+	ChargerStarting  = "STARTING"
 	ChargerCharging  = "CHARGING"
 	ChargerBlocked   = "BLOCKED"
 	DefaultPowerKw   = 7.4
@@ -89,11 +90,12 @@ func (s *Server) HandleChargeStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.charger.mu.Lock()
-	if s.charger.State == ChargerCharging {
+	if s.charger.State != ChargerAvailable {
 		s.charger.mu.Unlock()
 		writeJSON(w, Err(StatusClientError, "charger already in use — stop current session first"))
 		return
 	}
+	s.charger.State = ChargerStarting
 	s.charger.mu.Unlock()
 
 	tokenHash := cashu.TokenHash(body.CashuToken)
@@ -121,6 +123,9 @@ func (s *Server) HandleChargeStart(w http.ResponseWriter, r *http.Request) {
 
 	if !result.Accept {
 		slog.Warn("charge rejected", "reason", result.ReplyMessage, "token_prefix", tokenHash[:8])
+		s.charger.mu.Lock()
+		s.charger.State = ChargerAvailable
+		s.charger.mu.Unlock()
 		writeJSON(w, Err(StatusClientError, result.ReplyMessage))
 		return
 	}
@@ -129,6 +134,9 @@ func (s *Server) HandleChargeStart(w http.ResponseWriter, r *http.Request) {
 		tp, found := s.providers.GetTokenProvider(tokenHash)
 		if !found {
 			slog.Warn("charge rejected: token not bound to any provider", "charger_provider", body.ProviderNpub, "token_prefix", tokenHash[:8])
+			s.charger.mu.Lock()
+			s.charger.State = ChargerAvailable
+			s.charger.mu.Unlock()
 			writeJSON(w, Err(StatusClientError, "Rejected: token was not issued for this provider"))
 			return
 		}
@@ -138,6 +146,9 @@ func (s *Server) HandleChargeStart(w http.ResponseWriter, r *http.Request) {
 				"charger_provider", body.ProviderNpub,
 				"token_prefix", tokenHash[:8],
 			)
+			s.charger.mu.Lock()
+			s.charger.State = ChargerAvailable
+			s.charger.mu.Unlock()
 			writeJSON(w, Err(StatusClientError, "Rejected: token issued for a different provider"))
 			return
 		}
@@ -161,6 +172,8 @@ func (s *Server) HandleChargeStart(w http.ResponseWriter, r *http.Request) {
 	s.charger.Since = time.Now()
 	s.charger.Session = session
 	s.charger.mu.Unlock()
+
+	go s.chargeMonitor()
 
 	if s.ledger != nil {
 		s.ledger.RecordAuth(ledger.LedgerEntry{
@@ -266,7 +279,6 @@ func (s *Server) HandleChargeStop(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleChargeStatus returns the current charger state + live kWh if charging.
-// Auto-stops when credit balance reaches zero.
 func (s *Server) HandleChargeStatus(w http.ResponseWriter, _ *http.Request) {
 	s.charger.mu.Lock()
 	defer s.charger.mu.Unlock()
@@ -278,15 +290,27 @@ func (s *Server) HandleChargeStatus(w http.ResponseWriter, _ *http.Request) {
 		resp.Kwh = sess.PowerKw * time.Since(sess.StartedAt).Hours()
 		resp.CreditUsed = resp.Kwh * PriceForUnit(sess.Unit)
 		resp.CreditRemaining = float64(sess.CreditAmount) - resp.CreditUsed
-
-		if resp.CreditRemaining <= 0 {
-			kwh, creditUsed, _ := s.finishCharging()
-			resp.State = ChargerAvailable
-			resp.Session = nil
-			resp.Kwh = kwh
-			resp.CreditUsed = creditUsed
-			resp.CreditRemaining = 0
-		}
 	}
 	writeJSON(w, OK(resp))
+}
+
+func (s *Server) chargeMonitor() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.charger.mu.Lock()
+		if s.charger.State != ChargerCharging || s.charger.Session == nil {
+			s.charger.mu.Unlock()
+			return
+		}
+		sess := s.charger.Session
+		kwh := sess.PowerKw * time.Since(sess.StartedAt).Hours()
+		creditRemaining := float64(sess.CreditAmount) - kwh*PriceForUnit(sess.Unit)
+		if creditRemaining <= 0 {
+			s.finishCharging()
+			s.charger.mu.Unlock()
+			return
+		}
+		s.charger.mu.Unlock()
+	}
 }
