@@ -85,3 +85,62 @@ jobs:
             exit 1
           fi
           echo "All Docker images built successfully."
+
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always() && needs.build.result == 'success'
+    strategy:
+      matrix:
+        service:
+          - tollgate-auth-ocpi
+          - tollgate-csms
+          - tollgate-webssh
+          - tollgate-daemon
+          - tollgate-settle
+          - freeradius
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ matrix.service }}:scan
+          load: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.service }}:scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          output: trivy-${{ matrix.service }}.txt
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-${{ matrix.service }}
+          path: trivy-${{ matrix.service }}.txt
+
+      - name: Report
+        if: always()
+        run: |
+          echo "### Trivy scan: ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
+          echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-${{ matrix.service }}.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
