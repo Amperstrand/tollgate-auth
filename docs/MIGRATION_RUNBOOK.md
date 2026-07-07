@@ -8,6 +8,49 @@ This runbook is the **how**. Each phase has explicit pre-conditions, steps, veri
 
 ---
 
+## Current live state (observed on `nodns.shop`, 2026-07)
+
+The host is **already partially migrated** — it is a hybrid systemd + Docker
+deployment, not a clean systemd baseline. Treat Phase 1 below as mostly
+complete; the real cutovers remaining are the daemon (Phase 2) and FreeRADIUS
+(Phase 3).
+
+| Service | Current runtime | Listen | Maps to |
+|---|---|---|---|
+| `tollgate-auth-ocpi` | **container** (systemd unit inactive) | `127.0.0.1:8093` | Phase 1 — verify/adopt |
+| `tollgate-csms` | **container** (systemd unit inactive) | `127.0.0.1:8887` | Phase 1 — verify/adopt |
+| `tollgate-webssh` | **container** (systemd unit inactive) | `127.0.0.1:8092` | Phase 1 — verify/adopt |
+| `tollgate-daemon` | bare systemd (active) | `127.0.0.1:8091` | Phase 2 — cutover |
+| `tollgate-settle` | systemd timer | — | Phase 2 — cutover |
+| `freeradius` | host systemd (`freeradius.service`) | `:1812/udp` | Phase 3 — cutover |
+| `tollgate-auth-ssh` | bare systemd | `:2222` | stays host (Phase 4) |
+| `caddy` / `wireguard` (`wg0`) / `tollgate-net` (`:2121`) / `tollgate-eur-mint` | bare systemd / host | `:443` / `:51820` / `:2121` | stay host (not in compose) |
+
+> Confirm the three "container" rows are managed by this compose project (not
+> ad-hoc `docker run`) during Phase 1 — if not, adopt them by recreating under
+> compose. Their systemd units still exist as a rollback path.
+
+### Image build gap (fix before any cutover)
+`docker images` on the host shows only **`:test`** tags; the compose file
+references **`:latest`**, and the repo names have drifted. `docker compose up`
+will therefore **rebuild** rather than reuse:
+
+| Compose expects | On host | Issue |
+|---|---|---|
+| `tollgate-daemon:latest` | `tollgate-daemon:test` | tag mismatch |
+| `tollgate-auth-ocpi:latest` | `tollgate-auth-ocpi:test` | tag mismatch |
+| `tollgate-csms:latest` | `tollgate-csms:test` | tag mismatch |
+| `tollgate-webssh:latest` | `tollgate-tollgate-webssh:test` | tag + double prefix |
+| `tollgate-settle:latest` | `tollgate-tollgate-settle:test` | tag + double prefix |
+| `tollgate-freeradius:latest` | `freeradius:test` | wrong repo name |
+
+Note: a `freeradius:test` image **does** exist — "freeradius is missing" is a
+tag/naming mismatch, not a missing build. Resolution: run
+`make docker-build-all` (produces correctly-tagged `:latest`) or `docker tag`
+each `:test` to the compose-expected name before starting Phase 0.
+
+---
+
 ## Phase 0 — Pre-flight (1 day, no production changes)
 
 **Goal:** Dockerfiles build, compose file validates, CI catches regressions. Nothing is deployed.
