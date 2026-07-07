@@ -26,7 +26,6 @@ import (
 	"syscall"
 
 	"tollgate-auth/internal/auth"
-	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/ledger"
@@ -62,7 +61,6 @@ func main() {
 		slog.Error("mkdir base", "error", err)
 		os.Exit(1)
 	}
-	replay := cashu.NewReplayGuard(baseDir + "/ocpi-spent.txt")
 
 	opResolver, err := operator.NewResolver("")
 	if err != nil {
@@ -98,7 +96,6 @@ func main() {
 
 	deps := &auth.Dependencies{
 		Sessions:     sessions,
-		Replay:       replay,
 		Verifier:     verifier,
 		Bootstrapper: bootstrapper,
 		OperatorID:   opCtx.Account.ID,

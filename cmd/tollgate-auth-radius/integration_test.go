@@ -17,7 +17,6 @@ func setupIntegrationDeps(t *testing.T) *Dependencies {
 	t.Helper()
 	return &Dependencies{
 		Sessions:   &SessionStore{Dir: t.TempDir()},
-		Replay:     fakeverity.NewFakeReplayGuard(),
 		Verifier:   fakeverity.NewFakeVerifier(),
 		OperatorID: "test-operator",
 		HMACKey:    []byte("test-hmac-key-16b"),
@@ -86,14 +85,8 @@ func TestE2ELNURLwAcceptFullFlow(t *testing.T) {
 
 	result := auth.ProcessAuth(deps, testtoken.LNURLwCode(), "aa:bb:cc:dd:ee:ff", "", "", "", "")
 
-	if !result.Accept {
-		t.Fatalf("expected Accept: %s", result.ReplyMessage)
-	}
-	if result.SessionTimeout != 600 {
-		t.Errorf("SessionTimeout = %d, want 600", result.SessionTimeout)
-	}
-	if !strings.Contains(result.ReplyMessage, "10m") {
-		t.Errorf("ReplyMessage should contain '60m': %q", result.ReplyMessage)
+	if result.Accept {
+		t.Fatal("expected Reject (LNURLW disabled)")
 	}
 }
 
@@ -202,6 +195,7 @@ func TestE2ESessionExpiredThenReauth(t *testing.T) {
 	}
 
 	token2 := testtoken.V4Token(16)
+	deps.Verifier.(*fakeverity.FakeVerifier).CheckStateResult = cashu.StateUnspent
 	reauth := auth.ProcessAuth(deps, token2, mac1, "", "", "", "")
 	if !reauth.Accept {
 		t.Fatalf("new token on expired session should Accept: %s", reauth.ReplyMessage)

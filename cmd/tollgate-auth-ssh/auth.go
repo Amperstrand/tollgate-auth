@@ -30,7 +30,6 @@ type Bootstrapper interface {
 
 // SSHDependencies holds all injectable dependencies for SSH auth processing.
 type SSHDependencies struct {
-	Replay       fakeverity.ReplayGuard
 	Verifier     fakeverity.Verifier
 	Bootstrapper Bootstrapper
 	AuthMode     string // "local" or "delegated"
@@ -72,18 +71,6 @@ func processSSHLlocal(deps *SSHDependencies, username string, tokenData *cashu.T
 		}
 	}
 
-	// CheckAndMark atomically prevents replay — if already spent, reject.
-	if deps.Replay.CheckAndMark(thash) {
-		return AuthDecision{
-			Accept:    false,
-			Error:     "token already used",
-			TokenData: tokenData,
-			TokenHash: thash,
-			Guest:     guest,
-			LogMsg:    fmt.Sprintf("Reject: token already spent (hash=%s)", safeHashPrefix(thash)),
-		}
-	}
-
 	ok, msg := deps.Verifier.Verify(tokenData)
 	if !ok {
 		return AuthDecision{
@@ -120,17 +107,6 @@ func processSSHLlocal(deps *SSHDependencies, username string, tokenData *cashu.T
 }
 
 func processSSHDelegated(deps *SSHDependencies, username string, tokenData *cashu.TokenData, thash, guest, remoteAddr string) AuthDecision {
-	if deps.Replay.CheckAndMark(thash) {
-		return AuthDecision{
-			Accept:    false,
-			Error:     "token already used",
-			TokenData: tokenData,
-			TokenHash: thash,
-			Guest:     guest,
-			LogMsg:    fmt.Sprintf("Reject: token already spent (hash=%s)", safeHashPrefix(thash)),
-		}
-	}
-
 	mac := remoteAddr
 	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		mac = "ssh:" + host

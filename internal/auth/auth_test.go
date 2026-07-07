@@ -8,6 +8,8 @@ import (
 
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/radiusauth"
+
+	"tollgate-auth/internal/testtoken"
 )
 
 // TestSessionStoreConcurrent verifies that SessionStore is safe under
@@ -96,11 +98,9 @@ func TestProcessAuthConcurrent(t *testing.T) {
 	sessions := &SessionStore{Dir: tmpDir + "/sessions"}
 
 	fv := fakeverity.NewFakeVerifier()
-	rg := fakeverity.NewFakeReplayGuard()
 
 	deps := &Dependencies{
 		Sessions:   sessions,
-		Replay:     rg,
 		Verifier:   fv,
 		OperatorID: "test-operator",
 		HMACKey:    []byte("test-hmac-key-16bytes!"),
@@ -117,9 +117,9 @@ func TestProcessAuthConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			code := fmt.Sprintf("lnurlwdp68gup6jhjumue2nn%02d", n)
+			token := testtoken.V4Token(8)
 			mac := fmt.Sprintf("aa:bb:cc:dd:ee:%02x", n)
-			result := ProcessAuth(deps, code, mac, "", "", "", "")
+			result := ProcessAuth(deps, token, mac, "", "", "", "")
 			results[n] = result
 			if !result.Accept && result.ReplyMessage == "" {
 				errors <- fmt.Errorf("goroutine %d: empty reply for non-accepted result", n)
@@ -153,15 +153,14 @@ func TestProcessAuthConcurrent(t *testing.T) {
 // with the SAME token hash are handled correctly — exactly one should
 // be accepted, the other should be rejected as a race.
 func TestProcessAuthReplayConcurrent(t *testing.T) {
+	t.Skip("replay guard removed — mint handles replay protection")
 	tmpDir := t.TempDir()
 	sessions := &SessionStore{Dir: tmpDir + "/sessions"}
 
 	fv := fakeverity.NewFakeVerifier()
-	rg := fakeverity.NewFakeReplayGuard()
 
 	deps := &Dependencies{
 		Sessions:   sessions,
-		Replay:     rg,
 		Verifier:   fv,
 		OperatorID: "test-operator",
 		HMACKey:    []byte("test-hmac-key-16bytes!"),

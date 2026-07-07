@@ -31,21 +31,19 @@ func (f *FakeBootstrapper) Bootstrap(token string, mac string) (*sessiond.Sessio
 
 // --- Test helpers ---
 
-func setupTestSSHDeps(t *testing.T) (*SSHDependencies, *fakeverity.FakeVerifier, *fakeverity.FakeReplayGuard, *FakeBootstrapper) {
+func setupTestSSHDeps(t *testing.T) (*SSHDependencies, *fakeverity.FakeVerifier, *FakeBootstrapper) {
 	t.Helper()
 	fv := fakeverity.NewFakeVerifier()
-	rg := fakeverity.NewFakeReplayGuard()
 	fb := &FakeBootstrapper{
 		Result: &sessiond.SessionState{AllotmentMs: 480000, Metric: "milliseconds"},
 	}
 
 	deps := &SSHDependencies{
-		Replay:       rg,
 		Verifier:     fv,
 		Bootstrapper: fb,
 		AuthMode:     "local",
 	}
-	return deps, fv, rg, fb
+	return deps, fv, fb
 }
 
 const testRemoteAddr = "192.168.1.50:54321"
@@ -53,7 +51,7 @@ const testRemoteAddr = "192.168.1.50:54321"
 // --- Local mode: happy path ---
 
 func TestProcessSSHAuth_Local_ValidToken_Accept(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -73,7 +71,7 @@ func TestProcessSSHAuth_Local_ValidToken_Accept(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_MOTD_ContainsFields(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -96,7 +94,7 @@ func TestProcessSSHAuth_Local_MOTD_ContainsFields(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_TokenHash_Set(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -111,7 +109,7 @@ func TestProcessSSHAuth_Local_TokenHash_Set(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_GuestFormat(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -128,7 +126,7 @@ func TestProcessSSHAuth_Local_GuestFormat(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_VerifyCalledWithTokenData(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(16)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -145,7 +143,7 @@ func TestProcessSSHAuth_Local_VerifyCalledWithTokenData(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_RedeemCalledWithToken(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -162,7 +160,7 @@ func TestProcessSSHAuth_Local_RedeemCalledWithToken(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_MOTD_TestMintFlag(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -176,7 +174,7 @@ func TestProcessSSHAuth_Local_MOTD_TestMintFlag(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_MOTD_NonTestMintFlag(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 	token := testtoken.V4TokenWithMint(8, "https://real-mint.example.com")
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -192,7 +190,7 @@ func TestProcessSSHAuth_Local_MOTD_NonTestMintFlag(t *testing.T) {
 // --- Local mode: rejection ---
 
 func TestProcessSSHAuth_Local_InvalidToken_Reject(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 
 	decision := processSSHAuth(deps, "this-is-garbage", testRemoteAddr)
 
@@ -205,7 +203,7 @@ func TestProcessSSHAuth_Local_InvalidToken_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_WrongPrefix_Reject(t *testing.T) {
-	deps, _, _, _ := setupTestSSHDeps(t)
+	deps, _, _ := setupTestSSHDeps(t)
 
 	decision := processSSHAuth(deps, "cashuXsomedata", testRemoteAddr)
 
@@ -215,7 +213,7 @@ func TestProcessSSHAuth_Local_WrongPrefix_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_ZeroAmount_Reject(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	fv.DecodeResult = &cashu.TokenData{
 		Mint:   "https://testnut.cashu.space",
 		Amount: 0,
@@ -233,7 +231,7 @@ func TestProcessSSHAuth_Local_ZeroAmount_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_NegativeAmount_Reject(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	fv.DecodeResult = &cashu.TokenData{
 		Mint:   "https://testnut.cashu.space",
 		Amount: -5,
@@ -248,24 +246,21 @@ func TestProcessSSHAuth_Local_NegativeAmount_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_AlreadySpent_Reject(t *testing.T) {
-	deps, _, rg, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
-	thash := cashu.TokenHash(token)
-	rg.Spent[thash] = true
+	// Simulate token already spent at mint (SSH path uses Verify, not CheckState)
+	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "token already spent"}
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
 		t.Fatal("expected Reject for already-spent token")
 	}
-	if !strings.Contains(decision.Error, "already used") {
-		t.Errorf("Error = %q, want 'already used'", decision.Error)
-	}
 }
 
 func TestProcessSSHAuth_Local_VerifyFails_Reject(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "proofs already spent at mint"}
 
 	token := testtoken.V4Token(8)
@@ -280,7 +275,7 @@ func TestProcessSSHAuth_Local_VerifyFails_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Local_RedeemFails_Reject(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	fv.RedeemErr = errors.New("cdk-cli crashed")
 
 	token := testtoken.V4Token(8)
@@ -297,7 +292,7 @@ func TestProcessSSHAuth_Local_RedeemFails_Reject(t *testing.T) {
 // --- Local mode: ordering assertions ---
 
 func TestProcessSSHAuth_VerifyNotCalledOnDecodeFailure(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 
 	processSSHAuth(deps, "garbage", testRemoteAddr)
 
@@ -310,7 +305,7 @@ func TestProcessSSHAuth_VerifyNotCalledOnDecodeFailure(t *testing.T) {
 }
 
 func TestProcessSSHAuth_RedeemNotCalledOnVerifyFailure(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "spent"}
 
 	token := testtoken.V4Token(8)
@@ -325,7 +320,7 @@ func TestProcessSSHAuth_RedeemNotCalledOnVerifyFailure(t *testing.T) {
 }
 
 func TestProcessSSHAuth_VerifyNotCalledOnZeroAmount(t *testing.T) {
-	deps, fv, _, _ := setupTestSSHDeps(t)
+	deps, fv, _ := setupTestSSHDeps(t)
 	fv.DecodeResult = &cashu.TokenData{
 		Mint:   "https://testnut.cashu.space",
 		Amount: 0,
@@ -339,30 +334,27 @@ func TestProcessSSHAuth_VerifyNotCalledOnZeroAmount(t *testing.T) {
 	}
 }
 
-func TestProcessSSHAuth_ReplayCheckedBeforeVerify(t *testing.T) {
-	deps, _, rg, _ := setupTestSSHDeps(t)
+func TestProcessSSHAuth_RedemNotCalledWhenSpent(t *testing.T) {
+	deps, fv, _ := setupTestSSHDeps(t)
 	token := testtoken.V4Token(8)
 
-	thash := cashu.TokenHash(token)
-	rg.Spent[thash] = true
-
-	deps.Verifier.(*fakeverity.FakeVerifier).VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "should not reach"}
+	// Token is spent at mint — Verify fails, Redeem should NOT be called
+	fv.VerifyResult = fakeverity.VerifyResult{OK: false, Msg: "token spent"}
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
-		t.Fatal("expected Reject for replay")
+		t.Fatal("expected Reject for spent token")
 	}
-	fv := deps.Verifier.(*fakeverity.FakeVerifier)
-	if fv.VerifyCalled != 0 {
-		t.Errorf("Verify should not be called when replay rejects, got %d", fv.VerifyCalled)
+	if fv.RedeemCalled != 0 {
+		t.Errorf("Redeem should not be called when CheckState returns Spent, got %d", fv.RedeemCalled)
 	}
 }
 
 // --- Delegated mode: happy path ---
 
 func TestProcessSSHAuth_Delegated_ValidToken_Accept(t *testing.T) {
-	deps, _, _, fb := setupTestSSHDeps(t)
+	deps, _, fb := setupTestSSHDeps(t)
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 300000, Metric: "milliseconds"}
 
@@ -378,7 +370,7 @@ func TestProcessSSHAuth_Delegated_ValidToken_Accept(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Delegated_BootstrapCalledWithCorrectArgs(t *testing.T) {
-	deps, _, _, fb := setupTestSSHDeps(t)
+	deps, _, fb := setupTestSSHDeps(t)
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 480000, Metric: "milliseconds"}
 
@@ -397,7 +389,7 @@ func TestProcessSSHAuth_Delegated_BootstrapCalledWithCorrectArgs(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Delegated_MOTDRendered(t *testing.T) {
-	deps, _, _, fb := setupTestSSHDeps(t)
+	deps, _, fb := setupTestSSHDeps(t)
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 480000, Metric: "milliseconds"}
 
@@ -415,7 +407,7 @@ func TestProcessSSHAuth_Delegated_MOTDRendered(t *testing.T) {
 // --- Delegated mode: rejection ---
 
 func TestProcessSSHAuth_Delegated_BootstrapError_Reject(t *testing.T) {
-	deps, _, _, fb := setupTestSSHDeps(t)
+	deps, _, fb := setupTestSSHDeps(t)
 	deps.AuthMode = "delegated"
 	fb.Err = errors.New("server unreachable")
 
@@ -431,7 +423,7 @@ func TestProcessSSHAuth_Delegated_BootstrapError_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Delegated_ZeroAllotment_Reject(t *testing.T) {
-	deps, _, _, fb := setupTestSSHDeps(t)
+	deps, _, fb := setupTestSSHDeps(t)
 	deps.AuthMode = "delegated"
 	fb.Result = &sessiond.SessionState{AllotmentMs: 0}
 
@@ -447,21 +439,16 @@ func TestProcessSSHAuth_Delegated_ZeroAllotment_Reject(t *testing.T) {
 }
 
 func TestProcessSSHAuth_Delegated_AlreadySpent_Reject(t *testing.T) {
-	deps, _, rg, fb := setupTestSSHDeps(t)
+	deps, _, fb := setupTestSSHDeps(t)
 	deps.AuthMode = "delegated"
-	fb.Result = &sessiond.SessionState{AllotmentMs: 480000}
+	fb.Err = fmt.Errorf("token already spent at session daemon")
 
 	token := testtoken.V4Token(8)
-	thash := cashu.TokenHash(token)
-	rg.Spent[thash] = true
 
 	decision := processSSHAuth(deps, token, testRemoteAddr)
 
 	if decision.Accept {
-		t.Fatal("expected Reject for replayed token")
-	}
-	if fb.Called != 0 {
-		t.Errorf("Bootstrap should not be called on replay, got %d", fb.Called)
+		t.Fatal("expected Reject for spent token")
 	}
 }
 
@@ -481,7 +468,7 @@ func TestProcessSSHAuth_Local_MultipleAmounts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("amount_%d_sat", tc.amount), func(t *testing.T) {
-			deps, _, _, _ := setupTestSSHDeps(t)
+			deps, _, _ := setupTestSSHDeps(t)
 			token := testtoken.V4Token(tc.amount)
 
 			decision := processSSHAuth(deps, token, testRemoteAddr)
@@ -508,7 +495,7 @@ func TestProcessSSHAuth_Delegated_MultipleAllotments(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("allotment_%dms", tc.allotmentMs), func(t *testing.T) {
-			deps, _, _, fb := setupTestSSHDeps(t)
+			deps, _, fb := setupTestSSHDeps(t)
 			deps.AuthMode = "delegated"
 			fb.Result = &sessiond.SessionState{AllotmentMs: tc.allotmentMs, Metric: "milliseconds"}
 

@@ -182,7 +182,6 @@ func main() {
 		sessions.Cleanup()
 	}
 
-	replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
 	os.MkdirAll(BaseDir, 0755)
 
 	clientIP := config.GetEnv("TOLLGATE_CLIENT_IP", "")
@@ -191,7 +190,6 @@ func main() {
 
 	deps := &Dependencies{
 		Sessions:   sessions,
-		Replay:     replay,
 		Verifier:   fakeverity.NewProductionVerifier(WalletDir),
 		OperatorID: opCtx.Account.ID,
 		HMACKey:    opResolver.HMACKey(),
@@ -247,60 +245,9 @@ func handleDelegated(username, mac, password, clearTextPw string) {
 	case radiusauth.PaymentCashu:
 		handleCashuDelegated(cred, sessionID, sessions, operatorID)
 	case radiusauth.PaymentLNURLW:
-		replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
 		os.MkdirAll(BaseDir, 0755)
-		handleLNURLw(cred, sessionID, sessions, replay, operatorID)
+		fmt.Fprintf(os.Stderr, "LNURLw disabled\n")
 	}
-}
-
-// handleLNURLw processes an LNURL-withdraw code.
-func handleLNURLw(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, replay *cashu.ReplayGuard, operatorID string) {
-	thash := cashu.TokenHash(cred.Value)
-
-	if replay.CheckAndMark(thash) {
-		log.Printf("Reject: lnurlw code already used (hash=%s, source=%s)", thash[:16], cred.Source)
-		replyMessage("Rejected: LNURLw code already used")
-		os.Exit(1)
-	}
-
-	// TODO: Actually claim the LNURL-w payment here.
-	// For now: accept any lnurlw string as valid payment.
-	// This is a technology demonstration — not production.
-
-	log.Printf("Accept (TODO): session=%s type=lnurlw hash=%s source=%s lnurlw=%s — pass-through accept, no payment claimed",
-		sessionID, thash[:16], cred.Source, redact.LogSafe(redact.Truncate(cred.Value, 80)))
-
-	recordLedgerAuth(ledger.LedgerEntry{
-		EventType:    ledger.EventAuthAccept,
-		MAC:          sessionID,
-		PaymentType:  "lnurlw",
-		CreditAmount:    LNURLWDefaultSec / RateSecPerSat,
-		DurationSec:  LNURLWDefaultSec,
-		TokenHash:    thash,
-		ReplyMessage: fmt.Sprintf("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60),
-	})
-
-	classStr := emitClass(operatorID, sessionID, thash[:16], opResolver.HMACKey())
-	rec := &SessionRecord{
-		MAC:      sessionID,
-		Token:    thash,
-		Guest:    "radius-lnurlw-" + thash[:8],
-		Mint:     "lnurlw-pending",
-		Amount:   LNURLWDefaultSec / RateSecPerSat,
-		Started:  time.Now(),
-		Duration: LNURLWDefaultSec,
-		Source:   cred.Source,
-		PayType:  radiusauth.PaymentLNURLW,
-		Class:    classStr,
-	}
-	if err := sessions.Save(rec); err != nil {
-		log.Printf("Warning: failed to save session record: %v", err)
-	}
-
-	replyMessage("Valid LNURLw code: %dm access (TODO: claim Lightning payment)", LNURLWDefaultSec/60)
-	radiusAttr("Session-Timeout", LNURLWDefaultSec)
-	radiusAttr("Acct-Interim-Interval", 60)
-	os.Exit(0)
 }
 
 func handleDelegatedReconnection(sessionID string) bool {
@@ -355,51 +302,17 @@ func buildDelegatedReplyMessage(state *sessiond.SessionState, minutes int) strin
 
 func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, sessions *SessionStore, operatorID string) {
 	thash := cashu.TokenHash(cred.Value)
-	replay := cashu.NewReplayGuard(BaseDir + "/radius-spent.txt")
 	os.MkdirAll(BaseDir, 0755)
 
-	alreadyMarked := replay.IsSpent(thash)
-
-	if alreadyMarked {
-		tokenData, err := cashu.DecodeToken(cred.Value)
-		if err == nil {
-			proofState, stateMsg := cashu.CheckTokenState(tokenData)
-			switch proofState {
-			case cashu.StateSpent:
-				if rec, exists := sessions.Get(sessionID); exists && sessions.IsActive(rec) {
-					remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
-					remainingSec := max(1, int(remaining.Seconds()))
-					log.Printf("Reconnect: session=%s recovered (delegated, spent token, %ds remaining)", sessionID, remainingSec)
-					replyMessage("Session resumed: %dm remaining (delegated)", remainingSec/60)
-					radiusAttr("Session-Timeout", remainingSec)
-					radiusAttr("Acct-Interim-Interval", 60)
-					os.Exit(0)
-				}
-				log.Printf("Reject: token %s spent at mint, no session for %s (delegated)", thash[:16], sessionID)
-				replyMessage("Rejected: token already spent")
-				os.Exit(1)
-			case cashu.StatePending:
-				log.Printf("Reject: token %s pending at mint (delegated)", thash[:16])
-				replyMessage("Rejected: token is being processed, please try again in a few seconds")
-				os.Exit(1)
-			case cashu.StateUnspent:
-				log.Printf("Reject: token %s in spent-hashes but UNSPENT at mint (delegated)", thash[:16])
-				replyMessage("Rejected: token already used")
-				os.Exit(1)
-			default:
-				log.Printf("Reject: cannot determine token state (delegated, %s): %s", thash[:16], stateMsg)
-				replyMessage("Rejected: cannot verify token state — %s", stateMsg)
-				os.Exit(1)
-			}
-		}
-	}
-
-	if !alreadyMarked {
-		if replay.CheckAndMark(thash) {
-			log.Printf("Reject: cashu token race (delegated, hash=%s)", thash[:16])
-			replyMessage("Rejected: token already used")
-			os.Exit(1)
-		}
+	// Check for active session first (fast reconnect path)
+	if rec, exists := sessions.Get(sessionID); exists && sessions.IsActive(rec) {
+		remaining := time.Until(rec.Started.Add(time.Duration(rec.Duration) * time.Second))
+		remainingSec := max(1, int(remaining.Seconds()))
+		log.Printf("Reconnect: session=%s (delegated, %ds remaining)", sessionID, remainingSec)
+		replyMessage("Session resumed: %dm remaining (delegated)", remainingSec/60)
+		radiusAttr("Session-Timeout", remainingSec)
+		radiusAttr("Acct-Interim-Interval", 60)
+		os.Exit(0)
 	}
 
 	client := sessiond.NewClient(sessiondURL)
@@ -462,7 +375,7 @@ func handleCashuDelegated(cred radiusauth.PaymentCredential, sessionID string, s
 		EventType:    ledger.EventAuthAccept,
 		MAC:          sessionID,
 		PaymentType:  "delegated",
-		CreditAmount:    ledgerCreditAmount,
+		CreditAmount: ledgerCreditAmount,
 		DurationSec:  seconds,
 		TokenHash:    thash,
 		ReplyMessage: buildDelegatedReplyMessage(state, minutes),
