@@ -4,6 +4,7 @@ package fakeverity
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/sessiond"
@@ -23,7 +24,7 @@ type ReplayGuard interface {
 
 type BootstrapResult struct {
 	AllotmentMs            uint64
-	CreditAmount              uint64
+	CreditAmount           uint64
 	EffectiveRateSecPerSat uint64
 }
 
@@ -45,18 +46,16 @@ type FakeVerifier struct {
 	VerifyResult VerifyResult
 	RedeemErr    error
 
-	VerifyCalled    int
-	RedeemCalled    int
+	VerifyCalled    int64
+	RedeemCalled    int64
 	LastVerifiedTok *cashu.TokenData
 	LastRedeemedTok string
 
-	// DecodeErr overrides Decode to return this error when non-nil.
-	DecodeErr error
-	// DecodeResult overrides Decode to return this when non-nil and DecodeErr is nil.
+	DecodeErr    error
 	DecodeResult *cashu.TokenData
 
-	// CheckStateResult controls what CheckState returns. Defaults to UNSPENT.
 	CheckStateResult cashu.ProofState
+	mu               sync.RWMutex
 }
 
 // NewFakeVerifier returns a FakeVerifier with sensible defaults:
@@ -83,19 +82,24 @@ func (f *FakeVerifier) Decode(tokenStr string) (*cashu.TokenData, error) {
 
 // Verify returns the configured result and records the call.
 func (f *FakeVerifier) Verify(tokenData *cashu.TokenData) (bool, string) {
-	f.VerifyCalled++
+	atomic.AddInt64(&f.VerifyCalled, 1)
 	f.LastVerifiedTok = tokenData
 	return f.VerifyResult.OK, f.VerifyResult.Msg
 }
 
 // Redeem returns the configured error and records the call.
 func (f *FakeVerifier) Redeem(tokenStr string) error {
-	f.RedeemCalled++
+	atomic.AddInt64(&f.RedeemCalled, 1)
+	f.mu.Lock()
 	f.LastRedeemedTok = tokenStr
-	return f.RedeemErr
+	err := f.RedeemErr
+	f.mu.Unlock()
+	return err
 }
 
 func (f *FakeVerifier) CheckState(tokenData *cashu.TokenData) (cashu.ProofState, string) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if f.CheckStateResult == "" {
 		return cashu.StateUnspent, "OK"
 	}
@@ -202,7 +206,7 @@ func (p *ProductionBootstrapper) Bootstrap(token string, sessionID string) (*Boo
 	}
 	return &BootstrapResult{
 		AllotmentMs:            state.AllotmentMs,
-		CreditAmount:              state.CreditAmount,
+		CreditAmount:           state.CreditAmount,
 		EffectiveRateSecPerSat: state.EffectiveRateSecPerSat,
 	}, nil
 }
