@@ -132,10 +132,7 @@ func main() {
 	os.MkdirAll(BaseDir, 0755)
 	os.MkdirAll(SessionDir, 0755)
 
-	replay := cashu.NewReplayGuard(BaseDir + "/spent.txt")
-
 	deps := &SSHDependencies{
-		Replay:       replay,
 		Verifier:     fakeverity.NewProductionVerifier(WalletDir),
 		Bootstrapper: sessiond.NewClient(sshSessiondURL),
 		AuthMode:     sshAuthMode,

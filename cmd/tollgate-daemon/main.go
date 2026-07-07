@@ -38,7 +38,6 @@ import (
 	"time"
 
 	"tollgate-auth/internal/auth"
-	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/ledger"
@@ -89,7 +88,6 @@ func main() {
 	sessions := &auth.SessionStore{Dir: sessionsDir}
 
 	os.MkdirAll(baseDir, 0755)
-	replay := cashu.NewReplayGuard(baseDir + "/radius-spent.txt")
 
 	opResolver, err := operator.NewResolver("")
 	if err != nil {
@@ -115,7 +113,6 @@ func main() {
 
 	deps := &auth.Dependencies{
 		Sessions:     sessions,
-		Replay:       replay,
 		Verifier:     verifier,
 		Bootstrapper: bootstrapper,
 		OperatorID:   opCtx.Account.ID,
