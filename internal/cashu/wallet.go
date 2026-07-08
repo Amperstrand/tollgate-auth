@@ -37,11 +37,15 @@ func RedeemToken(tokenStr string, walletDir string) error {
 	output := string(out)
 
 	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Recovered") {
+			continue
+		}
 		if strings.Contains(line, "compensated") {
 			var compensated, skipped, failed int
 			fmt.Sscanf(line, "Recovered %d operations, %d compensated, %d skipped, %d failed", new(int), &compensated, &skipped, &failed)
 			if compensated > 0 {
-				log.Printf("cdk-cli receive: %s", strings.TrimSpace(line))
+				log.Printf("cdk-cli receive: %s", trimmed)
 				return nil
 			}
 			if skipped > 0 {
@@ -51,11 +55,11 @@ func RedeemToken(tokenStr string, walletDir string) error {
 				return fmt.Errorf("cdk-cli receive: token redemption failed")
 			}
 		}
-		if strings.HasPrefix(strings.TrimSpace(line), "Received:") {
+		if strings.HasPrefix(trimmed, "Received:") {
 			var received int
-			fmt.Sscanf(strings.TrimSpace(line), "Received: %d", &received)
+			fmt.Sscanf(trimmed, "Received: %d", &received)
 			if received > 0 {
-				log.Printf("cdk-cli receive: %s", strings.TrimSpace(line))
+				log.Printf("cdk-cli receive: %s", trimmed)
 				return nil
 			}
 		}
