@@ -51,7 +51,7 @@ services:
   # ─── Auth daemon — primary auth path for FreeRADIUS + WG ──────────────
   tollgate-daemon:
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/tollgate-daemon/Dockerfile
     image: tollgate-daemon:latest
     container_name: tollgate-daemon
@@ -90,7 +90,7 @@ services:
   # ─── OCPI eMSP — EV charging session authorization ────────────────────
   tollgate-auth-ocpi:
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/tollgate-auth-ocpi/Dockerfile
     image: tollgate-auth-ocpi:latest
     container_name: tollgate-auth-ocpi
@@ -125,7 +125,7 @@ services:
   # ─── OCPP CSMS — speaks to EV charge points over WebSocket ────────────
   tollgate-csms:
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/tollgate-csms/Dockerfile
     image: tollgate-csms:latest
     container_name: tollgate-csms
@@ -152,7 +152,7 @@ services:
   # ─── WebSSH — browser-based shell access ──────────────────────────────
   tollgate-webssh:
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/tollgate-webssh/Dockerfile
     image: tollgate-webssh:latest
     container_name: tollgate-webssh
@@ -181,7 +181,7 @@ services:
   freeradius:
     profiles: ["radius"]
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/freeradius/Dockerfile
     image: tollgate-freeradius:latest
     container_name: tollgate-freeradius
@@ -212,7 +212,7 @@ services:
   tollgate-settle:
     profiles: ["run-settle"]
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/tollgate-settle/Dockerfile
     image: tollgate-settle:latest
     container_name: tollgate-settle

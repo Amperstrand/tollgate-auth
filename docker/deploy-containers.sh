@@ -20,7 +20,9 @@ set -euo pipefail
 #      pinned for rollback to a known-good image.
 # Override via env var: IMAGE_TAG=<sha> ./deploy-containers.sh
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/amperstrand}"
+# Use ${IMAGE_PREFIX-...} (not ${IMAGE_PREFIX:-...}) so that setting
+# IMAGE_PREFIX= explicitly triggers the local :test fallback below.
+IMAGE_PREFIX="${IMAGE_PREFIX-ghcr.io/amperstrand}"
 
 IMAGE_WEBSSH="${IMAGE_PREFIX}/tollgate-webssh:${IMAGE_TAG}"
 IMAGE_CSMS="${IMAGE_PREFIX}/tollgate-csms:${IMAGE_TAG}"
