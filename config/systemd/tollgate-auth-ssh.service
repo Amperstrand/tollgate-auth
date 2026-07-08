@@ -19,6 +19,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
+SupplementaryGroups=cashu-wallet tollgate
 ExecStart=/opt/tollgate-auth/tollgate-auth-ssh
 Restart=on-failure
 RestartSec=5
@@ -50,7 +51,7 @@ RestrictRealtime=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_KILL
 AmbientCapabilities=CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_KILL
-SystemCallFilter=@system-service
+SystemCallFilter=@system-service @file-system chroot setgroups setgid setresuid setresgid
 SystemCallArchitectures=native
 
 [Install]
