@@ -85,7 +85,7 @@ func createJail(guest string, tokenData *cashu.TokenData, seconds int) error {
 	}
 	jailPath := SessionDir + "/" + clean
 
-	cmd := exec.Command("cp", "-a", JailTemplate, jailPath)
+	cmd := exec.Command("cp", "-r", "--preserve=mode", JailTemplate, jailPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("jail copy failed: %s: %w", string(out), err)
 	}
