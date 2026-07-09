@@ -602,6 +602,28 @@ Two audit windows have been completed. The full consolidated report is at [docs/
 
 See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) for root cause, fix detail, and verification per finding. See [docs/DOCKER_MIGRATION_ROADMAP.md](docs/DOCKER_MIGRATION_ROADMAP.md) for the longer-term plan to containerize the deployment for stronger isolation.
 
+### Window 3 — SSH service SystemCallFilter + capability fix (July 9 2025)
+
+3 findings, all fixed. The SSH auth pipeline was broken under the hardened
+systemd configuration from Window 2. Each issue was discovered and resolved
+during end-to-end testing with real Cashu tokens:
+
+| Finding | Severity | Status |
+|---------|----------|--------|
+| `SystemCallFilter=@system-service` blocked `chroot`, `setgroups`, `setgid`, `setresuid`, `setresgid` | HIGH | **Fixed** — added `@file-system chroot setgroups setgid setresuid setresgid` |
+| `CapabilityBoundingSet` dropped `CAP_DAC_OVERRIDE`, root couldn't access wallet/session dirs | HIGH | **Fixed** — `SupplementaryGroups=cashu-wallet tollgate` |
+| `cp -a` (archive copy) required `CAP_CHOWN` for ownership preservation | MEDIUM | **Fixed** — changed to `cp -r --preserve=mode` |
+
+Additionally fixed: `RedeemToken()` output parser falsely matched cdk-cli's
+recovery-phase lines ("Recovered N operations, K skipped") as the receive
+result, causing all daemon-path redemptions (RADIUS, WireGuard) to fail as
+"token already spent" when the wallet had any skipped recovery operations.
+
+**Verification**: SSH auth (port 2222) and RADIUS auth (port 1812) both
+tested end-to-end with real testnut tokens — Access-Accept with correct
+Session-Timeout. See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)
+Window 3 section for details.
+
 ## Intentional Design Decisions
 
 The following configuration choices are intentional for the test deployment:
@@ -641,7 +663,7 @@ All services hardened. Privilege reduced where possible, network locked to loopb
 
 ### Hardening matrix applied to every unit
 
-`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `ProtectHostname`, `ProtectProc=invisible`, `RestrictSUIDSGID`, `RemoveIPC`, `RestrictRealtime`, `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `CapabilityBoundingSet=` (empty for unprivileged, 4 caps for SSH), `SystemCallFilter=@system-service`, `SystemCallArchitectures=native`. For Docker containers: `--cap-drop=ALL`, `read_only: true` where possible, `--restart unless-stopped`, bind-mounted state dirs owned by matching UIDs.
+`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `ProtectHostname`, `ProtectProc=invisible`, `RestrictSUIDSGID`, `RemoveIPC`, `RestrictRealtime`, `LockPersonality`, `RestrictNamespaces`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `CapabilityBoundingSet=` (empty for unprivileged, 4 caps for SSH), `SystemCallFilter=@system-service` (SSH service also includes `@file-system chroot setgroups setgid setresuid setresgid`), `SystemCallArchitectures=native`. SSH service uses `SupplementaryGroups=cashu-wallet tollgate` for wallet/session directory access. For Docker containers: `--cap-drop=ALL`, `read_only: true` where possible, `--restart unless-stopped`, bind-mounted state dirs owned by matching UIDs.
 
 ### Why tollgate-auth-ssh runs as root (and stays on host systemd)
 

@@ -183,6 +183,35 @@ The unit now also has: `NoNewPrivileges`, `ProtectSystem=strict`, `ReadWritePath
 
 Note: `tollgate-settle` cannot use `IPAddressDeny=any` because it must reach public Nostr relays. Defense comes from the unprivileged user, ProtectSystem, and SystemCallFilter.
 
+### Window 3 — tollgate-auth-ssh SystemCallFilter + capability fix (2026-07-09)
+
+The SSH service unit (`config/systemd/tollgate-auth-ssh.service`) had two
+issues that prevented the auth pipeline from working under the hardened
+systemd configuration:
+
+1. **SystemCallFilter too restrictive**: `@system-service` alone blocks
+   `chroot(2)`, `setgroups(2)`, `setgid(2)`, `setresuid(2)`, `setresgid(2)`
+   — all needed by `chroot --userspec=nobody:nogroup`. The chroot process
+   was silently killed by seccomp, causing the PTY master to receive EIO
+   immediately with zero bytes of shell output. Fixed by adding
+   `@file-system chroot setgroups setgid setresuid setresgid` to the filter.
+
+2. **CapabilityBoundingSet drops CAP_DAC_OVERRIDE**: Root without
+   `CAP_DAC_OVERRIDE` cannot bypass file permissions. The wallet dir
+   (`/var/lib/cashu-wallet/`, mode 770, owned by `cashu-wallet:cashu-wallet`)
+   and session dir (`/opt/cashu-tollgate/sessions/`, mode 775, owned by
+   `tollgate:tollgate`) were inaccessible to the SSH service. Fixed by adding
+   `SupplementaryGroups=cashu-wallet tollgate` (same pattern as FreeRADIUS).
+
+3. **`cp -a` needs CAP_CHOWN**: The jail copy used `cp -a` (archive mode)
+   which preserves ownership via `chown(2)`. This requires `CAP_CHOWN`,
+   not in the bounding set. Changed to `cp -r --preserve=mode` which
+   preserves file permissions but not ownership.
+
+The SSH service unit now uses:
+`SystemCallFilter=@system-service @file-system chroot setgroups setgid setresuid setresgid`
+with `SupplementaryGroups=cashu-wallet tollgate`.
+
 ---
 
 ## Finding 5 — Internal services bound to 0.0.0.0 (MEDIUM)
@@ -279,7 +308,7 @@ Applied the full hardening matrix to every unit:
 | `SystemCallFilter=@system-service` | Only syscalls in the `@system-service` group |
 | `SystemCallArchitectures=native` | No 32-bit/foreign-arch syscall injection |
 
-`tollgate-auth-ssh` keeps root but is bounded to **4 capabilities** only: `CAP_SYS_CHROOT`, `CAP_SETUID`, `CAP_SETGID`, `CAP_KILL`. Even if the binary is fully subverted, it cannot `iptables`, packet-capture, load modules, mount filesystems, or reboot the host.
+`tollgate-auth-ssh` keeps root but is bounded to **4 capabilities** only: `CAP_SYS_CHROOT`, `CAP_SETUID`, `CAP_SETGID`, `CAP_KILL`. Even if the binary is fully subverted, it cannot `iptables`, packet-capture, load modules, mount filesystems, or reboot the host. The SSH service also uses `SupplementaryGroups=cashu-wallet tollgate` for wallet and session directory access (since `CapabilityBoundingSet` drops `CAP_DAC_OVERRIDE`), and `SystemCallFilter=@system-service @file-system chroot setgroups setgid setresuid setresgid` (the additional syscalls are needed for `chroot --userspec`).
 
 `sync-caddy-certs` keeps root (needs `systemctl restart freeradius`) but has all the other hardening.
 
@@ -289,7 +318,7 @@ Applied the full hardening matrix to every unit:
 
 ### Observation
 
-The audit flagged `cmd/tollgate-auth-ssh/main.go` lines 52–71, 144, 182 as a path-traversal risk: `jailPath := SessionDir + "/" + guest`, where `guest` is used in `cp -a`, `rm -rf`, and `chroot` invocations.
+The audit flagged `cmd/tollgate-auth-ssh/main.go` lines 52–71, 144, 182 as a path-traversal risk: `jailPath := SessionDir + "/" + guest`, where `guest` is used in `cp -r --preserve=mode`, `rm -rf`, and `chroot` invocations.
 
 ### Investigation
 

@@ -2,8 +2,8 @@
 
 A catalog of unresolved questions, untested assumptions, and identified risks. Organized by severity and category.
 
-**Last updated**: 2026-06-13
-**Status**: Security audit completed. 6 vulnerabilities found and fixed. Core concept validated end-to-end on real hardware. Refactoring for testability in progress.
+**Last updated**: 2026-07-09
+**Status**: Security audit Windows 1-3 complete. SSH and RADIUS auth pipelines verified end-to-end with real Cashu tokens. Core concept fully validated on production hardware. Firecracker microVM architecture designed (see [FIRECRACKER_SSH_DESIGN.md](FIRECRACKER_SSH_DESIGN.md)).
 
 ---
 
@@ -301,3 +301,7 @@ Unknowns:
 | — | Loose input validation (prefix-only checks)? | **FIXED.** `isValidCashuToken()` enforces base64url-only after prefix. `isValidLNURLw()` enforces alphanumeric-only. | 2025-06-12 |
 | — | File permissions too permissive (0644)? | **FIXED.** Changed to 0600 (owner-only) for spent hashes and wallet files. | 2025-06-12 |
 | — | Legacy `users` file shell injection vector? | **FIXED.** Removed all `Exec-Program-Wait` entries. Replaced with reject-all fallback. | 2025-06-12 |
+| 1 | Fresh-token end-to-end test on real hardware? | **VERIFIED.** Both SSH (port 2222) and RADIUS (port 1812) tested with fresh testnut tokens — Access-Accept, Session-Timeout correct, shell granted. | 2026-07-09 |
+| — | SSH auth pipeline broken under hardened systemd? | **FIXED.** SystemCallFilter missing chroot/setgroups/setgid syscalls; CapabilityBoundingSet dropped CAP_DAC_OVERRIDE; cp -a needed CAP_CHOWN. See Window 3 audit. | 2026-07-09 |
+| — | Daemon-path token redemption always fails as "already spent"? | **FIXED.** RedeemToken() output parser matched cdk-cli recovery-phase lines ("Recovered N ops, K skipped") as the receive result. Now skips "Recovered" lines. | 2026-07-09 |
+| — | TLS broken on ssh.nodns.shop, dns.nodns.shop? | **FIXED.** Added `tls { on_demand }` to Caddy site blocks shadowed by `*.nodns.shop` wildcard. | 2026-07-09 |

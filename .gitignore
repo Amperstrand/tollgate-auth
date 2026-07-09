@@ -9,7 +9,7 @@ cashu-tollgate
 /tollgate-auth-radius
 /tollgate-auth-radius.linux-*
 /tollgate-auth-ssh
-/tollgate-auth-ssh.linux-*
+/tollgate-auth-ssh.linux*
 /tollgate-auth-ocpi
 /tollgate-daemon
 /tollgate-shim
