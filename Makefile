@@ -40,6 +40,9 @@ build-shim:
 build-shell:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(SHELL_BINARY) ./cmd/tollgate-shell/
 
+build-vm-agent:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o tollgate-vm-agent ./cmd/tollgate-vm-agent/
+
 deploy: build-linux
 	LOCAL_SHA=$$(sha256sum $(SSH_BINARY) | cut -d' ' -f1) && \
 	scp -P $(REMOTE_PORT) $(SSH_BINARY) $(REMOTE_USER)@$(REMOTE_HOST):/tmp/$(SSH_BINARY) && \

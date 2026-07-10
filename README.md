@@ -276,6 +276,7 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `tollgate-auth-ssh` | SSH | 2222 | Interactive shell — chroot jail, timer, auto-cleanup |
 | `tollgate-wg` | CLI | - | WireGuard peer connect/disconnect via daemon |
 | `tollgate-settle` | Timer (systemd) | - | Operator wallet settlement — melt tokens to Lightning |
+| `tollgate-vm-agent` | vsock | 52 | Guest-side agent for Firecracker microVMs — vsock shell bridge |
 
 ### Directories
 
@@ -290,6 +291,7 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA |
 | `docs/tollgate-rs-deprecation-and-migration.md` | Go payment stack deprecation plan — file inventory, deprecation map, phased migration |
 | `docs/SECURITY_AUDIT.md` | Full security audit report — Window 1 (FreeRADIUS + Go) and Window 2 (defense in depth + privilege reduction) findings with root cause, fix, and verification per item |
+| `docs/FIRECRACKER_SSH_DESIGN.md` | Firecracker microVM-per-SSH architecture — verified prototype with vsock bridge, boot time benchmarks (1.7s cold, 0.285ms vsock RTT), bugs found, and improvement roadmap |
 | `docs/DOCKER_MIGRATION_ROADMAP.md` | Phased plan to migrate from systemd-managed host binaries to Docker containers — what's easy, what's hard, network/persistence/secret models |
 
 ### Supported transports
