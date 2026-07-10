@@ -1,8 +1,18 @@
 # Firecracker microVM per SSH Session — Architecture Design
 
-**Status:** Design (not yet implemented)
+**Status:** Prototype verified (vsock bridge tested end-to-end)
 **Date:** July 2025
 **Depends on:** [vps-on-demand](https://github.com/Amperstrand/vps-on-demand) Firecracker infrastructure
+
+## Verification (July 10 2025)
+
+Tested on SHC Dev VPS Professional (4C/16GB, nested KVM, Debian 13):
+
+- Firecracker v1.16.0 boots a microVM with vsock device in ~1 second
+- `tollgate-vm-agent` (1.9MB Go binary) listens on AF_VSOCK port 52
+- Host-side vsock handshake (CONNECT 52 / OK) succeeds
+- Interactive shell session works: host sends commands, guest busybox executes and returns output
+- Kernel modules required in initramfs: `virtio_mmio`, `vsock`, `vmw_vsock_virtio_transport_common`, `vmw_vsock_virtio_transport`
 
 ## Overview
 
