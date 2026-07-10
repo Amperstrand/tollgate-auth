@@ -18,6 +18,7 @@ cashu-tollgate
 /tollgate-shell
 /tollgate-webssh
 /tollgate-csms
+/tollgate-vm-agent
 /tollgate-auth-ocpi.local
 /tollgateroot*
 /signyourfirmware*
