@@ -449,3 +449,84 @@ all data is gone.
 - [mdlayher/vsock](https://github.com/mdlayher/vsock) — Go AF_VSOCK library
 - [sahil-shubham/bhatti](https://github.com/sahil-shubham/bhatti) — SSH-over-vsock reference implementation
 - [vps-on-demand](https://github.com/Amperstrand/vps-on-demand) — existing Firecracker daemon + rootfs builder
+
+## Bugs Found During Testing
+
+### B1: virtio_net fails to load — missing failover module dependency
+
+**Root cause**: Debian 13 cloud kernel has `CONFIG_VIRTIO_NET=m`, `CONFIG_NET_FAILOVER=m`, `CONFIG_FAILOVER=m` (all modules). The dependency chain is `virtio_net → net_failover → failover`. If `failover.ko` is not loaded first, `net_failover` fails with `Unknown symbol failover_register`, which cascades to `virtio_net` failing with `Unknown symbol net_failover_create`.
+
+**Fix**: Include all three modules in the initramfs and load in order: `failover → net_failover → virtio_net`.
+
+**Status**: Fix written (`/tmp/rebuild-v3.sh`), root cause confirmed from serial log. Not yet tested on live VM (VPS lost).
+
+### B2: SSH-piped commands don't complete
+
+**Root cause**: The agent uses direct stdin/stdout piping (no PTY). When SSH pipes input (e.g., `echo "cmd" | ssh ...`), the stdin EOF propagates through the vsock to the shell, causing it to exit before processing. Interactive SSH sessions (typing commands) work fine.
+
+**Fix**: Restore PTY support in the agent (confirmed `/dev/ptmx exists: YES` with proper devpts mount).
+
+### B3: fc-daemon TAP name exceeds IFNAMSIZ
+
+**Root cause**: Linux limits interface names to 15 characters. TAP names like `tap-2d278af41e0a` (17 chars) are rejected by `ip tuntap add`.
+
+**Fix**: Use shorter names (e.g., `fc{N}` where N is a counter).
+
+### B4: fc-daemon config-file argument format
+
+**Root cause**: Firecracker v1.16.0 doesn't accept `--config-file=/path` (single argument with `=`). It requires `--config-file /path` (two separate arguments).
+
+**Fix**: Use `subprocess.Popen([FIRECRACKER, "--no-api", "--config-file", str(config_path)], ...)`.
+
+## Unknown Unknowns Discovered
+
+### U1: ACPI device discovery works without CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES
+
+Firecracker adds `virtio_mmio.device=` to kernel boot args, but Debian cloud kernels have `CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES is not set`. Despite this, Firecracker devices are discovered via ACPI tables (DSDT). The vsock device works without the command-line option.
+
+### U2: All networking/vsock modules are modules, not built-in
+
+On Debian 13 cloud kernels: `virtio_mmio`, `vsock`, `vmw_vsock_virtio_transport_*`, `virtio_net`, `net_failover`, `failover` are ALL compiled as modules (=m), not built-in (=y). This means they must ALL be included in the initramfs and loaded with `insmod` in dependency order. A Firecracker-optimized kernel (like Anvil) with these built-in would eliminate this complexity.
+
+### U3: vsock RTT is sub-millisecond
+
+Measured at **0.285ms average** (min 0.181ms, max 0.803ms). This is faster than any network-based approach (SSH-in-SSH, serial console). Users will perceive zero latency from the vsock bridge.
+
+### U4: devtmpfs + devpts work in initramfs
+
+With proper PATH setup (`export PATH=/bin; busybox --install -s /bin` before mount calls), both devtmpfs and devpts mount successfully inside the Firecracker initramfs. `/dev/ptmx` exists, enabling PTY support.
+
+## Improvement Areas
+
+### I1: Build proper Alpine ext4 rootfs
+
+The initramfs approach works for proving the concept but is limited:
+- No package installation (no apk)
+- No persistence within session
+- Module loading is manual and fragile
+- No standard init system
+
+An Alpine ext4 rootfs (512MB) with OpenRC, full networking stack, and package support would be production-ready. The vps-on-demand project has rootfs builder scripts for this.
+
+### I2: Pre-warmed VM pool
+
+Current cold start: ~1.7 seconds. With a pre-warmed pool (paused VMs resumed on demand): ~10ms. This would make the experience indistinguishable from a local shell.
+
+### I3: PTY-based agent with window resize
+
+Now that `/dev/ptmx` is confirmed available, the agent should use `creack/pty` for proper terminal semantics: window resize (SIGWINCH), signal forwarding (Ctrl+C), and proper line editing.
+
+### I4: Snapshot-based boot
+
+Firecracker supports snapshot restore — save a pre-booted VM's memory state and restore it for instant boot. This eliminates kernel boot time entirely (~10ms restore vs ~1s cold boot).
+
+### I5: Token-to-VM-spec mapping
+
+Design needed: how many sats maps to how much RAM/CPU/disk/time?
+- Minimum viable: 1 sat = 10 seconds + 256MB RAM + 1 vCPU
+- Tiered: higher-value tokens get more resources
+- Configurable via operator settings
+
+### I6: Integration with vps-on-demand daemon
+
+The mini fc-daemon (`/tmp/fc-daemon.py`) is a prototype. Production should use the full vps-on-demand daemon which handles: payment verification, Nostr-based VM requests, proper rootfs management, port forwarding, TTL-based reaping, and health monitoring.
