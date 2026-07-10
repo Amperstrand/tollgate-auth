@@ -20,7 +20,9 @@ import (
 	"tollgate-auth/internal/cashu"
 	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
+	"tollgate-auth/internal/firecracker"
 	"tollgate-auth/internal/sessiond"
+	"tollgate-auth/internal/vsock"
 
 	"github.com/creack/pty"
 	"github.com/gliderlabs/ssh"
@@ -46,6 +48,10 @@ const (
 var (
 	sshAuthMode    = config.GetEnv("TOLLGATE_AUTH_MODE", "local")
 	sshSessiondURL = config.GetEnv("TOLLGATE_SESSIOND_URL", "http://127.0.0.1:2121")
+	vmMode         = config.GetEnv("TOLLGATE_VM_MODE", "chroot")
+	vmFallback     = config.GetEnv("TOLLGATE_VM_FALLBACK", "true")
+	fcDaemonURL    = config.GetEnv("TOLLGATE_FC_DAEMON", "http://127.0.0.1:8081")
+	fcVsockDir     = config.GetEnv("TOLLGATE_FC_VSOCK_DIR", "/var/lib/vps-on-demand/vms")
 )
 
 // --- Jail Management ---
@@ -126,6 +132,70 @@ func setWinsize(f *os.File, w, h int) {
 	)
 }
 
+// handleFirecrackerSession creates a Firecracker microVM, bridges the SSH
+// session to the VM's vsock agent, and destroys the VM when the session ends.
+func handleFirecrackerSession(s ssh.Session, decision AuthDecision, seconds int, guest string) error {
+	fcClient := firecracker.NewClient(fcDaemonURL)
+
+	vmResp, err := fcClient.CreateVM(firecracker.VMSpec{
+		CPUs:       1,
+		MemMB:      256,
+		DiskMB:     512,
+		TTLSeconds: seconds + 60,
+	})
+	if err != nil {
+		return fmt.Errorf("create VM: %w", err)
+	}
+
+	log.Printf("VM created: id=%s port=%d for %s", vmResp.ID, vmResp.PublicPort, guest)
+
+	vsockPath := fcVsockDir + "/" + vmResp.ID + "/v.sock"
+	time.Sleep(2 * time.Second)
+
+	dialer := &vsock.Dialer{}
+	vsockConn, err := dialer.Dial(vsockPath, vsock.DefaultVsockPort)
+	if err != nil {
+		fcClient.DestroyVM(vmResp.ID)
+		return fmt.Errorf("vsock dial: %w", err)
+	}
+
+	log.Printf("vsock connected to VM %s for %s", vmResp.ID, guest)
+
+	io.WriteString(s, fmt.Sprintf("\r\n  +======================================+\r\n"))
+	io.WriteString(s, fmt.Sprintf("  |        CASHU TOLLGATE (microVM)      |\r\n"))
+	io.WriteString(s, fmt.Sprintf("  +======================================+\r\n"))
+	io.WriteString(s, fmt.Sprintf("  |  Time:   %d sec                      |\r\n", seconds))
+	io.WriteString(s, fmt.Sprintf("  |  VM ID:  %s           |\r\n", vmResp.ID))
+	io.WriteString(s, fmt.Sprintf("  +======================================+\r\n\r\n"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	timer := time.AfterFunc(time.Duration(seconds)*time.Second, func() {
+		io.WriteString(s, "\r\n\r\n  === Time's up! VM destroying. ===\r\n")
+		vsockConn.Close()
+	})
+	defer timer.Stop()
+
+	go func() {
+		io.Copy(vsockConn, s)
+		select {
+		case <-ctx.Done():
+		default:
+			vsockConn.Close()
+		}
+	}()
+
+	io.Copy(s, vsockConn)
+	cancel()
+
+	fcClient.DestroyVM(vmResp.ID)
+	log.Printf("VM destroyed: id=%s for %s", vmResp.ID, guest)
+
+	s.Exit(0)
+	return nil
+}
+
 // --- Main ---
 
 func main() {
@@ -180,6 +250,21 @@ func main() {
 		seconds := decision.Seconds
 		tokenData := decision.TokenData
 
+		// --- Firecracker microVM mode (optional) ---
+		if vmMode == "firecracker" {
+			if err := handleFirecrackerSession(s, decision, seconds, guest); err == nil {
+				return
+			} else {
+				log.Printf("Firecracker failed, falling back to chroot: %v", err)
+				if vmFallback == "false" {
+					io.WriteString(s, "\r\nError: VM session unavailable\r\n\r\n")
+					s.Exit(1)
+					return
+				}
+			}
+		}
+
+		// --- Chroot mode (default or fallback) ---
 		// Create jail
 		if err := createJail(guest, tokenData, seconds); err != nil {
 			log.Printf("Failed to create jail: %v", err)
