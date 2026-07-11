@@ -291,7 +291,7 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA |
 | `docs/tollgate-rs-deprecation-and-migration.md` | Go payment stack deprecation plan — file inventory, deprecation map, phased migration |
 | `docs/SECURITY_AUDIT.md` | Full security audit report — Window 1 (FreeRADIUS + Go) and Window 2 (defense in depth + privilege reduction) findings with root cause, fix, and verification per item |
-| `docs/FIRECRACKER_SSH_DESIGN.md` | Firecracker microVM-per-SSH architecture — verified prototype with vsock bridge, boot time benchmarks (1.7s cold, 0.285ms vsock RTT), bugs found, and improvement roadmap |
+| `docs/FIRECRACKER_SSH_DESIGN.md` | Firecracker microVM-per-SSH architecture — verified prototype with vsock bridge, NAT networking, PTY shell, boot time benchmarks (2.5s cold, 0.25ms vsock RTT, 85MB/VM), snapshot restore implementation, and production hardening plan |
 | `docs/DOCKER_MIGRATION_ROADMAP.md` | Phased plan to migrate from systemd-managed host binaries to Docker containers — what's easy, what's hard, network/persistence/secret models |
 
 ### Supported transports
@@ -846,7 +846,28 @@ The core concept is validated — Cashu tokens work as RADIUS credentials. Secur
 - ~~No systemd hardening directives~~ — **FIXED** (full matrix applied to every unit)
 - ~~Repo systemd units drifted from prod~~ — **FIXED** (synced, `make deploy-systemd-units` target added)
 
+**Resolved in security audit Window 3** (2025-07-09):
+- ~~SSH `SystemCallFilter` blocked `chroot`, `setgroups`, `setgid`, `setresuid`, `setresgid`~~ — **FIXED** (added `@file-system chroot setgroups setgid setresuid setresgid`)
+- ~~`CapabilityBoundingSet` dropped `CAP_DAC_OVERRIDE`, root couldn't access wallet/session dirs~~ — **FIXED** (`SupplementaryGroups=cashu-wallet tollgate`)
+- ~~`cp -a` required `CAP_CHOWN` for ownership preservation~~ — **FIXED** (changed to `cp -r --preserve=mode`)
+- ~~`RedeemToken()` output parser matched cdk-cli recovery lines as receive result~~ — **FIXED** (skip "Recovered" lines)
+- ~~TLS broken on ssh.nodns.shop, dns.nodns.shop (shadowed by wildcard)~~ — **FIXED** (added `tls { on_demand }`)
+
 See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) for the full audit report.
+
+### Firecracker microVM-per-SSH (July 2025)
+
+The chroot jail is being replaced with **Firecracker microVMs** for hardware-level isolation. Each paying user gets a full Linux VM instead of a shared-kernel chroot. Prototype verified on SHC Dev VPS:
+
+- **vsock bridge**: host SSH to guest shell, 0.25ms RTT
+- **NAT networking**: VM has outbound internet (ping, HTTP)
+- **PTY agent**: proper terminal semantics (window resize, signals)
+- **Boot time**: 2.5s cold (0.12s API + 2.4s kernel/agent)
+- **Memory**: 85MB host overhead per VM
+- **Concurrency**: 10+ VMs on 4-core/16GB host
+- **Snapshot restore**: implementation committed (7 bugs fixed), pending live test for ~10ms target
+
+See [docs/FIRECRACKER_SSH_DESIGN.md](docs/FIRECRACKER_SSH_DESIGN.md) for the full architecture (1095 lines), including tradeoffs analysis for pre-warmed pool (snapshot vs pre-booted vs cold boot), daemon integration options (vps-on-demand patch vs sidecar vs standalone), and tollgate-rs/ContextVM federation path.
 
 ## Related
 
