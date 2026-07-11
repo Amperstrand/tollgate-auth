@@ -763,3 +763,115 @@ working, zero changes needed. For production with Nostr federation:
 lifecycle. For long-term Rust migration: tollgate-rs replaces the
 payment layer, ContextVM handles Nostr-based provisioning, and the
 Firecracker VM layer stays in Go (or moves to Rust via FFI).
+
+## V3 Test Results (July 11 2025)
+
+Re-ran full test suite with fixes for vcmd() PTY escape handling and
+TAP naming (vm_id hash instead of counter).
+
+### Results Summary
+
+| Test | v2 Result | v3 Result | Fix Applied |
+|---|---|---|---|
+| PTY agent | PASS | **PASS** | vcmd strips ANSI escapes |
+| NAT networking | FAIL (parsing) | **PASS** | vcmd reads full output |
+| Module loading | PASS | **PASS** | No change needed |
+| Boot time | 2.52s | **2.66s** | Consistent (vcmd adds 1s sleep) |
+| Concurrent (3) | 3/3 in 2.82s | **3/3 in 2.88s** | Consistent |
+| vsock RTT | 0.248ms | **0.249ms min** | Median skewed by vcmd sleep |
+| Memory/VM | 80MB | **77MB** | Consistent |
+| SSH-to-VM | FAIL | **Fix committed** | vsock retry loop (10 attempts) |
+| VM lifecycle | 3/3 OK | **3/3 OK** | Consistent |
+
+### NAT Networking: Confirmed Working
+
+```
+eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500
+  link/ether 5a:6a:1e:26:84:87
+  inet 172.16.0.2/24 scope global eth0
+
+ping 8.8.8.8: 64 bytes from 8.8.8.8: seq=0 ttl=116 time=24.076 ms
+HTTP example.com: PASS (Example Domain found)
+```
+
+### PTY Agent: Confirmed Working
+
+```
+/dev/ptmx: PTMX_OK
+echo PTY_SHELL_WORKS: PTY_SHELL_WORKS
+```
+
+The agent creates a proper PTY via `creack/pty`. Shell prompts render
+(`/ #`), ANSI escape sequences work, and commands execute correctly.
+
+### SSH-to-VM: Fix Committed
+
+Root cause: the SSH handler used a fixed `time.Sleep(2 * time.Second)`
+before dialing vsock. The daemon returns as soon as the vsock socket
+file exists, but the agent may not have called `accept()` yet. This
+race condition caused intermittent "VM session unavailable" errors.
+
+Fix: replaced the fixed sleep with a retry loop (10 attempts, 500ms
+apart, 5s timeout each). The handler now polls for the vsock
+connection instead of assuming the agent is ready after 2 seconds.
+
+### TAP Naming Fix
+
+Root cause: TAP names used a counter (`fc{N}`) that resets when VMs
+are destroyed. After creating/destroying many VMs, the counter wraps
+back to 1 and collides with stale TAP devices.
+
+Fix: TAP names now use a hash of the VM ID (`fc{vm_id[:8]}`),
+guaranteeing uniqueness across the VM lifecycle.
+
+## Production Hardening Plan
+
+### Phase 1: Core Stability (hackathon-ready)
+
+1. **Alpine ext4 rootfs**: Replace initramfs with the Alpine ext4
+   rootfs (built, not yet tested with Firecracker boot). Provides
+   OpenRC init, package installation, proper networking, and
+   persistence within a session.
+
+2. **vsock retry in SSH handler**: Committed (`2a95902`). Needs live
+   test to confirm the SSH-to-VM flow works end-to-end.
+
+3. **PTY agent**: Committed (`c42a449`). Confirmed working via direct
+   vsock. Needs live SSH test to confirm interactive shell works.
+
+4. **fc-daemon hardening**: Add VM cleanup on crash (signal handler),
+   TAP device cleanup on error, and health-check endpoint that reports
+   KVM availability.
+
+### Phase 2: Production Features
+
+1. **Pre-warmed pool**: Boot N VMs at startup, keep running. On
+   session: vsock connect to pre-booted VM. Replenish pool in
+   background. Reduces boot time from 2.5s to ~0ms.
+
+2. **Alpine rootfs with packages**: Include `openssh`, `curl`, `vim`,
+   `git` in the rootfs for a useful development environment.
+
+3. **Token-to-VM-spec mapping**: 1 sat = 10s + 256MB RAM + 1 vCPU.
+   Higher-value tokens get more resources (512MB, 2 vCPU).
+
+4. **Session timeout enforcement**: VM auto-destroyed after token
+   duration expires. Timer in the SSH handler calls `DestroyVM()`.
+
+5. **Resource limits**: Per-VM cgroup limits (memory.max, cpu.max).
+   Prevent fork bombs and resource exhaustion.
+
+### Phase 3: Federation
+
+1. **vps-on-demand daemon integration**: Add vsock config to daemon's
+   `create_vm_config()`, add agent to rootfs template, return
+   `vsock_path` in API response.
+
+2. **ContextVM support**: Expose VM creation via Nostr (kind 25910).
+   AI agents can create VMs programmatically.
+
+3. **Multi-operator**: Each operator runs their own KVM host. Buyers
+   discover operators via CEP-6 Nostr announcements.
+
+4. **tollgate-rs migration**: Replace Go payment layer with Rust
+   Spilman channels for sustained micropayment streams.
