@@ -1045,3 +1045,51 @@ would work because stdin stays open indefinitely.
 | Crash recovery | PASS |
 | SSH piped single command | PASS |
 | SSH multi-command | PARTIAL (first cmd only) |
+
+## V6: Pre-Warmed Pool Implementation (July 11 2025)
+
+### Snapshot Creation: VERIFIED WORKING
+
+Implemented `fc-daemon-v2.py` with Firecracker snapshot create/restore
+support. The warm-up flow (boot VM via API, wait for agent, pause,
+create snapshot) was verified working:
+
+```
+[fc-daemon] Agent ready after 4 attempts (2.0s)
+[fc-daemon] Snapshot created: state=/tmp/fc-snapshot/snap.bin, mem=/tmp/fc-snapshot/mem.bin
+```
+
+Warm-up time: 3.5 seconds (cold boot + agent wait + pause + snapshot write).
+
+### Snapshot Restore: 7 Bugs Fixed, Untested on Live Hardware
+
+The restore path had 7 distinct bugs, all fixed in commit `2ab1280`:
+
+1. **API boot mode required**: `--config-file` + `--api-sock` together
+   don't work. Must use API-driven boot (PUT /boot-source, etc.).
+2. **Network interface URL**: `PUT /network-interfaces/net0` (not
+   `/network-interfaces`). Firecracker requires iface_id in path.
+3. **HTTP status checking**: `curl -s` returns 0 even on HTTP 400.
+   Fixed with `curl -w "%{http_code}"` and explicit status parsing.
+4. **Agent polling**: Fixed 2s wait was insufficient (agent takes
+   ~22s in API mode). Replaced with 60-retry poll loop (30s max).
+5. **No device config before snapshot load**: Firecracker rejects
+   vsock/network config before `PUT /snapshot/load` with "not allowed
+   after configuring boot-specific resources."
+6. **Stale vsock UDS**: Warm-up VM's socket file persists after kill.
+   Must `os.unlink()` before snapshot load to avoid "Address already
+   in use."
+7. **Missing cid variable**: Removed from vms dict (not available in
+   restore path — snapshot contains the original CID).
+
+### Expected Performance
+
+- Snapshot creation: 3.5s (one-time warm-up)
+- Snapshot restore: ~10ms target (Firecracker MAP_PRIVATE memory mapping)
+- Cold boot fallback: 2.5s (when snapshot not available)
+
+### Status
+
+- `fc-daemon-v2.py`: Committed at `2ab1280`, snapshot creation verified
+- Snapshot restore: All 7 bugs fixed, needs live VPS test to confirm
+- Cold boot fallback: Works perfectly (verified in all test runs)
