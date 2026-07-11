@@ -508,6 +508,18 @@ Measured at **0.285ms average** (min 0.181ms, max 0.803ms). This is faster than 
 
 With proper PATH setup (`export PATH=/bin; busybox --install -s /bin` before mount calls), both devtmpfs and devpts mount successfully inside the Firecracker initramfs. `/dev/ptmx` exists, enabling PTY support.
 
+### U5: Host memory overhead is only 80MB per VM (not 261MB)
+
+Measured host-side delta when creating a 256MB VM: only 80MB. KVM uses lazy/on-demand memory allocation -- guest RAM is backed by host memory only when the guest first touches each page. The initramfs guest (busybox + agent) has a minimal working set, so most of the 256MB is never allocated. Production VMs that actively use RAM (compilation, databases) will see full consumption.
+
+### U6: Boot time breakdown estimated
+
+The 2.52s cold boot breaks down approximately as: kernel boot (~0.4s), initramfs unpack + busybox init (~0.3s), module loading for 7 modules (~0.8s), agent startup + vsock socket (~0.3s), host-side polling (~0.4s), Firecracker process startup (~0.3s). A kernel with networking/vsock built-in would save the ~0.8s module loading time.
+
+### U7: SHC Dev VPS instability
+
+SHC billing reports "CHARGE MISMATCH: charged $0.00, expected $0.90" even after payment confirmation. VMs disappear within 30-60 minutes. Likely cause: daily renewal billing doesn't properly deduct from account credit. Use alternative KVM providers for long-running tests.
+
 ## Improvement Areas
 
 ### I1: Build proper Alpine ext4 rootfs

@@ -2,8 +2,8 @@
 
 A catalog of unresolved questions, untested assumptions, and identified risks. Organized by severity and category.
 
-**Last updated**: 2026-07-09
-**Status**: Security audit Windows 1-3 complete. SSH and RADIUS auth pipelines verified end-to-end with real Cashu tokens. Core concept fully validated on production hardware. Firecracker microVM architecture designed (see [FIRECRACKER_SSH_DESIGN.md](FIRECRACKER_SSH_DESIGN.md)).
+**Last updated**: 2026-07-11
+**Status**: Security audit Windows 1-3 complete. SSH and RADIUS auth pipelines verified end-to-end with real Cashu tokens. Core concept fully validated on production hardware. Firecracker microVM prototype fully verified — vsock bridge, NAT networking, boot time benchmarks all confirmed on SHC Dev VPS (see [FIRECRACKER_SSH_DESIGN.md](FIRECRACKER_SSH_DESIGN.md)).
 
 ---
 
@@ -305,3 +305,44 @@ Unknowns:
 | — | SSH auth pipeline broken under hardened systemd? | **FIXED.** SystemCallFilter missing chroot/setgroups/setgid syscalls; CapabilityBoundingSet dropped CAP_DAC_OVERRIDE; cp -a needed CAP_CHOWN. See Window 3 audit. | 2026-07-09 |
 | — | Daemon-path token redemption always fails as "already spent"? | **FIXED.** RedeemToken() output parser matched cdk-cli recovery-phase lines ("Recovered N ops, K skipped") as the receive result. Now skips "Recovered" lines. | 2026-07-09 |
 | — | TLS broken on ssh.nodns.shop, dns.nodns.shop? | **FIXED.** Added `tls { on_demand }` to Caddy site blocks shadowed by `*.nodns.shop` wildcard. | 2026-07-09 |
+| — | Can Firecracker VMs get networking via vsock? | **VERIFIED.** vsock bridge works end-to-end: host SSH connects to guest agent on AF_VSOCK port 52, shell commands execute and return output. | 2026-07-11 |
+| — | Can Firecracker VMs access the internet (NAT)? | **VERIFIED.** With failover.ko included in initramfs, virtio_net loads, eth0 gets static IP, ping to 8.8.8.8 returns in 21ms, HTTP fetch succeeds. | 2026-07-11 |
+| — | Firecracker boot time for per-SSH microVMs? | **MEASURED.** Cold boot: 2.52s avg (API to vsock ready). 3 concurrent VMs: 2.82s. vsock RTT: 0.248ms. Host memory overhead: 80MB/VM. | 2026-07-11 |
+
+---
+
+## Hypotheses for Open Questions
+
+### H1: Why is host memory overhead only 80MB per VM (not 256MB+5MB)?
+
+KVM uses lazy/on-demand memory allocation. Guest RAM is backed by host
+memory only when the guest first touches each page. Since our initramfs
+guest runs busybox + agent (minimal working set), most of the 256MB
+configured RAM is never allocated. The 80MB overhead is: VMM thread
+stacks (~5MB), EPT/page tables (~10MB for 256MB guest), virtio queues
+(~2MB), and guest kernel metadata (~60MB for kernel structures, module
+allocations, page cache). Production VMs that actually use their RAM
+(e.g., running compilation, databases) will see the full 256MB consumed.
+
+### H2: Why did boot time increase from 1.71s to 2.52s with networking?
+
+Estimated breakdown of the 2.52s cold boot:
+- ~0.3s: Firecracker process startup + VM config parsing
+- ~0.4s: Kernel boot (decompression, ACPI, memory init)
+- ~0.3s: Initramfs unpack + busybox applet installation
+- ~0.8s: Module loading (7 modules: virtio_mmio, failover, net_failover, virtio_net, vsock, 2x transport)
+- ~0.3s: Agent startup + vsock socket creation
+- ~0.4s: Host-side polling for vsock socket availability
+
+A Firecracker-optimized kernel (like Anvil) with networking/vsock built-in
+(=y instead of =m) would eliminate the ~0.8s module loading, bringing cold
+boot to ~1.7s. Snapshot restore would bring it to ~10ms.
+
+### H3: Why do SHC Dev VPS instances disappear after 30-60 minutes?
+
+The SHC billing system reports "CHARGE MISMATCH: charged $0.00, expected
+$0.90" even after the payment confirmation flow completes. This suggests
+the daily renewal billing doesn't properly deduct from account credit.
+The VM is cleaned up when the next daily renewal cycle fails to charge.
+Workaround: use a different KVM provider (Hetzner, AWS .metal) for
+long-running Firecracker tests.
