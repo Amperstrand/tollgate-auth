@@ -474,9 +474,11 @@ all data is gone.
 
 ### B2: SSH-piped commands don't complete
 
-**Root cause**: The agent uses direct stdin/stdout piping (no PTY). When SSH pipes input (e.g., `echo "cmd" | ssh ...`), the stdin EOF propagates through the vsock to the shell, causing it to exit before processing. Interactive SSH sessions (typing commands) work fine.
+**Root cause**: The agent used direct stdin/stdout piping (no PTY). When SSH pipes input, the stdin EOF propagates through the vsock to the shell, causing it to exit before processing.
 
-**Fix**: Restore PTY support in the agent (confirmed `/dev/ptmx exists: YES` with proper devpts mount).
+**Fix**: Restored PTY support using `creack/pty`. `/dev/ptmx` confirmed available in initramfs with proper devpts mount. The agent now creates a PTY for each session and bridges bidirectionally between vsock and PTY master.
+
+**Status**: **FIXED** (code restored, build verified, pending live VM test).
 
 ### B3: fc-daemon TAP name exceeds IFNAMSIZ
 

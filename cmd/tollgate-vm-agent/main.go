@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 )
 
@@ -66,16 +68,28 @@ func handleSession(conn *os.File) {
 
 	cmd := exec.Command(shell)
 	cmd.Env = env
-	cmd.Stdin = conn
-	cmd.Stdout = conn
-	cmd.Stderr = conn
 
-	if err := cmd.Start(); err != nil {
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
 		fmt.Fprintf(conn, "\r\ntollgate-vm-agent: shell start failed: %v\r\n", err)
 		return
 	}
+	defer ptmx.Close()
 
 	log.Printf("shell PID=%d (%s)", cmd.Process.Pid, shell)
+
+	done := make(chan struct{})
+	go func() {
+		io.Copy(ptmx, conn)
+		ptmx.Close()
+		cmd.Process.Signal(syscall.SIGTERM)
+		close(done)
+	}()
+
+	io.Copy(conn, ptmx)
+	ptmx.Close()
+	cmd.Process.Signal(syscall.SIGTERM)
+	<-done
 
 	cmd.Wait()
 	log.Printf("shell PID=%d exited", cmd.Process.Pid)
