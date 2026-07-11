@@ -1135,3 +1135,55 @@ The prototype is **demo-ready for interactive SSH sessions**:
 The piped command limitation (2s grace period) only affects automated
 testing, not interactive use. An interactive SSH session keeps stdin
 open indefinitely, so the grace period never triggers.
+
+## V8: Final Comprehensive Test (July 11 2025)
+
+**14/14 tests PASSED.** Every capability verified in a single test run.
+
+### Results
+
+| # | Test | Result | Evidence |
+|---|---|---|---|
+| 1 | PTY agent | PASS | `/dev/ptmx=OK`, `SHELL_WORKS` |
+| 2 | NAT ping | PASS | ping 8.8.8.8, packets received |
+| 3 | NAT HTTP | PASS | wget example.com, "Example Domain" |
+| 4 | Boot time | PASS | 2.81s avg (min 2.75s, max 2.85s) |
+| 5 | Concurrent VMs | PASS | 3/3 in 3.01s, all returned echo |
+| 6 | vsock RTT | PASS | 0.41ms min, 0.97ms median |
+| 7 | Memory overhead | PASS | 72MB per VM |
+| 8 | VM lifecycle | PASS | 10/10 cycles |
+| 9 | SSH single command | PASS | `SSH_SINGLE_OK` returned, MOTD shown |
+| 10 | SSH multi-command | PASS | All 3 lines (LINE1, LINE2, LINE3) |
+| 11 | Interactive SSH | PASS | `INTERACTIVE_OK` in tmux pane |
+| 12 | Interactive whoami | PASS | `root` returned |
+| 13 | Interactive ping | PASS | `64 bytes` from 8.8.8.8 |
+| 14 | Crash recovery | PASS | Daemon healthy after kill, destroy OK |
+
+### Interactive SSH Evidence (tmux pane capture)
+
+```
+  +======================================+
+  |        CASHU TOLLGATE (microVM)      |
+  +======================================+
+
+/ # echo INTERACTIVE_OK
+INTERACTIVE_OK
+/ #
+```
+
+The user sees the MOTD banner, a shell prompt (`/ #`), can type
+commands interactively, and commands execute with output returned.
+This is the full user-facing experience.
+
+### Final Benchmark Summary
+
+| Metric | Value |
+|---|---|
+| Cold boot | 2.81s (0.12s POST + 2.69s kernel/agent) |
+| vsock RTT (min) | 0.41ms |
+| vsock RTT (median) | 0.97ms |
+| Memory per VM | 72MB |
+| Concurrent VMs | 3/3 in 3.01s |
+| Lifecycle | 10/10 cycles |
+| Interactive SSH | PASS (commands + ping + whoami) |
+| Crash recovery | PASS |
