@@ -555,4 +555,211 @@ Design needed: how many sats maps to how much RAM/CPU/disk/time?
 
 ### I6: Integration with vps-on-demand daemon
 
-The mini fc-daemon (`/tmp/fc-daemon.py`) is a prototype. Production should use the full vps-on-demand daemon which handles: payment verification, Nostr-based VM requests, proper rootfs management, port forwarding, TTL-based reaping, and health monitoring.
+The mini fc-daemon (`scripts/firecracker/fc-daemon.py`) is a prototype. Production should use the full vps-on-demand daemon which handles: payment verification, Nostr-based VM requests, proper rootfs management, port forwarding, TTL-based reaping, and health monitoring.
+
+## Pre-Warmed Pool Tradeoffs
+
+Three approaches to VM provisioning speed, with measured data from our
+prototype (2.52s cold boot, 0.248ms vsock RTT, 80MB host overhead/VM):
+
+### Approach A: Cold Boot (current)
+
+Every session creates a fresh Firecracker VM via the daemon API.
+
+| Metric | Value |
+|---|---|
+| Boot time | 2.52s |
+| Memory per idle VM | 0 (VMs don't persist) |
+| Complexity | Lowest |
+| Freshness | Every session gets a clean VM |
+
+**Best for**: Hackathon demo, low-traffic deployments, development.
+
+### Approach B: Pre-Booted Pool
+
+Boot N VMs at startup. Keep them running. On session: vsock connect to
+a pre-booted VM. After session: destroy VM, boot a replacement.
+
+| Metric | Value |
+|---|---|
+| Boot time (warm) | ~0ms (vsock connect only) |
+| Boot time (replenish) | 2.52s (background, non-blocking) |
+| Memory per idle VM | ~80MB (host overhead for paused VM) |
+| Complexity | Medium (pool manager, replacement logic) |
+| Freshness | Each VM used once, then replaced |
+
+**How it works**: A background goroutine maintains a pool of N
+pre-booted VMs. When a session arrives, it takes a VM from the pool
+and vsock-connects. The pool manager immediately boots a replacement.
+The pool size N should be tuned to expected concurrent sessions.
+
+**Tradeoffs vs snapshot**: Simpler (no snapshot files, no memory
+mapping), but each idle VM consumes ~80MB of host memory. At 16GB
+host RAM, a pool of 50 VMs uses ~4GB — feasible.
+
+### Approach C: Snapshot Restore
+
+Boot 1 VM, wait for agent to listen, pause, create snapshot. On
+session: load snapshot in a new Firecracker process + resume +
+vsock connect. Memory is shared via copy-on-write.
+
+| Metric | Value |
+|---|---|
+| Boot time (restore) | ~10ms (Firecracker spec) |
+| Memory per restored VM | ~5MB VMM + shared base (copy-on-write) |
+| Complexity | Highest (snapshot files, CID management, network reconfig) |
+| Freshness | All VMs start from identical state (VMGenID changes on restore) |
+
+**How it works** (from Firecracker docs):
+1. Boot a VM with kernel + rootfs + vsock + network
+2. Wait for tollgate-vm-agent to listen on vsock port 52
+3. `PATCH /vm {"state": "Paused"}`
+4. `PUT /snapshot/create {"snapshot_type": "Full", ...}` — saves memory + state
+5. On demand: start new Firecracker process, `PUT /snapshot/load` + `PATCH /vm {"state": "Resumed"}`
+6. Vsock listen socket survives restore — agent is immediately connectable
+7. Network needs reconfiguration (TAP device per restore, fresh IP)
+
+**Key findings from Firecracker snapshot docs**:
+- Memory is loaded on-demand via `MAP_PRIVATE` (copy-on-write). Pages
+  are faulted in only when the guest touches them. Restore is near-instant.
+- Multiple restored VMs share one base memory file. Each VM only writes
+  dirty pages to anonymous memory. This means 50 VMs from one snapshot
+  share the same base memory file (~256MB) plus ~5MB each for VMM + dirty
+  pages. Total: ~256MB + 50 * 5MB = ~506MB for 50 VMs.
+- vsock connections are RESET on restore, but listen sockets survive.
+  Our agent's listening socket on port 52 remains active — new
+  connections work immediately after resume.
+- VMGenID changes on restore. Linux 5.18+ re-seeds the kernel PRNG
+  automatically. User-space randomness (application-level) is NOT
+  re-seeded — applications must handle this.
+- Network connectivity is not guaranteed after restore. Each restored
+  VM needs its own TAP device and IP address.
+
+**Tradeoffs vs pre-booted**: Faster boot (~10ms vs ~0ms), lower memory
+(many VMs share base), but higher complexity (snapshot file management,
+network reconfiguration per restore, VMGenID security considerations).
+
+### Recommendation
+
+For the hackathon: **Approach A (cold boot)** — 2.52s is fast enough
+and zero complexity. For production: **Approach B (pre-booted pool)** —
+simple to implement, ~0ms warm start, predictable memory usage. For
+high-density multi-tenant: **Approach C (snapshot restore)** — best
+memory efficiency, but needs careful implementation.
+
+## Daemon Integration Tradeoffs
+
+Three approaches to integrate tollgate-auth-ssh with the Firecracker
+daemon, considering vps-on-demand, tollgate-rs, and ContextVM:
+
+### Option A: Patch vps-on-demand daemon
+
+Add vsock config to `create_vm_config()`, add tollgate-vm-agent to
+the rootfs template, return `vsock_path` in POST /vms response.
+
+| Aspect | Detail |
+|---|---|
+| Single daemon | Yes — one process manages all VM lifecycle |
+| Payment | vps-on-demand handles NUT-24 payment verification |
+| Nostr | vps-on-demand handles ContextVM (kind 25910) requests |
+| Rootfs | Uses vps-on-demand's Alpine rootfs builder |
+| Changes needed | ~20 lines: add vsock to VM config JSON, add agent to rootfs |
+| Risk | Tightly couples tollgate-auth-ssh to vps-on-demand internals |
+
+**How it works**: tollgate-auth-ssh calls `POST http://127.0.0.1:8081/vms`
+with `{"cpus":1, "mem_mb":256}`. The daemon creates the rootfs,
+configures vsock + networking, starts Firecracker, and returns
+`{"id":"...", "vsock_path":"..."}`. tollgate-auth-ssh dials the
+vsock path and bridges the SSH session.
+
+### Option B: Sidecar mini-daemon (current)
+
+Keep the mini fc-daemon (`scripts/firecracker/fc-daemon.py`) as a
+separate service. vps-on-demand daemon continues handling Nostr/payment
+independently.
+
+| Aspect | Detail |
+|---|---|
+| Two daemons | Yes — mini fc-daemon for tollgate SSH, vps-on-demand for Nostr |
+| Payment | tollgate-auth-ssh handles Cashu verification itself |
+| Nostr | vps-on-demand handles ContextVM independently |
+| Rootfs | Mini daemon uses our Alpine rootfs (with agent) |
+| Changes needed | None — already working |
+| Risk | Duplicate VM lifecycle management, potential resource conflicts |
+
+**How it works**: tollgate-auth-ssh calls the mini fc-daemon at
+`http://127.0.0.1:8081/vms`. The mini daemon creates a VM with vsock
++ TAP networking. The vps-on-demand daemon runs on a different port
+for Nostr-based VM requests. Both can coexist.
+
+### Option C: Standalone (no daemon integration)
+
+tollgate-auth-ssh manages Firecracker directly, without any daemon.
+
+| Aspect | Detail |
+|---|---|
+| No daemon | tollgate-auth-ssh calls Firecracker API directly |
+| Payment | tollgate-auth-ssh handles Cashu verification |
+| Nostr | Not supported (no ContextVM integration) |
+| Rootfs | tollgate-auth-ssh manages rootfs files |
+| Changes needed | Port fc-daemon logic into Go (internal/firecracker) |
+| Risk | More code in tollgate-auth-ssh, but no external dependencies |
+
+### Role of tollgate-rs
+
+tollgate-rs is a Rust implementation of the TollGate protocol —
+device-to-device payment for metered resource delivery using Cashu
+ecash and Spilman payment channels. It defines:
+
+- **Bootstrap tokens**: one-time Cashu tokens for initial access
+  (what tollgate-auth currently implements)
+- **Spilman channels**: sustained micropayment streams for ongoing
+  access (future — not yet implemented)
+- **Access control**: None / Active / Suspended states based on
+  payment status
+- **Session daemon API**: `POST /tollgate/v1/exchange` for
+  protocol messages, session management, metering
+
+**Integration path**: tollgate-rs's session daemon could replace
+tollgate-auth's `internal/sessiond` client. When a user pays with
+a Cashu token, tollgate-rs would:
+1. Verify the bootstrap token
+2. Open an access session (Active state)
+3. Meter usage (deduct from balance)
+4. Suspend when balance exhausted
+5. Report usage via `GET /usage`
+
+This is a **future migration path** from Go (tollgate-auth) to Rust
+(tollgate-rs). The Firecracker VM layer is independent of which
+payment backend is used — the vsock bridge works regardless.
+
+### Role of ContextVM
+
+ContextVM is the Nostr-based MCP server in vps-on-demand. It exposes
+tools (`create_vps`, `connect_vpn`, `list_vms`, `destroy_vm`,
+`faucet`, `health`) over kind 25910 events with NIP-44 v2 encryption.
+
+**Integration path**: ContextVM could be the control plane for
+tollgate-auth-ssh's Firecracker VMs. Instead of calling the daemon
+HTTP API directly, tollgate-auth-ssh could subscribe to ContextVM
+events. This would enable:
+
+- AI agents (Claude, Cursor) to create VMs via Nostr
+- Encrypted VM credentials delivery (NIP-44 v2)
+- Federation: multiple operators, discoverable via CEP-6 announcements
+- Programmatic VM creation from any MCP-compatible client
+
+**Tradeoff**: ContextVM adds latency (Nostr relay round-trips) and
+complexity (NIP-44 encryption, event signing). For direct SSH-to-VM
+sessions, the HTTP API is faster and simpler. ContextVM is better
+suited for async VM provisioning (e.g., "create me a VM for 1 hour"
+from an AI agent).
+
+### Recommendation
+
+For the hackathon: **Option B (sidecar mini-daemon)** — already
+working, zero changes needed. For production with Nostr federation:
+**Option A (patch vps-on-demand)** — single daemon, unified VM
+lifecycle. For long-term Rust migration: tollgate-rs replaces the
+payment layer, ContextVM handles Nostr-based provisioning, and the
+Firecracker VM layer stays in Go (or moves to Rust via FFI).
