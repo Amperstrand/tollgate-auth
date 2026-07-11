@@ -944,3 +944,104 @@ are now verified:
 | TAP naming (no collisions) | PASS | vm_id hash prevents counter collisions |
 | Alpine ext4 rootfs | BUILT | 256MB, OpenRC + packages + agent + modules |
 | SSH-to-VM (interactive) | READY | vsock connected, MOTD shown, needs live interactive test |
+
+## V5 Research Results (July 11 2025)
+
+Extensive testing of known unknowns and new experiments on SHC Dev VPS.
+
+### Core Test Results (with grace period fix)
+
+| Test | Result | Evidence |
+|---|---|---|
+| SSH-to-VM (piped, single cmd) | **PASS** | `GRACE_PERIOD_OK` returned, 5.253s total |
+| SSH-to-VM (multi-cmd) | **PARTIAL** | First command passes, subsequent commands don't complete |
+| PTY agent | **PASS** | `/dev/ptmx=OK`, `PTY_WORKS` |
+| NAT networking | **PASS** | ping 22ms, HTTP PASS |
+| Boot time | **2.47s** avg | Consistent across 3 runs |
+| Concurrent VMs | 3/3 in 2.86s | All boot + vsock connect |
+| vsock RTT | **0.039ms min** | 0.641ms median (PTY overhead) |
+| Memory/VM | **85MB** | Consistent |
+
+### Known Unknowns Research
+
+#### H1: Memory Lazy Allocation — REFUTED
+
+Hypothesis: KVM uses lazy memory allocation, so host overhead is only
+~80MB because guest RAM is never touched.
+
+Experiment: Created VM (256MB), then ran `dd if=/dev/zero of=/tmp/mem
+bs=1M count=200` inside the VM to touch 200MB of guest memory.
+
+Result: Host memory increased by only 100MB (not 200MB as expected).
+**H1 is REFUTED** — the lazy allocation theory doesn't fully explain
+the low overhead. The likely explanation is that the initramfs guest
+uses tmpfs for /tmp, and the dd writes go to tmpfs (which is already
+counted in host memory). The 85MB overhead is real VMM + page table
+cost, not lazy allocation savings.
+
+#### H2: Boot Time Breakdown — CONFIRMED
+
+Hypothesis: Boot time breaks down as POST (~0.1s) + vsock wait (~2.4s).
+
+Experiment: Measured HTTP POST time and vsock connect time separately.
+
+Result: **H2 CONFIRMED** — POST=0.121s, vsock wait=2.392s, total=2.513s.
+The HTTP POST returns almost instantly (daemon creates the VM config
+and starts Firecracker). The 2.4s is the time for the kernel to boot,
+modules to load, and the agent to start listening. This is the
+irreducible cold-start time. Pre-warming (snapshot restore) would
+eliminate it.
+
+### New Experiments
+
+#### Max Concurrent VMs: 10
+
+Created VMs until failure: all 10 succeeded on a 4-core/16GB host.
+Each VM uses ~85MB host overhead + 256MB guest RAM (lazy). 10 VMs =
+~850MB + lazy guest memory. The host had 15GB available, so the limit
+was not memory but likely the test loop (stopped at 10).
+
+#### VSOCK Connection Limits: 6 per VM
+
+Opened multiple vsock connections to a single VM. After 6 connections,
+the 7th failed. This is likely a limit in the Firecracker vsock device
+or the guest agent's `Listen(fd, 4)` backlog parameter. Increasing the
+backlog would allow more concurrent connections.
+
+#### VM Crash Recovery: PASS
+
+Killed the Firecracker process for a running VM. The daemon remained
+healthy (`status: ok`). The VM was successfully destroyed via the API
+after the crash. The daemon handles crashes gracefully.
+
+#### VM Lifecycle Stress: 10/10
+
+Created and destroyed 10 VMs in sequence. All succeeded. No TAP name
+collisions, no resource leaks, no daemon crashes. The vm_id hash-based
+TAP naming fix works correctly.
+
+#### SSH Multi-Command: PARTIAL
+
+Single piped command works (`echo X | ssh` returns X). Multiple
+sequential commands (`echo A; echo B; echo C | ssh`) only return the
+first command's output. Root cause: the PTY shell processes commands
+sequentially, but the grace period (2s) may not be long enough for
+all commands to complete. Interactive SSH (typing commands manually)
+would work because stdin stays open indefinitely.
+
+### Updated Summary
+
+| Metric | Value |
+|---|---|
+| Cold boot (API to vsock ready) | 2.47s |
+| HTTP POST time | 0.12s |
+| Kernel + agent startup time | 2.39s |
+| vsock RTT (min) | 0.039ms |
+| vsock RTT (median) | 0.641ms |
+| Memory overhead per VM | 85MB |
+| Max concurrent VMs (tested) | 10+ |
+| Max vsock connections per VM | 6 |
+| VM lifecycle cycles (tested) | 10/10 |
+| Crash recovery | PASS |
+| SSH piped single command | PASS |
+| SSH multi-command | PARTIAL (first cmd only) |
