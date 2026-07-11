@@ -189,6 +189,7 @@ func handleFirecrackerSession(s ssh.Session, decision AuthDecision, seconds int,
 		select {
 		case <-ctx.Done():
 		default:
+			time.Sleep(2 * time.Second)
 			vsockConn.Close()
 		}
 	}()
