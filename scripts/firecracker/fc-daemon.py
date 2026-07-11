@@ -67,7 +67,7 @@ class Handler(BaseHTTPRequestHandler):
         cid = 3 + len(vms)
         ip_suffix = 2 + len(vms)
         vm_ip = f"172.16.0.{ip_suffix}"
-        tap_name = f"fc{len(vms)+1}"
+        tap_name = f"fc{vm_id[:8]}"
         vsock_path = str(vm_dir / "v.sock")
 
         # Create TAP device and attach to bridge

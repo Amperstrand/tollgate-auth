@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -150,13 +151,19 @@ func handleFirecrackerSession(s ssh.Session, decision AuthDecision, seconds int,
 	log.Printf("VM created: id=%s port=%d for %s", vmResp.ID, vmResp.PublicPort, guest)
 
 	vsockPath := fcVsockDir + "/" + vmResp.ID + "/v.sock"
-	time.Sleep(2 * time.Second)
 
-	dialer := &vsock.Dialer{}
-	vsockConn, err := dialer.Dial(vsockPath, vsock.DefaultVsockPort)
+	dialer := &vsock.Dialer{Timeout: 5 * time.Second}
+	var vsockConn net.Conn
+	for attempt := 0; attempt < 10; attempt++ {
+		vsockConn, err = dialer.Dial(vsockPath, vsock.DefaultVsockPort)
+		if err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	if err != nil {
 		fcClient.DestroyVM(vmResp.ID)
-		return fmt.Errorf("vsock dial: %w", err)
+		return fmt.Errorf("vsock dial after 10 retries: %w", err)
 	}
 
 	log.Printf("vsock connected to VM %s for %s", vmResp.ID, guest)
