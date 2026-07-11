@@ -1,18 +1,30 @@
 # Firecracker microVM per SSH Session — Architecture Design
 
-**Status:** Prototype verified (vsock bridge tested end-to-end)
+**Status:** Prototype fully verified (vsock + NAT + networking + benchmarks)
 **Date:** July 2025
 **Depends on:** [vps-on-demand](https://github.com/Amperstrand/vps-on-demand) Firecracker infrastructure
 
-## Verification (July 10 2025)
+## Verification (July 10-11 2025)
 
 Tested on SHC Dev VPS Professional (4C/16GB, nested KVM, Debian 13):
 
-- Firecracker v1.16.0 boots a microVM with vsock device in ~1 second
+### Fully Verified
+- Firecracker v1.16.0 boots a microVM with vsock + networking in ~2.5 seconds
 - `tollgate-vm-agent` (1.9MB Go binary) listens on AF_VSOCK port 52
 - Host-side vsock handshake (CONNECT 52 / OK) succeeds
-- Interactive shell session works: host sends commands, guest busybox executes and returns output
-- Kernel modules required in initramfs: `virtio_mmio`, `vsock`, `vmw_vsock_virtio_transport_common`, `vmw_vsock_virtio_transport`
+- Shell commands execute inside the VM and output returns to host
+- **NAT networking works**: VM gets eth0 with static IP, can ping external IPs (21ms to 8.8.8.8), HTTP fetch succeeds
+- Kernel modules in initramfs (dependency order): `virtio_mmio`, `failover`, `net_failover`, `virtio_net`, `vsock`, `vmw_vsock_virtio_transport_common`, `vmw_vsock_virtio_transport`
+
+### Benchmark Results
+
+| Metric | Result | Notes |
+|---|---|---|
+| Cold boot (API to vsock ready) | 2.52s avg | Includes kernel boot + module loading + agent start |
+| 3 concurrent VMs (parallel) | 2.82s total | All 3 succeed on 4-core host |
+| vsock round-trip latency | 0.248ms avg | Sub-millisecond, imperceptible to users |
+| Host memory overhead per VM | 80MB | VMM + page tables + virtio structures |
+| VM lifecycle (create/use/destroy) | 3 cycles OK | Clean creation and destruction confirmed |
 
 ## Overview
 
@@ -454,11 +466,11 @@ all data is gone.
 
 ### B1: virtio_net fails to load — missing failover module dependency
 
-**Root cause**: Debian 13 cloud kernel has `CONFIG_VIRTIO_NET=m`, `CONFIG_NET_FAILOVER=m`, `CONFIG_FAILOVER=m` (all modules). The dependency chain is `virtio_net → net_failover → failover`. If `failover.ko` is not loaded first, `net_failover` fails with `Unknown symbol failover_register`, which cascades to `virtio_net` failing with `Unknown symbol net_failover_create`.
+**Root cause**: Debian 13 cloud kernel has `CONFIG_VIRTIO_NET=m`, `CONFIG_NET_FAILOVER=m`, `CONFIG_FAILOVER=m` (all modules). The dependency chain is `virtio_net -> net_failover -> failover`. If `failover.ko` is not loaded first, `net_failover` fails with `Unknown symbol failover_register`, which cascades to `virtio_net` failing with `Unknown symbol net_failover_create`.
 
-**Fix**: Include all three modules in the initramfs and load in order: `failover → net_failover → virtio_net`.
+**Fix**: Include all three modules in the initramfs and load in order: `failover -> net_failover -> virtio_net`.
 
-**Status**: Fix written (`/tmp/rebuild-v3.sh`), root cause confirmed from serial log. Not yet tested on live VM (VPS lost).
+**Status**: **RESOLVED** (July 11 2025). Verified on live VM: `virtio_net virtio0: Assigned random MAC address`, eth0 UP with 172.16.0.2/24, ping to 8.8.8.8 returns in 21ms, HTTP fetch from external IPs succeeds.
 
 ### B2: SSH-piped commands don't complete
 
