@@ -38,6 +38,7 @@ type VMSpec struct {
 	DiskMB     int    `json:"disk_mb"`
 	SSHKey     string `json:"ssh_key,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	Rootfs     string `json:"rootfs,omitempty"`
 }
 
 // VMResponse is the daemon's response to POST /vms.

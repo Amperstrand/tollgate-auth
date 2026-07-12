@@ -859,7 +859,26 @@ See [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) for the full audit report.
 
 The chroot jail is being replaced with **Firecracker microVMs** for hardware-level isolation. Each paying user gets a full Linux VM instead of a shared-kernel chroot. Prototype verified on SHC Dev VPS:
 
+- **Multi-rootfs**: Alpine 3.21 (apk), Ubuntu 24.04 LTS (apt), or busybox initramfs
 - **vsock bridge**: host SSH to guest shell, 0.25ms RTT
+- **NAT networking**: VM has outbound internet (ping, HTTP)
+- **PTY agent**: proper terminal semantics (window resize, signals)
+- **Boot time**: 2.5s cold (0.12s API + 2.4s kernel/agent)
+- **Memory**: 72-85MB host overhead per VM (256MB Alpine, 512MB recommended for Ubuntu)
+- **Concurrency**: 10+ VMs on 4-core/16GB host
+- **Interactive SSH**: PASS (tmux test — echo, whoami, ping all work interactively)
+- **Crash recovery**: daemon survives VM process kill
+- **14/14 tests PASS** in comprehensive suite
+
+Configuration via environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TOLLGATE_VM_MODE` | `chroot` | `chroot` (current) or `firecracker` (microVM) |
+| `TOLLGATE_VM_ROOTFS` | `initramfs` | `initramfs`, `alpine`, or `ubuntu` |
+| `TOLLGATE_VM_FALLBACK` | `true` | Fall back to chroot if VM creation fails |
+| `TOLLGATE_FC_DAEMON` | `http://127.0.0.1:8081` | Firecracker daemon HTTP URL |
+| `TOLLGATE_FC_VSOCK_DIR` | `/var/lib/vps-on-demand/vms` | VM vsock socket directory |
 - **NAT networking**: VM has outbound internet (ping, HTTP)
 - **PTY agent**: proper terminal semantics (window resize, signals)
 - **Boot time**: 2.5s cold (0.12s API + 2.4s kernel/agent)
