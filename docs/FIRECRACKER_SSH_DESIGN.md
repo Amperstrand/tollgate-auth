@@ -1207,3 +1207,48 @@ switch_root.
 
 Config: TOLLGATE_VM_MODE=firecracker, TOLLGATE_VM_ROOTFS=alpine.
 Ubuntu recommended at 512MB RAM (systemd baseline), Alpine at 256MB.
+
+## ai-legion Load Test (July 12 2025)
+
+Tested on dedicated hardware: 20 cores, 32GB RAM, 937GB NVMe,
+Ubuntu 24.04.4 LTS, kernel 6.17.0-35-generic, Firecracker v1.16.0.
+
+Key advantage: Ubuntu 6.17 kernel has virtio_blk, virtio_net,
+failover, and net_failover ALL built-in (=y). No module loading
+needed for block/network. Only vsock modules need loading.
+
+### Results
+
+| Test | Result | Notes |
+|---|---|---|
+| Cold boot (5 runs) | **1.49s avg** (min 1.46s) | 40% faster than SHC (2.5s) — no module loading |
+| Max concurrent VMs | **20/20** | All booted, ~85MB host overhead each |
+| vsock RTT | **0.009ms min, 0.212ms P50** | Sub-millisecond on bare metal |
+| Memory scaling | **85MB/VM** (linear) | 1 VM: 85MB, 15 VMs: 85MB each |
+| Lifecycle stress | **50/50 cycles** | Perfect create/destroy reliability |
+| Parallel boot | **10/10 in 2.74s (0.27s/VM)** | Near-linear scaling on 20 cores |
+| Stability | **60s, 12/12 pings** | Zero degradation over time |
+
+### Memory Scaling Detail
+
+| VMs | Host Memory | Per-VM |
+|---|---|---|
+| 1 | 8601MB | 85MB overhead |
+| 5 | 8914MB | 85MB each |
+| 10 | 9404MB | 85MB each |
+| 15 | 9917MB | 85MB each |
+| 20 | 10355MB | 85MB each |
+
+Theoretical capacity on 32GB host: ~250 concurrent VMs (limited by
+256MB guest RAM each, not host overhead). At 85MB overhead per VM,
+the host can run far more VMs than the guest RAM allocation suggests.
+
+### Performance Comparison
+
+| Metric | SHC Dev VPS (4c/16GB) | ai-legion (20c/32GB) | Improvement |
+|---|---|---|---|
+| Cold boot | 2.5s | 1.49s | 40% faster |
+| vsock RTT min | 0.039ms | 0.009ms | 4.3x faster |
+| Max concurrent | 10+ (tested) | 20/20 (tested) | 2x verified |
+| Parallel 10 boot | 2.86s | 2.74s | Similar |
+| Module loading | 7 modules | 0 (all builtin) | Eliminated |
