@@ -53,6 +53,8 @@ var (
 	vmFallback     = config.GetEnv("TOLLGATE_VM_FALLBACK", "true")
 	fcDaemonURL    = config.GetEnv("TOLLGATE_FC_DAEMON", "http://127.0.0.1:8081")
 	fcVsockDir     = config.GetEnv("TOLLGATE_FC_VSOCK_DIR", "/var/lib/vps-on-demand/vms")
+	fcRootfs       = config.GetEnv("TOLLGATE_VM_ROOTFS", "initramfs")
+	fcMemMB        = 256
 )
 
 // --- Jail Management ---
@@ -140,9 +142,10 @@ func handleFirecrackerSession(s ssh.Session, decision AuthDecision, seconds int,
 
 	vmResp, err := fcClient.CreateVM(firecracker.VMSpec{
 		CPUs:       1,
-		MemMB:      256,
+		MemMB:      fcMemMB,
 		DiskMB:     512,
 		TTLSeconds: seconds + 60,
+		Rootfs:     fcRootfs,
 	})
 	if err != nil {
 		return fmt.Errorf("create VM: %w", err)
