@@ -1187,3 +1187,23 @@ This is the full user-facing experience.
 | Lifecycle | 10/10 cycles |
 | Interactive SSH | PASS (commands + ping + whoami) |
 | Crash recovery | PASS |
+
+## E2E with Real Cashu Tokens (July 12 2025)
+
+FULL PIPELINE VERIFIED: Real testnut Cashu token to mint verify to
+cdk-cli redeem to Firecracker VM to vsock bridge to Alpine shell.
+
+Evidence (SSH log):
+  Session request, user=230 chars
+  cdk-cli receive: Received: 7
+  Accept: guest=g-002cead8 duration=80s amount=8 mint=testnut
+  VM created: id=daf5358061a1 (alpine)
+  vsock connected to VM daf5358061a1
+  VM destroyed
+
+Multi-rootfs verified: Alpine 3.21.3 (apk), Ubuntu 24.04 LTS (apt),
+initramfs (busybox). All boot via initramfs with virtio_blk +
+switch_root.
+
+Config: TOLLGATE_VM_MODE=firecracker, TOLLGATE_VM_ROOTFS=alpine.
+Ubuntu recommended at 512MB RAM (systemd baseline), Alpine at 256MB.
