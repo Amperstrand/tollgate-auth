@@ -291,7 +291,8 @@ See [docs/radius-testing.md](docs/radius-testing.md) for practical config exampl
 | `docs/tollgate-rs-integration.md` | tollgate-auth + tollgate-rs integration design — shared session API, top-up, CoA |
 | `docs/tollgate-rs-deprecation-and-migration.md` | Go payment stack deprecation plan — file inventory, deprecation map, phased migration |
 | `docs/SECURITY_AUDIT.md` | Full security audit report — Window 1 (FreeRADIUS + Go) and Window 2 (defense in depth + privilege reduction) findings with root cause, fix, and verification per item |
-| `docs/FIRECRACKER_SSH_DESIGN.md` | Firecracker microVM-per-SSH architecture — verified prototype with vsock bridge, NAT networking, PTY shell, boot time benchmarks (2.5s cold, 0.25ms vsock RTT, 85MB/VM), snapshot restore implementation, and production hardening plan |
+| `docs/FIRECRACKER_SSH_DESIGN.md` | Firecracker microVM-per-SSH architecture — verified prototype with vsock bridge, NAT networking, PTY shell, boot time benchmarks (1.49s cold on ai-legion, 0.009ms vsock RTT), snapshot restore implementation, multi-rootfs (Alpine + Ubuntu + initramfs), and production hardening plan |
+| `docs/SYSTEM_ARCHITECTURE.md` | Full system architecture — tollgate-ssh + vps-on-demand + tollgate-rs, shared Firecracker daemon, tiered pricing model, 4-phase roadmap (shared infra → production → federation → consolidation) |
 | `docs/DOCKER_MIGRATION_ROADMAP.md` | Phased plan to migrate from systemd-managed host binaries to Docker containers — what's easy, what's hard, network/persistence/secret models |
 
 ### Supported transports
