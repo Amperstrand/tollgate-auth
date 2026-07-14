@@ -1345,3 +1345,47 @@ microVMs: 146+ concurrent users per dollar/day, vs 10 for the Dev VPS
 and 4 for ai-legion. The 1-vCPU constraint slows cold boot (2.55s vs
 1.49s) but does not limit concurrency — memory is the bottleneck, not
 CPU.
+
+## NixOS Host Experiments (July 14 2025)
+
+Tested three approaches to running Firecracker on NixOS hosts via SHC.
+
+### Approach 1: nixos-cloud template (BEST)
+
+Ordered VPS 1595 with SHC nixos-cloud image. SSH as root works when
+SSH key is specified during ordering. NixOS 26.05 (unstable), kernel
+6.12.62, KVM available.
+
+Firecracker installation methods tested:
+- nix-shell -p firecracker: FAILED (10+ min nixpkgs evaluation, 1 vCPU
+  starvation)
+- nix profile install nixpkgs#firecracker: WORKS (2 min, v1.15.1)
+- nixos-rebuild switch with firecracker in systemPackages: WORKS
+  (proper NixOS way)
+
+VM boot verified: NixOS kernel boots in Firecracker with KVM.
+
+### Approach 2: nixos-infect (WORKS with fixes)
+
+Converts Debian to NixOS in-place. Three fixes needed:
+1. NO_SWAP=true (swapon fails on SHC filesystem)
+2. PROVIDER=hetznercloud (generates networking config)
+3. boot.kernelPackages = pkgs.linuxPackages_latest (24.05 ships 6.6.68)
+
+Result: NixOS 24.05 with networking, Firecracker v1.7.0, kernel 6.12.7.
+
+### Approach 3: firecracker-cloud template (DOES NOT WORK)
+
+This is a Firecracker GUEST rootfs, not a standalone host OS. Lacks
+Proxmox disk drivers and standalone networking. Stuck in pending,
+never bootstrapped.
+
+### Critical: SHC Node Placement Affects KVM
+
+| Node | CPU | VMX | /dev/kvm |
+|---|---|---|---|
+| VPS 1595 | Intel Xeon Skylake | Yes | Works |
+| VPS 1593 | QEMU Virtual CPU 2.5+ | No | Missing |
+
+Not all SHC nodes expose nested virtualization. Verify /dev/kvm after
+provisioning. Request migration if missing.
