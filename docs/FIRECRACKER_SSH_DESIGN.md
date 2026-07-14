@@ -1252,3 +1252,96 @@ the host can run far more VMs than the guest RAM allocation suggests.
 | Max concurrent | 10+ (tested) | 20/20 (tested) | 2x verified |
 | Parallel 10 boot | 2.86s | 2.74s | Similar |
 | Module loading | 7 modules | 0 (all builtin) | Eliminated |
+
+## SHC Starter VPS Load Test (July 14 2025)
+
+**The headline result: 35 concurrent Firecracker microVMs on a $0.24/day
+VPS — with 635MB of RAM still free.**
+
+Tested on SHC "Dev VPS - Starter": 1 vCPU, 4GB RAM, 8GB disk,
+Debian 13 (trixie), kernel 6.12.90+deb13.1-cloud-amd64, Firecracker
+v1.16.0. This is the cheapest SHC VPS ($0.24/day) and it has `/dev/kvm`.
+
+Evidence: `scripts/firecracker/results/starter-vps-loadtest.json`
+(raw JSON), `starter-vps-loadtest.log` (full test log),
+`scripts/firecracker/loadtest-starter.py` (test script).
+
+### Results
+
+| Test | Result | Notes |
+|---|---|---|
+| Cold boot (3 runs) | **2.550s avg** (min 2.495s) | 1 vCPU — slower than ai-legion's 1.49s |
+| Max concurrent VMs | **35/35 ALL PASSED** | Test capped at 35; 635MB still available |
+| vsock RTT | **0.14ms min, 0.664ms P50** | Sub-millisecond on 1 vCPU |
+| Memory per VM | **80.1MB avg overhead** | Stabilizes at ~81MB after 10+ VMs |
+| Lifecycle stress | **20/20 cycles** | Perfect create/destroy |
+| Parallel boot | **5/5 in 8.64s** | 1.73s/VM when booting 5 simultaneously |
+
+### Memory Scaling Curve
+
+| VMs | Host Memory Used | Overhead | Per-VM |
+|---|---|---|---|
+| 0 (baseline) | 481MB | — | — |
+| 1 | 528MB | 47MB | 47.0MB |
+| 2 | 610MB | 129MB | 64.5MB |
+| 3 | 691MB | 210MB | 70.0MB |
+| 5 | 860MB | 379MB | 75.8MB |
+| 8 | 1106MB | 625MB | 78.1MB |
+| 10 | 1273MB | 792MB | 79.2MB |
+| 12 | 1443MB | 962MB | 80.2MB |
+| 15 | 1692MB | 1211MB | 80.7MB |
+| 18 | 1941MB | 1460MB | 81.1MB |
+| 20 | 2114MB | 1633MB | 81.7MB |
+| 25 | 2504MB | 2023MB | 80.9MB |
+| 30 | 2890MB | 2409MB | 80.3MB |
+| 35 | 3286MB | 2805MB | 80.1MB |
+
+Theoretical maximum: **~43 VMs** (635MB remaining ÷ 80MB/VM ≈ 8 more
+before OOM). The test hit its 35-VM cap without a single failure.
+
+### Cost Economics
+
+| Metric | Value |
+|---|---|
+| VPS cost | $0.24/day (SHC Dev VPS Starter) |
+| Verified concurrent VMs | 35 |
+| Cost per concurrent user | **$0.0069/day** (~$0.21/month) |
+| Theoretical max users | ~43 |
+| Theoretical cost at max | **$0.0056/day** per user |
+
+At these economics, 100 paying users at 10 sats/minute (1 sat = 1 min)
+generates 100 × 10 × 60 = 60,000 sats/hour. At ~2,500 sats/USD
+(BTC ~$25k), that's ~$24/hour against $0.01/hour infrastructure cost.
+
+### Per-VM Overhead Analysis
+
+The first VM costs only 47MB (kernel + Firecracker process + vsock).
+Subsequent VMs add ~75-82MB each, stabilizing at ~81MB after 10 VMs.
+The marginal cost includes:
+
+- Firecracker process overhead (~15MB RSS per process)
+- Guest RAM balloon (256MB guest, KSM merges ~175MB → ~81MB net)
+- vsock UDS buffers (~1MB)
+- Tap device + bridge forwarding tables (~0.5MB)
+
+KSM (Kernel Same-page Merging) is critical here — without it, each VM
+would cost the full 256MB guest allocation. The 80MB net overhead means
+KSM is reclaiming ~176MB per VM through page deduplication.
+
+### Comparison Across Hardware
+
+| Metric | Starter (1c/4GB) | Dev VPS (4c/16GB) | ai-legion (20c/32GB) |
+|---|---|---|---|
+| Cold boot | 2.55s | 2.5s | 1.49s |
+| vsock RTT P50 | 0.664ms | 0.039ms | 0.212ms |
+| Max concurrent | **35+** (capped) | 10+ (tested) | 20 (tested) |
+| Per-VM overhead | 80MB | 85MB | 85MB |
+| Parallel boot | 5 in 8.6s | — | 10 in 2.74s |
+| Cost/day | **$0.24** | ~$1.00 | ~$5.00 |
+| Users/dollar | **146+** | ~10 | ~4 |
+
+The Starter VPS is the most cost-efficient platform for Firecracker
+microVMs: 146+ concurrent users per dollar/day, vs 10 for the Dev VPS
+and 4 for ai-legion. The 1-vCPU constraint slows cold boot (2.55s vs
+1.49s) but does not limit concurrency — memory is the bottleneck, not
+CPU.

@@ -1,0 +1,401 @@
+[16:08:22] ============================================================
+[16:08:22] SHC STARTER VPS LOAD TEST — 2026-07-14T16:08:22Z
+[16:08:22] Host: 1 cores, 3922MB RAM
+[16:08:22] Kernel: 6.12.90+deb13.1-cloud-amd64
+[16:08:22] ============================================================
+[16:08:22] All artifacts present.
+[16:08:22] Killing old processes...
+[16:08:24] Cleaning taps...
+[16:08:24] Setting up NAT...
+[16:08:24] Starting daemon...
+[16:08:27] Daemon healthy: {'status': 'ok', 'vms': 0, 'rootfs': ['initramfs']}
+[16:08:27] Baseline: 481MB used, 3440MB available, 3922MB total
+[16:08:27] 
+============================================================
+[16:08:27] 1. COLD BOOT BASELINE (3 runs)
+[16:08:27] ============================================================
+[16:08:30]   Run 1: 2.495s
+[16:08:33]   Run 2: 2.578s
+[16:08:37]   Run 3: 2.577s
+[16:08:38]   AVG: 2.550s
+[16:08:38] 
+============================================================
+[16:08:38] 2. MAX CONCURRENT VMs (push until failure or 35)
+[16:08:38] ============================================================
+[16:08:41]   VM  1: OK  mem= 560MB  avail=3362MB  overhead=  79MB
+[16:08:43]   VM  2: OK  mem= 645MB  avail=3277MB  overhead= 164MB
+[16:08:46]   VM  3: OK  mem= 725MB  avail=3196MB  overhead= 244MB
+[16:08:49]   VM  4: OK  mem= 799MB  avail=3123MB  overhead= 318MB
+[16:08:52]   VM  5: OK  mem= 885MB  avail=3036MB  overhead= 404MB
+[16:08:55]   VM  6: OK  mem= 967MB  avail=2955MB  overhead= 486MB
+[16:08:58]   VM  7: OK  mem=1048MB  avail=2874MB  overhead= 567MB
+[16:09:01]   VM  8: OK  mem=1132MB  avail=2789MB  overhead= 651MB
+[16:09:04]   VM  9: OK  mem=1213MB  avail=2708MB  overhead= 732MB
+[16:09:07]   VM 10: OK  mem=1294MB  avail=2627MB  overhead= 813MB
+[16:09:09]   VM 11: OK  mem=1375MB  avail=2547MB  overhead= 894MB
+[16:09:12]   VM 12: OK  mem=1460MB  avail=2462MB  overhead= 979MB
+[16:09:15]   VM 13: OK  mem=1541MB  avail=2381MB  overhead=1060MB
+[16:09:18]   VM 14: OK  mem=1622MB  avail=2300MB  overhead=1141MB
+[16:09:21]   VM 15: OK  mem=1707MB  avail=2215MB  overhead=1226MB
+[16:09:24]   VM 16: OK  mem=1788MB  avail=2134MB  overhead=1307MB
+[16:09:27]   VM 17: OK  mem=1869MB  avail=2053MB  overhead=1388MB
+[16:09:30]   VM 18: OK  mem=1950MB  avail=1972MB  overhead=1469MB
+[16:09:33]   VM 19: OK  mem=2028MB  avail=1894MB  overhead=1547MB
+[16:09:35]   VM 20: OK  mem=2110MB  avail=1812MB  overhead=1629MB
+[16:09:38]   VM 21: OK  mem=2191MB  avail=1731MB  overhead=1710MB
+[16:09:41]   VM 22: OK  mem=2270MB  avail=1652MB  overhead=1789MB
+[16:09:45]   VM 23: OK  mem=2362MB  avail=1560MB  overhead=1881MB
+[16:09:48]   VM 24: OK  mem=2426MB  avail=1496MB  overhead=1945MB
+[16:09:51]   VM 25: OK  mem=2504MB  avail=1418MB  overhead=2023MB
+[16:09:54]   VM 26: OK  mem=2583MB  avail=1338MB  overhead=2102MB
+[16:09:57]   VM 27: OK  mem=2656MB  avail=1265MB  overhead=2175MB
+[16:10:01]   VM 28: OK  mem=2733MB  avail=1187MB  overhead=2252MB
+[16:10:04]   VM 29: OK  mem=2811MB  avail=1110MB  overhead=2330MB
+[16:10:07]   VM 30: OK  mem=2890MB  avail=1031MB  overhead=2409MB
+[16:10:10]   VM 31: OK  mem=2992MB  avail= 930MB  overhead=2511MB
+[16:10:13]   VM 32: OK  mem=3054MB  avail= 867MB  overhead=2573MB
+[16:10:16]   VM 33: OK  mem=3131MB  avail= 790MB  overhead=2650MB
+[16:10:20]   VM 34: OK  mem=3208MB  avail= 713MB  overhead=2727MB
+[16:10:23]   VM 35: OK  mem=3286MB  avail= 635MB  overhead=2805MB
+[16:10:23]   Max concurrent: 35
+[16:10:23]   Total overhead: 2805MB
+[16:10:23]   Avg per VM: 80.1MB
+[16:10:29] 
+============================================================
+[16:10:29] 3. MEMORY SCALING CURVE
+[16:10:29] ============================================================
+[16:10:32]   n= 1:  528MB used,   47MB overhead, 47.0MB/VM
+[16:10:40]   n= 2:  610MB used,  129MB overhead, 64.5MB/VM
+[16:10:51]   n= 3:  691MB used,  210MB overhead, 70.0MB/VM
+[16:11:07]   n= 5:  860MB used,  379MB overhead, 75.8MB/VM
+[16:11:31]   n= 8: 1106MB used,  625MB overhead, 78.1MB/VM
+[16:12:00]   n=10: 1273MB used,  792MB overhead, 79.2MB/VM
+[16:12:34]   n=12: 1443MB used,  962MB overhead, 80.2MB/VM
+[16:13:16]   n=15: 1692MB used, 1211MB overhead, 80.7MB/VM
+[16:14:06]   n=18: 1941MB used, 1460MB overhead, 81.1MB/VM
+[16:15:02]   n=20: 2114MB used, 1633MB overhead, 81.7MB/VM
+[16:15:05] 
+============================================================
+[16:15:05] 4. VSOCK RTT (20 rounds)
+[16:15:05] ============================================================
+[16:15:09]   Rounds: 16
+[16:15:09]   MIN: 0.140ms  P50: 0.664ms  MAX: 21.168ms
+[16:15:09] 
+============================================================
+[16:15:09] 5. VM LIFECYCLE (20 cycles)
+[16:15:09] ============================================================
+[16:15:22]   5/20: 5 OK
+[16:15:35]   10/20: 10 OK
+[16:15:48]   15/20: 15 OK
+[16:16:01]   20/20: 20 OK
+[16:16:01]   Total: 20/20
+[16:16:01] 
+============================================================
+[16:16:01] 6. PARALLEL BOOT (5 simultaneous)
+[16:16:01] ============================================================
+[16:16:10]   Success: 5/5 in 8.642s (1.728s/VM)
+[16:16:10] 
+============================================================
+[16:16:10] SUMMARY
+[16:16:10] ============================================================
+[16:16:10] {
+  "date": "2026-07-14T16:08:27Z",
+  "host_cores": 1,
+  "host_total_mb": 3922,
+  "baseline_mem_mb": 481,
+  "kernel": "6.12.90+deb13.1-cloud-amd64",
+  "cold_boot_avg_s": 2.55,
+  "cold_boot_times": [
+    2.495,
+    2.578,
+    2.577
+  ],
+  "max_concurrent": 35,
+  "mem_readings": [
+    {
+      "vms": 1,
+      "used_mb": 560,
+      "avail_mb": 3362,
+      "overhead_mb": 79
+    },
+    {
+      "vms": 2,
+      "used_mb": 645,
+      "avail_mb": 3277,
+      "overhead_mb": 164
+    },
+    {
+      "vms": 3,
+      "used_mb": 725,
+      "avail_mb": 3196,
+      "overhead_mb": 244
+    },
+    {
+      "vms": 4,
+      "used_mb": 799,
+      "avail_mb": 3123,
+      "overhead_mb": 318
+    },
+    {
+      "vms": 5,
+      "used_mb": 885,
+      "avail_mb": 3036,
+      "overhead_mb": 404
+    },
+    {
+      "vms": 6,
+      "used_mb": 967,
+      "avail_mb": 2955,
+      "overhead_mb": 486
+    },
+    {
+      "vms": 7,
+      "used_mb": 1048,
+      "avail_mb": 2874,
+      "overhead_mb": 567
+    },
+    {
+      "vms": 8,
+      "used_mb": 1132,
+      "avail_mb": 2789,
+      "overhead_mb": 651
+    },
+    {
+      "vms": 9,
+      "used_mb": 1213,
+      "avail_mb": 2708,
+      "overhead_mb": 732
+    },
+    {
+      "vms": 10,
+      "used_mb": 1294,
+      "avail_mb": 2627,
+      "overhead_mb": 813
+    },
+    {
+      "vms": 11,
+      "used_mb": 1375,
+      "avail_mb": 2547,
+      "overhead_mb": 894
+    },
+    {
+      "vms": 12,
+      "used_mb": 1460,
+      "avail_mb": 2462,
+      "overhead_mb": 979
+    },
+    {
+      "vms": 13,
+      "used_mb": 1541,
+      "avail_mb": 2381,
+      "overhead_mb": 1060
+    },
+    {
+      "vms": 14,
+      "used_mb": 1622,
+      "avail_mb": 2300,
+      "overhead_mb": 1141
+    },
+    {
+      "vms": 15,
+      "used_mb": 1707,
+      "avail_mb": 2215,
+      "overhead_mb": 1226
+    },
+    {
+      "vms": 16,
+      "used_mb": 1788,
+      "avail_mb": 2134,
+      "overhead_mb": 1307
+    },
+    {
+      "vms": 17,
+      "used_mb": 1869,
+      "avail_mb": 2053,
+      "overhead_mb": 1388
+    },
+    {
+      "vms": 18,
+      "used_mb": 1950,
+      "avail_mb": 1972,
+      "overhead_mb": 1469
+    },
+    {
+      "vms": 19,
+      "used_mb": 2028,
+      "avail_mb": 1894,
+      "overhead_mb": 1547
+    },
+    {
+      "vms": 20,
+      "used_mb": 2110,
+      "avail_mb": 1812,
+      "overhead_mb": 1629
+    },
+    {
+      "vms": 21,
+      "used_mb": 2191,
+      "avail_mb": 1731,
+      "overhead_mb": 1710
+    },
+    {
+      "vms": 22,
+      "used_mb": 2270,
+      "avail_mb": 1652,
+      "overhead_mb": 1789
+    },
+    {
+      "vms": 23,
+      "used_mb": 2362,
+      "avail_mb": 1560,
+      "overhead_mb": 1881
+    },
+    {
+      "vms": 24,
+      "used_mb": 2426,
+      "avail_mb": 1496,
+      "overhead_mb": 1945
+    },
+    {
+      "vms": 25,
+      "used_mb": 2504,
+      "avail_mb": 1418,
+      "overhead_mb": 2023
+    },
+    {
+      "vms": 26,
+      "used_mb": 2583,
+      "avail_mb": 1338,
+      "overhead_mb": 2102
+    },
+    {
+      "vms": 27,
+      "used_mb": 2656,
+      "avail_mb": 1265,
+      "overhead_mb": 2175
+    },
+    {
+      "vms": 28,
+      "used_mb": 2733,
+      "avail_mb": 1187,
+      "overhead_mb": 2252
+    },
+    {
+      "vms": 29,
+      "used_mb": 2811,
+      "avail_mb": 1110,
+      "overhead_mb": 2330
+    },
+    {
+      "vms": 30,
+      "used_mb": 2890,
+      "avail_mb": 1031,
+      "overhead_mb": 2409
+    },
+    {
+      "vms": 31,
+      "used_mb": 2992,
+      "avail_mb": 930,
+      "overhead_mb": 2511
+    },
+    {
+      "vms": 32,
+      "used_mb": 3054,
+      "avail_mb": 867,
+      "overhead_mb": 2573
+    },
+    {
+      "vms": 33,
+      "used_mb": 3131,
+      "avail_mb": 790,
+      "overhead_mb": 2650
+    },
+    {
+      "vms": 34,
+      "used_mb": 3208,
+      "avail_mb": 713,
+      "overhead_mb": 2727
+    },
+    {
+      "vms": 35,
+      "used_mb": 3286,
+      "avail_mb": 635,
+      "overhead_mb": 2805
+    }
+  ],
+  "avg_overhead_per_vm_mb": 80.1,
+  "scaling_curve": [
+    {
+      "vms": 1,
+      "used_mb": 528,
+      "overhead_mb": 47,
+      "per_vm_mb": 47.0
+    },
+    {
+      "vms": 2,
+      "used_mb": 610,
+      "overhead_mb": 129,
+      "per_vm_mb": 64.5
+    },
+    {
+      "vms": 3,
+      "used_mb": 691,
+      "overhead_mb": 210,
+      "per_vm_mb": 70.0
+    },
+    {
+      "vms": 5,
+      "used_mb": 860,
+      "overhead_mb": 379,
+      "per_vm_mb": 75.8
+    },
+    {
+      "vms": 8,
+      "used_mb": 1106,
+      "overhead_mb": 625,
+      "per_vm_mb": 78.1
+    },
+    {
+      "vms": 10,
+      "used_mb": 1273,
+      "overhead_mb": 792,
+      "per_vm_mb": 79.2
+    },
+    {
+      "vms": 12,
+      "used_mb": 1443,
+      "overhead_mb": 962,
+      "per_vm_mb": 80.2
+    },
+    {
+      "vms": 15,
+      "used_mb": 1692,
+      "overhead_mb": 1211,
+      "per_vm_mb": 80.7
+    },
+    {
+      "vms": 18,
+      "used_mb": 1941,
+      "overhead_mb": 1460,
+      "per_vm_mb": 81.1
+    },
+    {
+      "vms": 20,
+      "used_mb": 2114,
+      "overhead_mb": 1633,
+      "per_vm_mb": 81.7
+    }
+  ],
+  "vsock_rtt_ms": {
+    "min": 0.14,
+    "p50": 0.664,
+    "max": 21.168
+  },
+  "lifecycle_20": 20,
+  "parallel_boot_5": {
+    "success": 5,
+    "total_s": 8.642
+  }
+}
+[16:16:10] Results saved to /tmp/loadtest-results.json
+[16:16:10] DONE
