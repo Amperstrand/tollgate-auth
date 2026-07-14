@@ -95,7 +95,8 @@ class Handler(BaseHTTPRequestHandler):
         warm_dir.mkdir(parents=True, exist_ok=True)
 
         api_sock = str(warm_dir / "api.sock")
-        vsock_path = str(Path(SNAPSHOT_DIR) / "v.sock")
+        vsock_path = str(Path(SNAPSHOT_DIR) / "warm.sock")  # Stable path — snapshot bakes this in
+        os.makedirs(SNAPSHOT_DIR, exist_ok=True)  # Ensure snapshot dir exists for vsock + later
         tap_name = f"fc{warm_id[:8]}"
         warm_cid = 99
 
@@ -286,9 +287,8 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(0.1)
 
         # Load snapshot directly — no device config allowed before snapshot load.
-        # The snapshot contains vsock + network state from the warm-up VM.
-        # The vsock UDS path must match the warm-up's path.
-        warm_vsock = str(Path(SNAPSHOT_DIR) / "v.sock")
+        # The snapshot contains vsock UDS path from warm-up. Must unlink before restore.
+        warm_vsock = str(Path(SNAPSHOT_DIR) / "warm.sock")
         if os.path.exists(warm_vsock):
             os.unlink(warm_vsock)
 
@@ -318,6 +318,11 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(0.1)
 
         vms[vm_id] = {"proc": proc, "dir": str(vm_dir), "log": log_file, "tap": tap_name}
+        # Symlink warm.sock into VM dir so callers find it at the standard path
+        try:
+            os.symlink(warm_vsock, str(vm_dir / "v.sock"))
+        except OSError:
+            pass
         print(f"[fc-daemon] VM {vm_id} restored from snapshot (ip={vm_ip})")
         return vm_id, vm_ip
 
