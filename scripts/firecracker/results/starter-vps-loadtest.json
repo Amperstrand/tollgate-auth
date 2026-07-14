@@ -1,0 +1,299 @@
+{
+  "date": "2026-07-14T16:08:27Z",
+  "host_cores": 1,
+  "host_total_mb": 3922,
+  "baseline_mem_mb": 481,
+  "kernel": "6.12.90+deb13.1-cloud-amd64",
+  "cold_boot_avg_s": 2.55,
+  "cold_boot_times": [
+    2.495,
+    2.578,
+    2.577
+  ],
+  "max_concurrent": 35,
+  "mem_readings": [
+    {
+      "vms": 1,
+      "used_mb": 560,
+      "avail_mb": 3362,
+      "overhead_mb": 79
+    },
+    {
+      "vms": 2,
+      "used_mb": 645,
+      "avail_mb": 3277,
+      "overhead_mb": 164
+    },
+    {
+      "vms": 3,
+      "used_mb": 725,
+      "avail_mb": 3196,
+      "overhead_mb": 244
+    },
+    {
+      "vms": 4,
+      "used_mb": 799,
+      "avail_mb": 3123,
+      "overhead_mb": 318
+    },
+    {
+      "vms": 5,
+      "used_mb": 885,
+      "avail_mb": 3036,
+      "overhead_mb": 404
+    },
+    {
+      "vms": 6,
+      "used_mb": 967,
+      "avail_mb": 2955,
+      "overhead_mb": 486
+    },
+    {
+      "vms": 7,
+      "used_mb": 1048,
+      "avail_mb": 2874,
+      "overhead_mb": 567
+    },
+    {
+      "vms": 8,
+      "used_mb": 1132,
+      "avail_mb": 2789,
+      "overhead_mb": 651
+    },
+    {
+      "vms": 9,
+      "used_mb": 1213,
+      "avail_mb": 2708,
+      "overhead_mb": 732
+    },
+    {
+      "vms": 10,
+      "used_mb": 1294,
+      "avail_mb": 2627,
+      "overhead_mb": 813
+    },
+    {
+      "vms": 11,
+      "used_mb": 1375,
+      "avail_mb": 2547,
+      "overhead_mb": 894
+    },
+    {
+      "vms": 12,
+      "used_mb": 1460,
+      "avail_mb": 2462,
+      "overhead_mb": 979
+    },
+    {
+      "vms": 13,
+      "used_mb": 1541,
+      "avail_mb": 2381,
+      "overhead_mb": 1060
+    },
+    {
+      "vms": 14,
+      "used_mb": 1622,
+      "avail_mb": 2300,
+      "overhead_mb": 1141
+    },
+    {
+      "vms": 15,
+      "used_mb": 1707,
+      "avail_mb": 2215,
+      "overhead_mb": 1226
+    },
+    {
+      "vms": 16,
+      "used_mb": 1788,
+      "avail_mb": 2134,
+      "overhead_mb": 1307
+    },
+    {
+      "vms": 17,
+      "used_mb": 1869,
+      "avail_mb": 2053,
+      "overhead_mb": 1388
+    },
+    {
+      "vms": 18,
+      "used_mb": 1950,
+      "avail_mb": 1972,
+      "overhead_mb": 1469
+    },
+    {
+      "vms": 19,
+      "used_mb": 2028,
+      "avail_mb": 1894,
+      "overhead_mb": 1547
+    },
+    {
+      "vms": 20,
+      "used_mb": 2110,
+      "avail_mb": 1812,
+      "overhead_mb": 1629
+    },
+    {
+      "vms": 21,
+      "used_mb": 2191,
+      "avail_mb": 1731,
+      "overhead_mb": 1710
+    },
+    {
+      "vms": 22,
+      "used_mb": 2270,
+      "avail_mb": 1652,
+      "overhead_mb": 1789
+    },
+    {
+      "vms": 23,
+      "used_mb": 2362,
+      "avail_mb": 1560,
+      "overhead_mb": 1881
+    },
+    {
+      "vms": 24,
+      "used_mb": 2426,
+      "avail_mb": 1496,
+      "overhead_mb": 1945
+    },
+    {
+      "vms": 25,
+      "used_mb": 2504,
+      "avail_mb": 1418,
+      "overhead_mb": 2023
+    },
+    {
+      "vms": 26,
+      "used_mb": 2583,
+      "avail_mb": 1338,
+      "overhead_mb": 2102
+    },
+    {
+      "vms": 27,
+      "used_mb": 2656,
+      "avail_mb": 1265,
+      "overhead_mb": 2175
+    },
+    {
+      "vms": 28,
+      "used_mb": 2733,
+      "avail_mb": 1187,
+      "overhead_mb": 2252
+    },
+    {
+      "vms": 29,
+      "used_mb": 2811,
+      "avail_mb": 1110,
+      "overhead_mb": 2330
+    },
+    {
+      "vms": 30,
+      "used_mb": 2890,
+      "avail_mb": 1031,
+      "overhead_mb": 2409
+    },
+    {
+      "vms": 31,
+      "used_mb": 2992,
+      "avail_mb": 930,
+      "overhead_mb": 2511
+    },
+    {
+      "vms": 32,
+      "used_mb": 3054,
+      "avail_mb": 867,
+      "overhead_mb": 2573
+    },
+    {
+      "vms": 33,
+      "used_mb": 3131,
+      "avail_mb": 790,
+      "overhead_mb": 2650
+    },
+    {
+      "vms": 34,
+      "used_mb": 3208,
+      "avail_mb": 713,
+      "overhead_mb": 2727
+    },
+    {
+      "vms": 35,
+      "used_mb": 3286,
+      "avail_mb": 635,
+      "overhead_mb": 2805
+    }
+  ],
+  "avg_overhead_per_vm_mb": 80.1,
+  "scaling_curve": [
+    {
+      "vms": 1,
+      "used_mb": 528,
+      "overhead_mb": 47,
+      "per_vm_mb": 47.0
+    },
+    {
+      "vms": 2,
+      "used_mb": 610,
+      "overhead_mb": 129,
+      "per_vm_mb": 64.5
+    },
+    {
+      "vms": 3,
+      "used_mb": 691,
+      "overhead_mb": 210,
+      "per_vm_mb": 70.0
+    },
+    {
+      "vms": 5,
+      "used_mb": 860,
+      "overhead_mb": 379,
+      "per_vm_mb": 75.8
+    },
+    {
+      "vms": 8,
+      "used_mb": 1106,
+      "overhead_mb": 625,
+      "per_vm_mb": 78.1
+    },
+    {
+      "vms": 10,
+      "used_mb": 1273,
+      "overhead_mb": 792,
+      "per_vm_mb": 79.2
+    },
+    {
+      "vms": 12,
+      "used_mb": 1443,
+      "overhead_mb": 962,
+      "per_vm_mb": 80.2
+    },
+    {
+      "vms": 15,
+      "used_mb": 1692,
+      "overhead_mb": 1211,
+      "per_vm_mb": 80.7
+    },
+    {
+      "vms": 18,
+      "used_mb": 1941,
+      "overhead_mb": 1460,
+      "per_vm_mb": 81.1
+    },
+    {
+      "vms": 20,
+      "used_mb": 2114,
+      "overhead_mb": 1633,
+      "per_vm_mb": 81.7
+    }
+  ],
+  "vsock_rtt_ms": {
+    "min": 0.14,
+    "p50": 0.664,
+    "max": 21.168
+  },
+  "lifecycle_20": 20,
+  "parallel_boot_5": {
+    "success": 5,
+    "total_s": 8.642
+  }
+}

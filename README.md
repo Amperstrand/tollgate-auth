@@ -864,11 +864,13 @@ The chroot jail is being replaced with **Firecracker microVMs** for hardware-lev
 - **vsock bridge**: host SSH to guest shell, 0.25ms RTT
 - **NAT networking**: VM has outbound internet (ping, HTTP)
 - **PTY agent**: proper terminal semantics (window resize, signals)
-- **Boot time**: 2.5s cold (0.12s API + 2.4s kernel/agent)
-- **Memory**: 72-85MB host overhead per VM (256MB Alpine, 512MB recommended for Ubuntu)
-- **Concurrency**: 10+ VMs on 4-core/16GB host
+- **Boot time**: 2.55s cold on 1-vCPU Starter (1.49s on 20-core ai-legion)
+- **Memory**: 80MB host overhead per VM (KSM-enabled, 256MB Alpine guest)
+- **Concurrency**: **35 VMs on $0.24/day Starter VPS** (1c/4GB), 20 on ai-legion (20c/32GB)
+- **Cost per user**: $0.007/day at 35 concurrent users on Starter VPS
 - **Interactive SSH**: PASS (tmux test — echo, whoami, ping all work interactively)
 - **Crash recovery**: daemon survives VM process kill
+- **Lifecycle**: 20/20 create/destroy cycles, 5/5 parallel boot
 - **14/14 tests PASS** in comprehensive suite
 
 Configuration via environment variables:
@@ -880,14 +882,9 @@ Configuration via environment variables:
 | `TOLLGATE_VM_FALLBACK` | `true` | Fall back to chroot if VM creation fails |
 | `TOLLGATE_FC_DAEMON` | `http://127.0.0.1:8081` | Firecracker daemon HTTP URL |
 | `TOLLGATE_FC_VSOCK_DIR` | `/var/lib/vps-on-demand/vms` | VM vsock socket directory |
-- **NAT networking**: VM has outbound internet (ping, HTTP)
-- **PTY agent**: proper terminal semantics (window resize, signals)
-- **Boot time**: 2.5s cold (0.12s API + 2.4s kernel/agent)
-- **Memory**: 85MB host overhead per VM
-- **Concurrency**: 10+ VMs on 4-core/16GB host
 - **Snapshot restore**: implementation committed (7 bugs fixed), pending live test for ~10ms target
 
-See [docs/FIRECRACKER_SSH_DESIGN.md](docs/FIRECRACKER_SSH_DESIGN.md) for the full architecture (1095 lines), including tradeoffs analysis for pre-warmed pool (snapshot vs pre-booted vs cold boot), daemon integration options (vps-on-demand patch vs sidecar vs standalone), and tollgate-rs/ContextVM federation path.
+See [docs/FIRECRACKER_SSH_DESIGN.md](docs/FIRECRACKER_SSH_DESIGN.md) for the full architecture, including load test results (35 concurrent VMs on $0.24/day Starter VPS), pre-warmed pool tradeoffs, daemon integration options, and tollgate-rs/ContextVM federation path.
 
 ## Related
 
