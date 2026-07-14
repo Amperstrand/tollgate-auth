@@ -1,0 +1,20 @@
+{
+  "date": "2026-07-14T16:50:02Z",
+  "cold_boot_avg_s": 2.603,
+  "cold_boot_times": [
+    2.58,
+    2.615,
+    2.614
+  ],
+  "snapshot_create_s": 3.395,
+  "snapshot_ready": true,
+  "snapshot_restore_avg_s": 0.182,
+  "snapshot_restore_times": [
+    0.187,
+    0.176,
+    0.184,
+    0.183,
+    0.178
+  ],
+  "speedup": 14.3
+}
