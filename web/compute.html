@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>compute.cashu.email — Lightning-Powered VPS</title>
+    <style>
+  :root {
+    --bg: #0a0b10;
+    --surface: #14161f;
+    --surface-hover: #1a1d2b;
+    --border: #252839;
+    --text: #e4e7f0;
+    --text-dim: #8b90a5;
+    --accent: #f7931a;
+    --accent-glow: rgba(247, 147, 26, 0.15);
+    --lightning: #00d4ff;
+    --success: #00e676;
+    --error: #ff5252;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+    line-height: 1.6;
+  }
+  .container { max-width: 560px; width: 100%; }
+
+  /* ── Header ──────────────────────────── */
+  .header { text-align: center; margin-bottom: 32px; }
+  .header h1 {
+    font-size: 1.8rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, var(--accent), var(--lightning));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header p { color: var(--text-dim); font-size: 0.9rem; margin-top: 4px; }
+  /* ── Cards ───────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--text-dim); }
+  .hidden { display: none !important; }
+
+  /* ── VPS Spec ────────────────────────── */
+  .spec-badge {
+    display: inline-block;
+    background: var(--accent-glow);
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+  .spec-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 8px; }
+  .spec-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .spec-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .spec-item strong { color: var(--text); }
+  .spec-price {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .spec-price small { font-size: 0.9rem; color: var(--text-dim); font-weight: 400; }
+
+  /* ── Package Selector ────────────────── */
+  .package-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 480px) {
+    .package-grid { grid-template-columns: 1fr; }
+  }
+  .package-card {
+    position: relative;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+  .package-card:hover { border-color: var(--text-dim); }
+  .package-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px var(--accent-glow);
+    background: rgba(247, 147, 26, 0.04);
+  }
+  .package-card .tier-name {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .package-card.selected .tier-name { color: var(--accent); }
+  .package-card .tier-specs {
+    font-size: 0.82rem;
+    color: var(--text);
+    line-height: 1.7;
+    margin-bottom: 10px;
+  }
+  .package-card .tier-price {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .package-card .tier-price small {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+  .package-card .popular-badge {
+    position: absolute;
+    top: -9px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  /* ── SSH Key Input ───────────────────── */
+  .ssh-input-group { margin-bottom: 20px; }
+  .ssh-input-group label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .ssh-input-group textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    font-size: 0.8rem;
+    padding: 10px 14px;
+    resize: vertical;
+    min-height: 60px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .ssh-input-group textarea::placeholder { color: var(--text-dim); opacity: 0.6; }
+  .ssh-input-group textarea:focus { border-color: var(--accent); }
+  .ssh-help {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+
+  /* ── Buttons ─────────────────────────── */
+  .btn {
+    display: inline-block;
+    width: 100%;
+    padding: 14px 24px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #0a0b10;
+    box-shadow: 0 0 30px var(--accent-glow);
+  }
+  .btn-primary:hover { background: #ffa033; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-secondary {
+    background: var(--surface-hover);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── QR / Payment ────────────────────── */
+  .qr-section { text-align: center; }
+  .qr-section h2 { font-size: 1.1rem; margin-bottom: 16px; }
+  #qrcode {
+    display: inline-block;
+    background: #fff;
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+  }
+  #qrcode canvas { display: block; }
+
+  .bolt11-field {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+  }
+  .bolt11-field input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    font-size: 0.8rem;
+    outline: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Status ──────────────────────────── */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 20px;
+    margin-bottom: 12px;
+  }
+  .status-pill .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+  .status-pill.waiting { background: rgba(247,147,26,0.12); color: var(--accent); }
+  .status-pill.waiting .dot { background: var(--accent); }
+  .status-pill.active { background: rgba(0,212,255,0.12); color: var(--lightning); }
+  .status-pill.active .dot { background: var(--lightning); }
+  .status-pill.ready { background: rgba(0,230,118,0.12); color: var(--success); }
+  .status-pill.ready .dot { background: var(--success); animation: none; }
+  .status-pill.error { background: rgba(255,82,82,0.12); color: var(--error); }
+  .status-pill.error .dot { background: var(--error); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .countdown {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+  .countdown strong { color: var(--accent); }
+
+  .log-area {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    max-height: 100px;
+    overflow-y: auto;
+  }
+  .log-entry { margin-bottom: 4px; }
+  .log-entry .ts { color: var(--text-dim); opacity: 0.6; }
+
+  /* ── SSH Result ──────────────────────── */
+  .ssh-box {
+    background: var(--bg);
+    border: 1px solid var(--success);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 12px;
+    position: relative;
+  }
+  .ssh-box .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--success);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .ssh-box .cmd {
+    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    font-size: 0.95rem;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .ssh-box .details {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  /* ── Toast ───────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .footer {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    margin-top: 32px;
+  }
+  .footer a { color: var(--lightning); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>compute.cashu.email</h1>
+    <p>Lightning-Powered VPS — Root Access in Seconds</p>
+  </div>
+
+  <!-- Package Selector -->
+  <div class="card" id="spec-card">
+    <div class="spec-badge">Choose Your Tier</div>
+    <div class="package-grid">
+      <div class="package-card" data-tier="standard" onclick="selectTier('standard')">
+        <div class="tier-name">Standard</div>
+        <div class="tier-specs">
+          <strong>2</strong> vCPU<br>
+          <strong>8GB</strong> RAM<br>
+          <strong>16GB</strong> NVMe
+        </div>
+        <div class="tier-price">$0.54<small>/24h</small></div>
+      </div>
+      <div class="package-card selected" data-tier="professional" onclick="selectTier('professional')">
+        <div class="popular-badge">Most Popular</div>
+        <div class="tier-name">Professional</div>
+        <div class="tier-specs">
+          <strong>4</strong> vCPU<br>
+          <strong>16GB</strong> RAM<br>
+          <strong>32GB</strong> NVMe
+        </div>
+        <div class="tier-price">$1.06<small>/24h</small></div>
+      </div>
+      <div class="package-card" data-tier="business" onclick="selectTier('business')">
+        <div class="tier-name">Business</div>
+        <div class="tier-specs">
+          <strong>8</strong> vCPU<br>
+          <strong>32GB</strong> RAM<br>
+          <strong>64GB</strong> NVMe
+        </div>
+        <div class="tier-price">$2.10<small>/24h</small></div>
+      </div>
+    </div>
+
+    <!-- Host Status -->
+    <div id="host-status-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px;font-size:0.8rem;">
+      <span style="color:var(--text-dim);">KVM Hosts:</span>
+      <span id="hosts-loading" style="color:var(--text-dim);">checking...</span>
+    </div>
+
+    <!-- VM Type Toggle -->
+    <div style="display:flex;gap:8px;margin:16px 0;">
+      <button class="btn" id="tab-dedicated" onclick="switchTab('dedicated')" style="flex:1;">Dedicated VPS (SHC)</button>
+      <button class="btn" id="tab-microvm" onclick="switchTab('microvm')" style="flex:1;background:var(--surface);">Firecracker MicroVM</button>
+    </div>
+
+    <!-- Firecracker MicroVM Configurator -->
+    <div id="microvm-config" style="display:none;">
+      <div class="spec-badge">Configure Your MicroVM</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0;">
+        <div>
+          <label style="font-size:0.8rem;color:var(--text-dim);">OS / Rootfs</label>
+          <select id="fc-rootfs" onchange="updateMicrovmPrice()" style="width:100%;padding:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;">
+            <option value="alpine">Alpine 3.21 (lightweight)</option>
+            <option value="ubuntu">Ubuntu 24.04 LTS</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.8rem;color:var(--text-dim);">RAM</label>
+          <select id="fc-ram" onchange="updateMicrovmPrice()" style="width:100%;padding:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;">
+            <option value="256">256 MB</option>
+            <option value="512" selected>512 MB</option>
+            <option value="1024">1 GB</option>
+            <option value="2048">2 GB</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.8rem;color:var(--text-dim);">vCPUs</label>
+          <select id="fc-cpu" onchange="updateMicrovmPrice()" style="width:100%;padding:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;">
+            <option value="1" selected>1 vCPU</option>
+            <option value="2">2 vCPU</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.8rem;color:var(--text-dim);">Duration</label>
+          <select id="fc-ttl" onchange="updateMicrovmPrice()" style="width:100%;padding:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;">
+            <option value="600">10 minutes</option>
+            <option value="3600" selected>1 hour</option>
+            <option value="21600">6 hours</option>
+            <option value="86400">24 hours</option>
+          </select>
+        </div>
+      </div>
+      <div style="text-align:center;padding:12px;background:var(--surface);border-radius:6px;margin:8px 0;">
+        <span id="fc-price-display" style="font-size:1.4rem;font-weight:700;color:var(--lightning);">2 sats/min</span>
+        <span style="color:var(--text-dim);"> = </span>
+        <span id="fc-total-display" style="font-size:1.1rem;font-weight:600;">120 sats total</span>
+      </div>
+    </div>
+
+    <!-- SSH Key Input -->
+    <div class="ssh-input-group">
+      <label for="ssh-key">Your SSH Public Key (optional — for root access)</label>
+      <textarea id="ssh-key" placeholder="ssh-ed25519 AAAA... or ssh-rsa AAAA..."></textarea>
+      <div class="ssh-help">Paste your public key to enable passwordless root SSH. Leave empty for password-based access.</div>
+    </div>
+
+    <button class="btn btn-primary" id="order-btn" onclick="createOrder()">
+      Order Now — $1.06 via Lightning
+    </button>
+  </div>
+
+  <!-- Payment -->
+  <div class="card hidden" id="payment-card">
+    <div class="qr-section">
+      <h2>⚡ Scan to Pay</h2>
+      <div id="qrcode"></div>
+      <div class="bolt11-field">
+        <input type="text" id="bolt11-text" readonly />
+        <button class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:0.8rem;" onclick="copyText('bolt11-text')">Copy</button>
+      </div>
+      <a id="checkout-link" href="#" target="_blank" rel="noopener" style="font-size:0.85rem;color:var(--lightning);">
+        Open BTCPay checkout ↗
+      </a>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="card hidden" id="status-card">
+    <div id="status-pill" class="status-pill waiting">
+      <span class="dot"></span>
+      <span id="status-text">Awaiting payment...</span>
+    </div>
+    <div class="countdown" id="countdown"></div>
+    <div class="log-area" id="log-area"></div>
+  </div>
+
+  <!-- SSH Result -->
+  <div class="card hidden" id="ssh-card">
+    <div class="ssh-box">
+      <div class="label">✓ Your VM is ready</div>
+      <div class="details" id="ssh-details"></div>
+
+      <div id="sshpass-option" style="margin-top:16px;">
+        <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">One-liner (requires sshpass: brew install hudochenkov/sshpass/sshpass)</div>
+        <code id="sshpass-command" style="display:block;font-family:'SF Mono',Monaco,monospace;font-size:0.75rem;color:var(--text);background:var(--bg);padding:8px 12px;border-radius:6px;border:1px solid var(--border);word-break:break-all;user-select:all;"></code>
+        <button class="btn btn-secondary" style="margin-top:6px;font-size:0.85rem;padding:6px 12px;" onclick="copyText2('sshpass-command')">Copy Command</button>
+      </div>
+
+      <div style="margin-top:16px;">
+        <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">SSH command</div>
+        <code id="ssh-command" style="display:block;font-family:'SF Mono',Monaco,monospace;font-size:0.95rem;color:var(--text);background:var(--bg);padding:8px 12px;border-radius:6px;border:1px solid var(--border);user-select:all;"></code>
+        <button class="btn btn-secondary" style="margin-top:6px;font-size:0.85rem;padding:6px 12px;" onclick="copyText2('ssh-command')">Copy SSH Command</button>
+      </div>
+
+      <div id="password-option" style="margin-top:12px;">
+        <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">Password</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <code id="ssh-password" style="flex:1;min-width:0;font-family:'SF Mono',Monaco,monospace;font-size:0.95rem;color:var(--text);background:var(--bg);padding:8px 12px;border-radius:6px;border:1px solid var(--border);user-select:all;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></code>
+          <button class="btn btn-secondary" style="font-size:0.85rem;padding:6px 12px;flex-shrink:0;" onclick="copyText2('ssh-password')">Copy</button>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <button class="btn" style="width:100%;" onclick="openWebTerminal()">Open Web Terminal</button>
+      </div>
+
+      <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:6px;">Experimental: Reseller Mode</div>
+        <button class="btn btn-secondary" style="width:100%;font-size:0.85rem;" onclick="toggleReseller()">Enable Reseller Mode</button>
+        <div id="reseller-instructions" class="hidden" style="margin-top:10px;font-size:0.8rem;color:var(--text-dim);line-height:1.5;">
+          SSH into your VM and run:<br>
+          <code style="display:block;margin-top:4px;padding:8px;background:var(--bg);border-radius:6px;border:1px solid var(--border);word-break:break-all;user-select:all;font-size:0.75rem;">curl -fsSL https://compute.cashu.email/install-reseller.sh | bash</code>
+          <div style="margin-top:6px;">This installs Firecracker and starts vending micro-VMs via Nostr. Your VM becomes a provider.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+   <!-- Firecracker VPS (Cashu) -->
+  <div class="card" id="fc-cashu-card">
+    <div class="spec-badge" style="background:rgba(247,147,26,0.12);color:#f7931a;">Cashu · Experimental</div>
+    <div class="spec-title" style="font-size:1.1rem;">Firecracker VPS</div>
+    <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:16px;">
+      Pay 1 sat (any Cashu mint) and get a real Firecracker micro-VM with SSH + web terminal. No account needed. Leave token empty for free testnuts.
+    </p>
+    <textarea id="fc-token" placeholder="Cashu token (cashuA... or cashuB...) — leave empty for free testnuts" style="width:100%;height:40px;font-size:0.7rem;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:monospace;resize:none;margin-bottom:8px;"></textarea>
+    <textarea id="fc-ssh-key" placeholder="ssh-ed25519 AAAA... (optional — password auth included)" style="width:100%;height:40px;font-size:0.7rem;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:monospace;resize:none;margin-bottom:12px;"></textarea>
+    <button class="btn btn-primary" id="fc-btn" onclick="launchFirecrackerVPS()" style="width:100%;">
+      ⚡ Launch VPS (1 sat)
+    </button>
+    <div id="fc-result" class="hidden" style="margin-top:16px;">
+      <div class="ssh-box" style="border-color:#f7931a;">
+        <div class="label" style="color:#f7931a;">VM Ready</div>
+        <div class="details" id="fc-details"></div>
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" style="width:100%;" onclick="openFirecrackerTerminal()">🖥 Open Web Terminal</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Micro-VM Sandbox -->
+  <div class="card" id="microvm-card">
+    <div class="spec-badge" style="background:rgba(0,212,255,0.12);color:var(--lightning);">Firecracker Sandbox</div>
+    <div class="spec-title" style="font-size:1.1rem;">Micro-VM Lab</div>
+    <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:16px;">
+      Launch a Firecracker micro-VM (Alpine Linux, 256MB RAM, 1 vCPU). Boots in ~2 seconds. Get a web terminal instantly.
+    </p>
+    <button class="btn btn-primary" id="microvm-btn" onclick="launchMicroVM()">
+      ⚡ Launch Micro-VM
+    </button>
+    <div id="microvm-result" class="hidden" style="margin-top:16px;">
+      <div class="ssh-box" style="border-color:var(--lightning);">
+        <div class="label" style="color:var(--lightning);">Micro-VM Ready</div>
+        <div class="details" id="microvm-details"></div>
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" style="width:100%;" id="terminal-btn" onclick="openMicroVMTerminal()">Open Web Terminal</button>
+        </div>
+        <div style="margin-top:8px;">
+          <button class="btn btn-secondary" style="width:100%;font-size:0.85rem;" onclick="destroyMicroVM()">Destroy Micro-VM</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Powered by <a href="https://blesta.sovereignhybridcompute.com/order/forms/a/lecture-mushroom-lunar" target="_blank" rel="noopener">Sovereign Hybrid Compute</a> × Lightning Network
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let pollTimer = null;
+  let countdownTimer = null;
+  let expiresAt = 0;
+  let currentSsh = "";
+  let selectedTier = "professional";
+  let currentTab = "dedicated";
+
+  const TIER_PRICES = {
+    standard: "$0.54",
+    professional: "$1.06",
+    business: "$2.10",
+  };
+
+  const ROOTFS_MULTIPLIER = { alpine: 1.0, ubuntu: 1.3 };
+  const BASE_SATS_PER_MIN = 1;
+
+  function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById("tab-dedicated").style.background = tab === "dedicated" ? "var(--lightning)" : "var(--surface)";
+    document.getElementById("tab-microvm").style.background = tab === "microvm" ? "var(--lightning)" : "var(--surface)";
+    document.getElementById("spec-card").querySelector(".package-grid").style.display = tab === "dedicated" ? "grid" : "none";
+    document.getElementById("microvm-config").style.display = tab === "microvm" ? "block" : "none";
+    updateOrderButton();
+  }
+
+  function updateMicrovmPrice() {
+    const ram = parseInt(document.getElementById("fc-ram").value);
+    const rootfs = document.getElementById("fc-rootfs").value;
+    const ttl = parseInt(document.getElementById("fc-ttl").value);
+    const mult = ROOTFS_MULTIPLIER[rootfs] || 1.0;
+    const satsPerMin = Math.ceil(BASE_SATS_PER_MIN * (ram / 256) * mult);
+    const totalSats = satsPerMin * Math.ceil(ttl / 60);
+    document.getElementById("fc-price-display").textContent = `${satsPerMin} sats/min`;
+    document.getElementById("fc-total-display").textContent = `${totalSats} sats total`;
+    updateOrderButton();
+  }
+
+  function updateOrderButton() {
+    const btn = document.getElementById("order-btn");
+    if (currentTab === "microvm") {
+      const ram = parseInt(document.getElementById("fc-ram").value);
+      const rootfs = document.getElementById("fc-rootfs").value;
+      const ttl = parseInt(document.getElementById("fc-ttl").value);
+      const mult = ROOTFS_MULTIPLIER[rootfs] || 1.0;
+      const totalSats = Math.ceil(BASE_SATS_PER_MIN * (ram / 256) * mult) * Math.ceil(ttl / 60);
+      btn.textContent = `Launch MicroVM — ${totalSats} sats via Lightning`;
+    } else {
+      btn.textContent = `Order Now — ${TIER_PRICES[selectedTier]} via Lightning`;
+    }
+  }
+
+  function selectTier(tier) {
+    selectedTier = tier;
+    document.querySelectorAll(".package-card").forEach((c) => {
+      c.classList.toggle("selected", c.dataset.tier === tier);
+    });
+    const btn = document.getElementById("order-btn");
+    btn.textContent = `Order Now — ${TIER_PRICES[tier]} via Lightning`;
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 2000);
+  }
+
+  function copyText(elementId) {
+    const el = document.getElementById(elementId);
+    el.select();
+    navigator.clipboard.writeText(el.value).then(() => showToast("Copied to clipboard"));
+  }
+
+  function copyText2(elementId) {
+    const el = document.getElementById(elementId);
+    const text = el.textContent || el.innerText;
+    navigator.clipboard.writeText(text).then(() => showToast("Copied to clipboard"));
+  }
+
+  function openWebTerminal() {
+    const vm = window._vmData || {};
+    if (!vm.ip) {
+      showToast("VM data not available");
+      return;
+    }
+    window.open(`http://${vm.ip}:7681`, "_blank", "width=900,height=600");
+  }
+
+  function toggleReseller() {
+    const el = document.getElementById("reseller-instructions");
+    el.classList.toggle("hidden");
+    if (!el.classList.contains("hidden")) {
+      showToast("Copy the command and run it on your VM");
+    }
+  }
+
+  let microVMData = null;
+  let fcVPSData = null;
+
+  async function launchFirecrackerVPS() {
+    const btn = document.getElementById("fc-btn");
+    btn.disabled = true;
+    btn.textContent = "Launching...";
+    try {
+      const tokenInput = document.getElementById("fc-token").value.trim();
+      let token = tokenInput;
+      if (!token) {
+        btn.textContent = "Minting testnut...";
+        const mintResp = await fetch("/api/mint?amount=1");
+        const mintData = await mintResp.json();
+        if (mintData.error) throw new Error("Mint: " + mintData.error);
+        token = mintData.token;
+        if (!token) throw new Error("No token from faucet");
+      }
+
+      btn.textContent = "Creating VM...";
+      const sshKey = document.getElementById("fc-ssh-key").value.trim();
+      const createResp = await fetch("/api/firecracker/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Cashu": token },
+        body: JSON.stringify({
+          cpus: 1, mem_mb: 256, disk_mb: 512, ttl_seconds: 3600,
+          ...(sshKey ? { ssh_key: sshKey } : {}),
+        }),
+      });
+      const data = await createResp.json();
+      if (data.error) throw new Error(data.error);
+
+      const vm = data.vm || data;
+      fcVPSData = {
+        port: vm.public_port || data.public_port,
+        password: vm.password || data.password,
+        id: vm.id || data.id,
+        host: "66.92.204.237",
+      };
+      const details = document.getElementById("fc-details");
+      const sanitize = (s) => String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+      details.innerHTML =
+        `Port: <strong>${sanitize(fcVPSData.port)}</strong><br>` +
+        `Password: <code style="user-select:all;">${sanitize(fcVPSData.password)}</code><br>` +
+        `SSH: <code style="font-size:0.7rem;">ssh -p ${sanitize(fcVPSData.port)} root@${sanitize(fcVPSData.host)}</code>`;
+      document.getElementById("fc-result").classList.remove("hidden");
+      btn.textContent = "⚡ Launch Another";
+      btn.disabled = false;
+      showToast("Firecracker VPS ready!");
+    } catch (err) {
+      btn.textContent = "⚡ Launch VPS (1 sat)";
+      btn.disabled = false;
+      showToast("Error: " + err.message);
+    }
+  }
+
+  function openFirecrackerTerminal() {
+    if (!fcVPSData) { showToast("Launch a VPS first"); return; }
+    const url = `/terminal?host=${encodeURIComponent(fcVPSData.host)}`
+              + `&port=${encodeURIComponent(fcVPSData.port)}`
+              + `&user=root`
+              + `&password=${encodeURIComponent(fcVPSData.password)}`;
+    window.open(url, "_blank", "width=900,height=600");
+  }
+
+  async function launchMicroVM() {
+    const btn = document.getElementById("microvm-btn");
+    btn.disabled = true;
+    btn.textContent = "Launching...";
+    try {
+      const resp = await fetch("/api/microvm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cpus: 1, mem_mb: 256, disk_mb: 512 }),
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      microVMData = data;
+      const details = document.getElementById("microvm-details");
+      details.innerHTML = `ID: ${sanitize(data.id)}<br>IP: ${sanitize(data.ip)}<br>vCPU: ${sanitize(data.cpus)} | RAM: ${sanitize(data.mem_mb)}MB`;
+      document.getElementById("microvm-result").classList.remove("hidden");
+      btn.textContent = "⚡ Launch Another";
+      btn.disabled = false;
+      showToast("Micro-VM launched!");
+    } catch (err) {
+      btn.textContent = "⚡ Launch Micro-VM";
+      btn.disabled = false;
+      showToast("Error: " + err.message);
+    }
+  }
+
+  function openMicroVMTerminal() {
+    if (!microVMData) { showToast("Launch a micro-VM first"); return; }
+    const host = microVMData.host_ip || "66.92.204.237";
+    window.open(`http://${host}:7682`, "_blank", "width=900,height=600");
+  }
+
+  async function destroyMicroVM() {
+    if (!microVMData) return;
+    try {
+      await fetch(`/api/microvm/${microVMData.id}`, { method: "DELETE" });
+      document.getElementById("microvm-result").classList.add("hidden");
+      document.getElementById("microvm-btn").textContent = "⚡ Launch Micro-VM";
+      showToast("Micro-VM destroyed");
+      microVMData = null;
+    } catch (err) {
+      showToast("Destroy failed: " + err.message);
+    }
+  }
+
+  function log(msg) {
+    const area = document.getElementById("log-area");
+    const ts = new Date().toLocaleTimeString();
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    entry.innerHTML = `<span class="ts">[${ts}]</span> ${msg}`;
+    area.appendChild(entry);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function setStatus(status, text) {
+    const pill = document.getElementById("status-pill");
+    const label = document.getElementById("status-text");
+    pill.className = `status-pill ${status}`;
+    label.textContent = text;
+
+    const dot = pill.querySelector(".dot");
+    if (status === "ready" || status === "error") {
+      dot.style.animation = "none";
+    }
+  }
+
+  function startCountdown(expMs) {
+    expiresAt = expMs;
+    if (countdownTimer) clearInterval(countdownTimer);
+    updateCountdown();
+    countdownTimer = setInterval(updateCountdown, 1000);
+  }
+
+  function updateCountdown() {
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      document.getElementById("countdown").innerHTML = "<strong>VM expired</strong>";
+      if (countdownTimer) clearInterval(countdownTimer);
+      return;
+    }
+    const hours = Math.floor(remaining / 3600000);
+    const mins = Math.floor((remaining % 3600000) / 60000);
+    document.getElementById("countdown").innerHTML =
+      `VM expires in <strong>${hours}h ${mins}m</strong>`;
+  }
+
+  async function createOrder() {
+    const btn = document.getElementById("order-btn");
+    btn.disabled = true;
+    btn.textContent = "Creating invoice...";
+
+    const sshKey = document.getElementById("ssh-key").value.trim();
+
+    try {
+      let resp;
+      if (currentTab === "microvm") {
+        const ram = parseInt(document.getElementById("fc-ram").value);
+        const cpu = parseInt(document.getElementById("fc-cpu").value);
+        const rootfs = document.getElementById("fc-rootfs").value;
+        const ttl = parseInt(document.getElementById("fc-ttl").value);
+        resp = await fetch("/api/firecracker/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cpus: cpu,
+            mem_mb: ram,
+            disk_mb: 512,
+            rootfs: rootfs,
+            ttl_seconds: ttl,
+            ...(sshKey ? { ssh_key: sshKey } : {}),
+          }),
+        });
+      } else {
+        resp = await fetch("/api/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tier: selectedTier, ...(sshKey ? { ssh_key: sshKey } : {}) }),
+        });
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: "Request failed" }));
+        throw new Error(err.message || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+
+      // Show payment card
+      document.getElementById("payment-card").classList.remove("hidden");
+      document.getElementById("status-card").classList.remove("hidden");
+
+      // Render QR
+      const qrEl = document.getElementById("qrcode");
+      qrEl.innerHTML = "";
+      function renderQR(data) {
+        var qrData = encodeURIComponent('lightning:' + data.bolt11);
+        qrEl.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&bgcolor=ffffff&color=0a0b10&data=' + qrData + '" width="240" height="240" style="border-radius:12px;background:#fff;padding:8px" alt="Lightning QR" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'<p style=\\\'color:#666;padding:20px;\\\'>QR unavailable — use invoice string below</p>\'" />';
+      }
+      if (data.bolt11) {
+        renderQR(data);
+      } else {
+        qrEl.innerHTML = '<p style="color:#666;padding:20px;">No invoice generated<br>Use the checkout link below</p>';
+      }
+
+      // Show BOLT11
+      document.getElementById("bolt11-text").value = data.bolt11 || "—";
+
+      // Checkout link
+      const link = document.getElementById("checkout-link");
+      link.href = data.checkout_url;
+
+      // Start countdown
+      startCountdown(data.expires_at);
+
+      // Start polling
+      setStatus("waiting", "Awaiting payment...");
+      log(`Order created: ${data.order_id.slice(0, 8)}...`);
+      log(`Lightning invoice ready — scan QR or use invoice string`);
+      startPolling(data.order_id);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = `Retry — ${TIER_PRICES[selectedTier]} via Lightning`;
+      showToast(err.message);
+    }
+  }
+
+  function startPolling(orderId) {
+    if (pollTimer) clearInterval(pollTimer);
+
+    const poll = async () => {
+      try {
+        const resp = await fetch(`/api/status/${orderId}`);
+        const data = await resp.json();
+
+        switch (data.status) {
+          case "awaiting_payment":
+            setStatus("waiting", "Awaiting payment...");
+            break;
+          case "ordering":
+            setStatus("active", "Payment received — ordering VM...");
+            log("Payment confirmed!");
+            break;
+          case "provisioning":
+            if (!window._provStart) window._provStart = Date.now();
+            {
+              const elapsed = Math.floor((Date.now() - window._provStart) / 1000);
+              const mins = Math.floor(elapsed / 60);
+              const secs = (elapsed % 60).toString().padStart(2, '0');
+              setStatus("active", `Provisioning your VM... ${mins}:${secs} elapsed`);
+            }
+            if (!document.querySelector('[data-logged="prov"]')) {
+              log(`VM provisioning started (service #${data.service_id}) — SHC is allocating resources...`);
+              document.getElementById("log-area").setAttribute('data-logged', 'prov');
+            }
+            break;
+          case "configuring_ssh":
+            setStatus("active", "Injecting SSH key...");
+            log("VM ready — configuring SSH access...");
+            break;
+          case "ready":
+            setStatus("ready", "VM is ready! 🎉");
+            log(`VM ready: ${data.hostname}`);
+            currentSsh = data.ssh;
+            document.getElementById("ssh-command").textContent = data.ssh;
+
+            if (data.sshpass) {
+              document.getElementById("sshpass-command").textContent = data.sshpass;
+              document.getElementById("sshpass-option").style.display = "block";
+            } else {
+              document.getElementById("sshpass-option").style.display = "none";
+            }
+
+            if (data.password) {
+              document.getElementById("ssh-password").textContent = data.password;
+              document.getElementById("password-option").style.display = "block";
+            } else {
+              document.getElementById("password-option").style.display = "none";
+            }
+
+            document.getElementById("ssh-details").textContent =
+              `Hostname: ${data.hostname} | IP: ${data.ip} | User: ${data.username || "root"}`;
+            document.getElementById("ssh-card").classList.remove("hidden");
+            document.getElementById("payment-card").classList.add("hidden");
+            if (pollTimer) clearInterval(pollTimer);
+
+            window._vmData = { ip: data.ip, user: data.username || "root", password: data.password || "" };
+            break;
+          case "error":
+            setStatus("error", `Error: ${data.message}`);
+            log(`Error: ${data.message}`);
+            if (pollTimer) clearInterval(pollTimer);
+            break;
+        }
+
+        if (data.expires_at) startCountdown(data.expires_at);
+      } catch {
+        // Network errors are transient, keep polling
+      }
+    };
+
+    poll();
+    pollTimer = setInterval(poll, 3000);
+  }
+
+  async function loadHostStatus() {
+    const bar = document.getElementById("host-status-bar");
+    try {
+      const resp = await fetch("/api/hosts");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const loading = document.getElementById("hosts-loading");
+      if (loading) loading.remove();
+      if (!data.hosts || data.hosts.length === 0) {
+        bar.innerHTML = '<span style="color:var(--text-dim);">KVM Hosts: none configured</span>';
+        return;
+      }
+      bar.innerHTML = '<span style="color:var(--text-dim);">KVM Hosts:</span>';
+      for (const h of data.hosts) {
+        const badge = document.createElement("span");
+        badge.style.cssText = "padding:2px 8px;border-radius:4px;display:inline-flex;align-items:center;gap:4px;";
+        if (h.online) {
+          badge.style.background = "rgba(0,255,136,0.12)";
+          badge.style.color = "#00ff88";
+          let info = `${h.vms ?? 0} VMs`;
+          if (h.rootfs && h.rootfs.length > 0) info += ` · ${h.rootfs.join(", ")}`;
+          if (h.latency_ms) info += ` · ${h.latency_ms}ms`;
+          badge.innerHTML = `● ${h.name} (${info})`;
+        } else {
+          badge.style.background = "rgba(255,80,80,0.12)";
+          badge.style.color = "#ff5050";
+          badge.innerHTML = `○ ${h.name} (offline)`;
+        }
+        bar.appendChild(badge);
+      }
+    } catch {
+      // Silently fail — host status is informational
+    }
+  }
+
+  loadHostStatus();
+  setInterval(loadHostStatus, 30000);
+</script>
+</body>
+</html>
