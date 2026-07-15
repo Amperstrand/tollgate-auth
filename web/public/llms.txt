@@ -1,0 +1,208 @@
+# compute.cashu.email — Firecracker VPS + WireGuard VPN — LLM Instructions
+
+> **EXPERIMENTAL BETA** — Firecracker microVMs and WireGuard VPN tunnels.
+> Pay with Cashu ecash from any mint. Web terminal included.
+> This file tells LLMs and agents everything needed to get tokens, pay, and connect.
+
+## Current Status (2026-07-12)
+
+| Service | Status | Host | Details |
+|---|---|---|---|
+| **Firecracker VPS** | ✅ Operational | ai-legion (via tunnel) + europa-vpn-vps (66.92.204.237, direct) | 256MB-2GB RAM, 1-4 vCPU, Debian rootfs, kernel 7.1.2 |
+| **WireGuard VPN** | ✅ Operational | europa-vpn-vps (66.92.204.237) | Remote-access and exit modes, JWT-authenticated peers |
+| **Web Terminal** | ✅ Operational | nodns.shop (webssh-proxy :7682) | Browser-based xterm.js → WebSocket → SSH |
+| **Cashu Payment** | ✅ Operational | Any Cashu mint accepted | Tokens verified via cdk-cli receive --allow-untrusted |
+| **Self-hosted CI** | ✅ Operational | europa-vpn-vps (GitHub Actions runner) | Self-hosted runner, no Actions minutes consumed |
+| **NixOS ISO** | ✅ Built | ai-legion | 1.5GB bootable ISO, ready for USB |
+
+**Payment model**: Bring any Cashu token from any mint. Tokens are verified and
+spent via `cdk-cli receive --allow-untrusted`. **Testnuts from testnut.cashu.exchange
+are accepted for free testing.** Real Cashu mints (backed by Bitcoin Lightning) also accepted.
+
+## Quick Start
+
+```bash
+# 1. Get a free testnut token (or use your own from any Cashu mint)
+TOKEN=$(curl -s "https://compute.cashu.email/api/mint?amount=1" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+
+# 2. Create a Firecracker VPS
+curl -X POST https://compute.cashu.email/api/firecracker/create \
+  -H "Content-Type: application/json" \
+  -H "X-Cashu: $TOKEN" \
+  -d '{"cpus":1,"mem_mb":256,"disk_mb":512,"ttl_seconds":3600}'
+
+# 3. SSH in
+ssh -o KexAlgorithms=curve25519-sha256 -p 25000 root@66.92.204.237
+
+# 4. Or open web terminal in browser:
+# https://compute.cashu.email/terminal?host=66.92.204.237&port=25000&user=root&password=PASSWORD
+
+# 5. Destroy when done
+curl -X DELETE https://compute.cashu.email/api/firecracker/VM_ID \
+  -H "X-VM-Token: OWNERSHIP_TOKEN"
+```
+
+## Services at a glance
+
+| Service | Price | Payment |
+|---|---|---|
+| **Firecracker VPS** | 1 sat / hour | Any Cashu token |
+| **WireGuard Exit VPN** | 1 sat flat (beta) | Any Cashu token |
+| **WireGuard Remote-Access** | 1 sat / hour | Any Cashu token |
+
+## Getting Cashu Tokens
+
+**Option A: Free faucet (testing)**
+```bash
+curl -s "https://compute.cashu.email/api/mint?amount=1"
+```
+
+**Option B: Real Cashu wallet (real sats)**
+Any Cashu-compatible wallet (Nutshell, macadamia, Enigma). Tokens from any NUT-00
+compliant mint are accepted: testnut.cashu.exchange (free), cashu.me, mint.minibits.cash, etc.
+
+**Option C: Browser**
+Visit `https://compute.cashu.email/`, paste token or leave empty for free testnuts.
+
+## Architecture
+
+```
+compute.cashu.email (Cloudflare Worker)
+  ├── GET /api/mint?amount=1         → free testnut faucet
+  ├── POST /api/firecracker/create   → creates VM (X-Cashu header)
+  ├── GET /terminal                  → xterm.js web terminal
+  ├── DELETE /api/firecracker/:id    → destroys VM
+  └── /v1/wg/*                       → WireGuard VPN endpoints
+
+nodns.shop (proxy + services)
+  ├── vps-proxy :8094                → Cashu verification (any mint)
+  ├── cdk-mintd :3341                → self-hosted Cashu mint (operator-controlled)
+  ├── webssh-proxy :7682             → WebSocket-to-SSH bridge
+  ├── faucet-api :8095               → testnut.cashu.exchange faucet
+  └── GitHub Actions runner          → self-hosted CI runner
+
+Hosts:
+  ├── ai-legion (home lab, 32GB RAM, 937GB disk)
+  │   ├── Firecracker daemon :8081   → max 10 VMs, 4 vCPU/2GB each
+  │   ├── WireGuard tunnel           → ports 25000-25099 via VPS
+  │   └── NixOS ISO builder          → 1.5GB ISO stored at /tmp/firecracker-reseller.iso
+  │
+  └── europa-vpn-vps (66.92.204.237, SHC Dev VPS, $0.24/day)
+      ├── Firecracker daemon :8081   → max 5 VMs, direct public IP
+      ├── wg-jwt-peer :8080          → WireGuard VPN peer management
+      └── GitHub Actions runner      → self-hosted CI (bypasses Actions billing)
+```
+
+## Deployment Options
+
+Three ways to bootstrap a new Firecracker reseller node:
+
+### 1. Ansible playbook (any Debian 13 + KVM)
+```bash
+cd ansible && cp inventory.example inventory
+# Edit inventory with your host IP
+ansible-playbook -i inventory bootstrap-reseller.yml
+```
+Proven on SHC Dev VPS — installs Firecracker, daemon, webssh, NIP-99 announcer.
+
+### 2. cloud-init userdata (SHC, GCP, AWS)
+```bash
+# SHC:
+shc order --hostname reseller --size dev-1c-4gb \
+  --ssh-key ~/.ssh/id_ed25519.pub --userdata-file cloud-init-bootstrap.yml --pay
+
+# GCP:
+gcloud compute instances create reseller \
+  --machine-type=n2-standard-4 \
+  --image-family=debian-13 \
+  --metadata-from-file user-data=cloud-init-bootstrap.yml
+```
+Validated in CI: `cloud-init schema --config-file cloud-init-bootstrap.yml` passes.
+
+### 3. NixOS ISO (bootable USB for any machine)
+```bash
+# ISO built on ai-legion (1.5GB):
+# /tmp/firecracker-reseller.iso on ai-legion
+
+# Write to USB:
+dd if=firecracker-reseller.iso of=/dev/sdX bs=4M
+
+# Boot any machine from USB → NixOS with Firecracker daemon + webssh + announcer
+# All services auto-start. Auto-announces on Nostr (NIP-99).
+
+# Build from source (on any Nix machine):
+cd nixos && nix build .#isoImage    # ISO
+cd nixos && nix build .#vm          # VM image
+```
+
+## API Reference
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/mint?amount=1` | GET | Free testnut Cashu token |
+| `/api/firecracker/create` | POST | Create VM (X-Cashu header) |
+| `/api/firecracker/:id` | DELETE | Destroy VM (X-VM-Token header) |
+| `/api/payment/request` | POST | Payment order (manual approval flow) |
+| `/api/payment/status/:ref` | GET | Poll payment status |
+| `/terminal` | GET | Web terminal (host, port, user, password) |
+| `/v1/wg/connect` | POST | WireGuard connection |
+| `/v1/wg/subscribe` | POST | WireGuard exit subscription |
+| `/v1/wg/cancel` | POST | Cancel subscription |
+| `/v1/wg/subscription` | GET | Subscription status |
+
+## Recent Improvements (2026-07-08 to 2026-07-12)
+
+### Production fixes
+- **Policy routing bug**: Fixed inbound tunnel traffic being routed back through tunnel instead of to VMs
+- **nftables killswitch**: Added persistent inbound-SSH rule for wg-egress → fcTap
+- **SSH KEX optimization**: Disabled post-quantum KEX on low-RAM VMs (was causing 5+ minute SSH timeouts)
+- **TTL fix**: Daemon now respects `ttl_seconds` from request body (was using hardcoded config default)
+- **Cashu verification fix**: Ported tollgate-ssh's cdk-cli output parsing (handles "compensated" indicator)
+- **Password generation**: Each VM gets a random password for web terminal auth
+- **SNAT fix**: Added MASQUERADE for management port 25010 (asymmetric routing)
+
+### New features
+- **Web terminal**: xterm.js + webssh_proxy on nodns.shop, WSS via Caddy
+- **Self-hosted Cashu mint**: cdk-mintd on nodns.shop with manual operator approval
+- **Payment order system**: POST /api/payment/request → operator approval → token
+- **Firecracker VPS card**: UI with token paste field + "Launch VPS" button
+- **8-test E2E suite**: Playwright tests covering homepage, VM creation, terminal, SSH auth, concurrent VMs, replay rejection, destroy
+- **Test result publishing**: Blossom upload + Nostr kind 30078, visible on tests.cashu.email
+- **Self-hosted CI runner**: GitHub Actions runner on europa-vpn-vps (bypasses Actions billing)
+
+### Deployment infrastructure
+- **Ansible playbook**: bootstrap-reseller.yml (proven on SHC, 18/20 tasks pass)
+- **cloud-init bootstrap**: cloud-init-bootstrap.yml (validated in CI)
+- **NixOS configuration**: configuration.nix + flake.nix (ISO + QCOW2 + bare metal from one config)
+- **NixOS ISO built**: 1.5GB bootable ISO on ai-legion
+- **NIP-99 announcer**: Publishes capacity to Nostr relays every 60s
+
+### Merged upstream
+- Marketplace zones/plans/catalog
+- 429 resource exhaustion handling
+- VM DNS delivery fix
+- Dynamic pricing
+- README rewrite
+
+## Stats
+
+- **59 Firecracker VMs launched** total across all testing
+- **8/8 E2E tests pass** (verified with real Cashu payment flow)
+- **3 deployment paths** (Ansible, cloud-init, NixOS ISO)
+- **2 active hosts** (ai-legion + europa-vpn-vps)
+- **Self-hosted CI** (no GitHub Actions minutes consumed)
+
+## Source Code
+
+| File | Purpose |
+|---|---|
+| `src/index.ts` | Cloudflare Worker (compute.cashu.email) |
+| `firecracker/vps_proxy.py` | Cashu verification, VM routing, payment orders |
+| `firecracker/firecracker-daemon.py` | VM lifecycle, rootfs baking, port forwarding |
+| `firecracker/webssh_proxy.js` | WebSocket-to-SSH bridge |
+| `ansible/bootstrap-reseller.yml` | Ansible playbook for new hosts |
+| `cloud-init-bootstrap.yml` | Cloud-init userdata for cloud VMs |
+| `nixos/configuration.nix` | NixOS declarative config |
+| `nixos/flake.nix` | Flake for ISO/QCOW2/bare metal |
+| `.github/workflows/build-nixos.yml` | CI workflow (self-hosted runner) |
+| `tests/e2e-firecracker.spec.ts` | 8 Playwright E2E tests |

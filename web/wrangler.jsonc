@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "compute-cashu-email",
+  "main": "worker.ts",
+  "compatibility_date": "2025-06-20",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "routes": [
+    { "pattern": "compute.cashu.email", "custom_domain": true }
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "VPS_ORDERS",
+      "id": "dea6b148906e4acc8d5a2650660e2796"
+    }
+  ],
+
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.html"],
+      "fallthrough": true
+    },
+    {
+      "type": "Text",
+      "globs": ["**/*.sh"],
+      "fallthrough": true
+    }
+  ]
+}
