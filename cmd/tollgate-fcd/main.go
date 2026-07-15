@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const (
@@ -37,25 +38,29 @@ var (
 )
 
 type VM struct {
-	ID      string `json:"id"`
-	IP      string `json:"ip"`
-	Rootfs  string `json:"rootfs"`
-	CPUs    int    `json:"cpus"`
-	MemMB   int    `json:"mem_mb"`
-	proc    *os.Process
-	tap     string
-	logFile *os.File
+	ID        string `json:"id"`
+	IP        string `json:"ip"`
+	Rootfs    string `json:"rootfs"`
+	CPUs      int    `json:"cpus"`
+	MemMB     int    `json:"mem_mb"`
+	proc      *os.Process
+	tap       string
+	logFile   *os.File
+	ttl       int
+	expiresAt time.Time
 }
 
 type createRequest struct {
-	CPUs   int    `json:"cpus"`
-	MemMB  int    `json:"mem_mb"`
-	Rootfs string `json:"rootfs"`
+	CPUs       int    `json:"cpus"`
+	MemMB      int    `json:"mem_mb"`
+	Rootfs     string `json:"rootfs"`
+	TTLSeconds int    `json:"ttl_seconds"`
 }
 
 func main() {
 	os.MkdirAll(vmBase, 0755)
 	ensureNAT()
+	startReaper()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
