@@ -55,12 +55,14 @@ type createRequest struct {
 	MemMB      int    `json:"mem_mb"`
 	Rootfs     string `json:"rootfs"`
 	TTLSeconds int    `json:"ttl_seconds"`
+	CashuToken string `json:"cashu_token"`
 }
 
 func main() {
 	os.MkdirAll(vmBase, 0755)
 	ensureNAT()
 	startReaper()
+	initCashu()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
@@ -126,6 +128,15 @@ func handleVMs(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Rootfs == "" {
 			req.Rootfs = "initramfs"
+		}
+
+		if req.CashuToken != "" {
+			result := verifyCashuToken(req.CashuToken)
+			if !result.Accept {
+				writeJSON(w, 402, map[string]string{"error": result.Error})
+				return
+			}
+			req.TTLSeconds = result.Seconds
 		}
 
 		vm, err := createVM(req)
