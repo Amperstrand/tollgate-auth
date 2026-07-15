@@ -1389,3 +1389,51 @@ never bootstrapped.
 
 Not all SHC nodes expose nested virtualization. Verify /dev/kvm after
 provisioning. Request migration if missing.
+
+## KVM Reselling: End-to-End Deployment (July 15 2025)
+
+PROVEN: nixos-cloud SHC template can host and resell Firecracker
+microVMs via HTTP API. Tested on VPS 1598 (Dev VPS Starter, $0.24/day,
+Intel Xeon Skylake, VMX present, /dev/kvm available).
+
+### Deployment Steps (all verified)
+
+1. Order SHC VPS with nixos-cloud template (via shc-toolkit API)
+2. Pay invoice (prevents billing-bug deletion)
+3. SSH as root (key injected during ordering)
+4. Verify KVM: grep vmx /proc/cpuinfo, ls /dev/kvm
+5. Install Firecracker: nix profile install nixpkgs#firecracker (2 min)
+6. Install iproute2: nix profile install nixpkgs#iproute2 (BusyBox ip
+   lacks tuntap support)
+7. Symlink: ln -sf ~/.nix-profile/bin/firecracker /usr/local/bin/
+8. Setup NAT: br-fc bridge + iptables MASQUERADE
+9. Start fc-daemon: python3 fc-daemon-v3.py (HTTP API on :8081)
+10. Create VMs: POST /vms (returns VM ID + IP)
+
+### Verified Capabilities
+
+| Capability | Status | Evidence |
+|---|---|---|
+| KVM available | YES | vmx=2, /dev/kvm exists |
+| Firecracker starts | YES | v1.15.1, exits cleanly |
+| Daemon API | YES | health=ok, rootfs=["initramfs"] |
+| VM creation | YES | VM 22c9608b49e7 created, alive=true |
+| VM kernel boots | YES | NixOS 6.12.62 kernel, init runs |
+| Host TAP networking | YES | fc22c9608b UP on br-fc |
+| Guest internet | PENDING | Needs kernel modules in initramfs |
+| Guest vsock | PENDING | Needs vsock modules in initramfs |
+
+### Known Issues
+
+1. BusyBox ip lacks tuntap: Install iproute2 via nix profile
+2. NixOS kernel modules (=m) not in cloud image module tree: Guest
+   initramfs needs virtio_net.ko + vsock.ko included, or use a kernel
+   with these built-in (=y, like Debian 6.12.90)
+3. SHC node placement: Not all nodes have VMX (see table above)
+
+### Deployment Artifacts
+
+- scripts/firecracker/nixos-host.nix: NixOS config with fc-daemon
+  systemd service, Firecracker, NAT, KVM modules
+- scripts/firecracker/deploy-nixos-host.py: Full deployment script
+  (order VPS, install, configure, verify)
