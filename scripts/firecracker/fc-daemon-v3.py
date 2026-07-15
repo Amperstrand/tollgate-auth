@@ -26,6 +26,9 @@ UBUNTU_ROOTFS = "/tmp/tollgate-ubuntu-rootfs.ext4"
 VM_BASE = "/tmp/fc-vms"
 DEFAULT_MEM = 256
 DEFAULT_VCPUS = 1
+BIND_ADDR = os.environ.get("FC_BIND", "127.0.0.1")
+BIND_PORT = int(os.environ.get("FC_PORT", "8081"))
+API_KEY = os.environ.get("FC_API_KEY", "")
 
 vms = {}
 
@@ -33,6 +36,11 @@ vms = {}
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
+
+    def _check_auth(self):
+        if not API_KEY:
+            return True
+        return self.headers.get("Authorization", "") == f"Bearer {API_KEY}"
 
     def _json(self, code, data):
         body = json.dumps(data).encode()
@@ -49,12 +57,17 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.exists(UBUNTU_ROOTFS): rootfs_available.append("ubuntu")
             if os.path.exists(INITRAMFS): rootfs_available.append("initramfs")
             self._json(200, {"status": "ok", "vms": len(vms), "rootfs": rootfs_available})
+        elif not self._check_auth():
+            self._json(401, {"error": "Unauthorized"})
         elif self.path == "/vms":
             self._json(200, [{"id": k, "alive": v["proc"].poll() is None, "rootfs": v.get("rootfs", "?")} for k, v in vms.items()])
         else:
             self._json(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._check_auth():
+            self._json(401, {"error": "Unauthorized"})
+            return
         if self.path != "/vms":
             self._json(404, {"error": "not found"})
             return
@@ -148,6 +161,9 @@ class Handler(BaseHTTPRequestHandler):
         return vm_id, vm_ip
 
     def do_DELETE(self):
+        if not self._check_auth():
+            self._json(401, {"error": "Unauthorized"})
+            return
         parts = self.path.strip("/").split("/")
         if len(parts) != 2 or parts[0] != "vms":
             self._json(404, {"error": "not found"})
@@ -186,7 +202,7 @@ if __name__ == "__main__":
     os.makedirs(VM_BASE, exist_ok=True)
     signal.signal(signal.SIGTERM, cleanup_all)
     signal.signal(signal.SIGINT, cleanup_all)
-    server = HTTPServer(("127.0.0.1", 8081), Handler)
+    server = HTTPServer((BIND_ADDR, BIND_PORT), Handler)
     rootfs_list = []
     if os.path.exists(ALPINE_ROOTFS): rootfs_list.append("alpine")
     if os.path.exists(UBUNTU_ROOTFS): rootfs_list.append("ubuntu")
