@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func createVM(req createRequest) (*VM, error) {
@@ -81,14 +82,16 @@ func createVM(req createRequest) (*VM, error) {
 	}
 
 	vm := &VM{
-		ID:      id,
-		IP:      ip,
-		Rootfs:  req.Rootfs,
-		CPUs:    req.CPUs,
-		MemMB:   req.MemMB,
-		proc:    cmd.Process,
-		tap:     tapName,
-		logFile: serialFile,
+		ID:        id,
+		IP:        ip,
+		Rootfs:    req.Rootfs,
+		CPUs:      req.CPUs,
+		MemMB:     req.MemMB,
+		proc:      cmd.Process,
+		tap:       tapName,
+		logFile:   serialFile,
+		ttl:       req.TTLSeconds,
+		expiresAt: time.Now().Add(time.Duration(req.TTLSeconds) * time.Second),
 	}
 	vms[id] = vm
 
@@ -106,6 +109,14 @@ func createVM(req createRequest) (*VM, error) {
 		log.Printf("[tollgate-fcd] VM %s exited", id)
 	}()
 
+	if vm.ttl > 0 {
+		go func() {
+			time.Sleep(time.Duration(vm.ttl) * time.Second)
+			log.Printf("[tollgate-fcd] VM %s TTL expired (%ds), destroying", id, vm.ttl)
+			destroyVM(id)
+		}()
+	}
+
 	log.Printf("[tollgate-fcd] VM %s created (ip=%s, rootfs=%s, tap=%s)", id, ip, req.Rootfs, tapName)
 
 	return &VM{
@@ -115,6 +126,29 @@ func createVM(req createRequest) (*VM, error) {
 		CPUs:   req.CPUs,
 		MemMB:  req.MemMB,
 	}, nil
+}
+
+func startReaper() {
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			vmsMutex.Lock()
+			now := time.Now()
+			for id, vm := range vms {
+				if vm.ttl > 0 && now.After(vm.expiresAt) {
+					log.Printf("[tollgate-fcd] Reaper: destroying expired VM %s", id)
+					vm.proc.Kill()
+					if vm.logFile != nil {
+						vm.logFile.Close()
+					}
+					cleanupTAP(vm.tap)
+					os.RemoveAll(filepath.Join(vmBase, id))
+					delete(vms, id)
+				}
+			}
+			vmsMutex.Unlock()
+		}
+	}()
 }
 
 func destroyVM(id string) error {
