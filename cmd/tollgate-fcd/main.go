@@ -154,12 +154,16 @@ func handleVMs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleVMByID(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/shell") {
+		handleVMShellWS(w, r)
+		return
+	}
 	if !checkAuth(r) {
 		writeJSON(w, 401, map[string]string{"error": "Unauthorized"})
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/vms/")
-	if id == "" {
+	if id == "" || strings.Contains(id, "/") {
 		writeJSON(w, 400, map[string]string{"error": "missing VM ID"})
 		return
 	}
