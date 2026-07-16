@@ -1,6 +1,6 @@
 module tollgate-auth
 
-go 1.25
+go 1.25.0
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260701134336-94cc8043858a
@@ -10,7 +10,8 @@ require (
 	github.com/fxamacker/cbor/v2 v2.7.0
 	github.com/gliderlabs/ssh v0.3.7
 	github.com/lorenzodonini/ocpp-go v0.19.0
-	golang.org/x/crypto v0.39.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/sys v0.45.0
 	layeh.com/radius v0.0.0-20231213012653-1006025d24f8
 )
 
@@ -40,7 +41,6 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/text v0.26.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/go-playground/validator.v9 v9.30.0 // indirect
 )
