@@ -79,3 +79,21 @@ tmp/
 # Test binary
 /test
 /psbt.raw
+
+# Generated build outputs (binaries never belong in git; /tollgate-csms was
+# tracked before this rule existed)
+/csms-test
+*.test
+*.out
+
+# Playwright MCP console logs
+.playwright-mcp/
+
+# Firecracker loadtest results
+scripts/firecracker/results/
+
+# Test evidence convention (lightning-playground pattern): test-artifacts/
+# is gitignored by default; run evidence worth persisting is added
+# deliberately with `git add -f test-artifacts/<run>/` and reviewed.
+test-artifacts/*
+!test-artifacts/README.md
