@@ -28,3 +28,27 @@ jobs:
 
       - name: Build RADIUS binary
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/tollgate-auth-radius/
+
+      - name: Binary guard (issue #20)
+        # Fails on newly added ELF/Mach-O/PE executables anywhere in the
+        # tree, or any added file >1MB at the repo root. The class that
+        # produced the tracked 11MB tollgate-csms ELF.
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}"
+          git fetch --depth=1 "$BASE" 2>/dev/null || true
+          ADDED=$(git diff --name-only --diff-filter=A "$BASE"...HEAD 2>/dev/null || git diff --name-only --diff-filter=A HEAD~1)
+          if [ -z "$ADDED" ]; then echo "no added files"; exit 0; fi
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            TYPE=$(file -b "$f")
+            case "$TYPE" in
+              *ELF*|*Mach-O*|*PE32*)
+                echo "::error::$f looks like a compiled binary ($TYPE) - build outputs never belong in git (issue #20)"; FAIL=1 ;;
+            esac
+            SIZE=$(stat -c%s "$f")
+            if [ "$SIZE" -gt 1048576 ] && [ "$(dirname "$f")" = "." ]; then
+              echo "::error::$f is $SIZE bytes at repo root - large blobs do not belong at top level (issue #20)"; FAIL=1
+            fi
+          done <<< "$ADDED"
+          [ -n "${FAIL:-}" ] && exit 1 || echo "binary guard clean"
