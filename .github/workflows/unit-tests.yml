@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -34,11 +36,17 @@ jobs:
         # tree, or any added file >1MB at the repo root. The class that
         # produced the tracked 11MB tollgate-csms ELF.
         run: |
-          set -euo pipefail
-          BASE="${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}"
-          git fetch --depth=1 "$BASE" 2>/dev/null || true
-          ADDED=$(git diff --name-only --diff-filter=A "$BASE"...HEAD 2>/dev/null || git diff --name-only --diff-filter=A HEAD~1)
-          if [ -z "$ADDED" ]; then echo "no added files"; exit 0; fi
+          set -eu
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            BASE="origin/$GITHUB_BASE_REF"
+          else
+            BASE="${{ github.event.before }}"
+            if ! git rev-parse --verify -q "$BASE" >/dev/null; then
+              git fetch --depth=250 origin "$BASE" 2>/dev/null || BASE="HEAD~1"
+            fi
+          fi
+          ADDED=$(git diff --name-only --diff-filter=A "$BASE...HEAD" 2>/dev/null || true)
+          if [ -z "$ADDED" ]; then echo "no added files (base=$BASE)"; exit 0; fi
           while IFS= read -r f; do
             [ -f "$f" ] || continue
             TYPE=$(file -b "$f")
