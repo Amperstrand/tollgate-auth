@@ -27,3 +27,10 @@ paths = [
   '''web/public/llms\.txt''',
   '''scripts/contextvm/.*''',
 ]
+
+[[allowlists]]
+description = "FreeRADIUS module templates: gitleaks keys on %{User-Password}-style attribute expansions, which are attacker-controlled RADIUS placeholders documented in-file (SECURITY header), not credentials"
+paths = [
+  '''config/freeradius/mods-available/cashu-exec.*''',
+  '''config/freeradius/mods-available/tollgate-acct.*''',
+]
