@@ -1,0 +1,29 @@
+# Gitleaks allowlist — every entry justified. No blanket suppression.
+#
+# tollgate-auth is the IAM hub; real credentials live in deploy secrets and
+# lab machines, never in these paths. Flagged material is test fixtures and
+# docs using published demo values.
+
+title = "tollgate-auth gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Sequential/patterned demo hex used across RADIUS and OCPI test fixtures (a1b2c3-style, 0123..def, repeated-byte aaaa/bbbb patterns) — never provisioned to any real device or server"
+regexTarget = "secret"
+regexes = [
+  '''(?i)^a1b2c3''',
+  '''(?i)^0123456''',
+  '''(?i)^(a|b|c|d|e|f|0|1|2|3){8,}$''',
+]
+
+[[allowlists]]
+description = "cashu test tokens in unit tests, docs and llms.txt — fixtures minted by test mints (FakeWallet class); no real ecash"
+paths = [
+  '''internal/.*_test\.go''',
+  '''docs/.*\.md''',
+  '''README\.md''',
+  '''web/public/llms\.txt''',
+  '''scripts/contextvm/.*''',
+]
