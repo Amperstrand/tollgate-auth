@@ -1,0 +1,32 @@
+# because: demo testnut tokens in docs examples (amount-prefixed, test money)
+cashu-token:docs/
+# because: README carries the same demo testnut token example
+cashu-token:README.md
+# because: Go test fixtures use synthetic {"token":...} payloads
+cashu-token:internal/radiusauth/payment_test.go
+# because: setup scripts use literal demo passwords (TollgateDemo2, ci-password)
+secret-key:scripts/opencpo-setup.sh
+# because: mint script references a literal ci-password placeholder
+secret-key:scripts/mint-testnut.js
+# because: README documents demo passwords (a1b2c3d4…, request-invoice…)
+secret-key:README.md
+# because: testtoken package is synthetic-by-design (test_secret_123)
+secret-key:internal/testtoken/
+# because: radius payment tests use literal demo password lnurlwdiff
+secret-key:internal/radiusauth/payment_test.go
+# because: internal cashu tests use synthetic secrets (test_secret_123, secret1, v4secret)
+secret-key:internal/cashu/
+# because: e2e workflow uses the literal demo value "anything" as password
+secret-key:.github/workflows/
+# because: demo/testing docs use $TOKEN refs and demo tokens as password examples
+secret-key:docs/
+# because: freeradius site config carries the upstream default password literal
+secret-key:config/freeradius/
+# because: ssh auth tests use the synthetic test_secret_123
+secret-key:cmd/tollgate-auth-ssh/
+# because: radius auth tests use the synthetic test_secret_123
+secret-key:cmd/tollgate-auth-radius/
+# because: this file quotes the demo passwords it exempts
+secret-key:scripts/leak-scan-allowlist.txt
+# because: this file quotes the demo tokens it exempts
+cashu-token:scripts/leak-scan-allowlist.txt

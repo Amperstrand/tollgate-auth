@@ -97,3 +97,6 @@ scripts/firecracker/results/
 # deliberately with `git add -f test-artifacts/<run>/` and reviewed.
 test-artifacts/*
 !test-artifacts/README.md
+
+# Captured browser sessions — never committed (publication policy, see foundry)
+.playwright-mcp/
