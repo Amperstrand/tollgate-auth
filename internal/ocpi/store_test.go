@@ -34,7 +34,7 @@ func TestStore_PutAndGetPrepay(t *testing.T) {
 		UID:            "OCPI-ABC12345",
 		CashuTokenHash: "abc12345deadbeef",
 		AllotmentSec:   120,
-		CreditAmount:      12,
+		CreditAmount:   12,
 		MintURL:        "https://testnut.cashu.space",
 		ContractID:     "NPC-OCPI-ABC12345",
 		StartedAt:      time.Now(),

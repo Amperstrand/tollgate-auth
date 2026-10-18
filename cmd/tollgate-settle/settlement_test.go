@@ -40,15 +40,15 @@ func seedLedger(t *testing.T, l *ledger.Ledger, operatorID string) (accepts, rej
 
 	for i, mac := range macs {
 		entry := ledger.LedgerEntry{
-			EventType:   ledger.EventAuthAccept,
-			OperatorID:  operatorID,
-			MAC:         mac,
-			PaymentType: "cashu",
-			CreditAmount:   amounts[i],
-			DurationSec: amounts[i] * 60,
-			MintURL:     "https://testnut.cashu.space",
-			TokenHash:   fmt.Sprintf("deadbeef%02d", i),
-			NASIP:       fmt.Sprintf("10.0.0.%d", i+1),
+			EventType:    ledger.EventAuthAccept,
+			OperatorID:   operatorID,
+			MAC:          mac,
+			PaymentType:  "cashu",
+			CreditAmount: amounts[i],
+			DurationSec:  amounts[i] * 60,
+			MintURL:      "https://testnut.cashu.space",
+			TokenHash:    fmt.Sprintf("deadbeef%02d", i),
+			NASIP:        fmt.Sprintf("10.0.0.%d", i+1),
 			ReplyMessage: fmt.Sprintf("Valid Cashu token: %d sat = %dm access",
 				amounts[i], amounts[i]),
 		}
@@ -229,15 +229,15 @@ func TestBuildSettlementReport_EmptyLedger(t *testing.T) {
 
 func TestSettlementReport_JSONFormat(t *testing.T) {
 	report := &SettlementReport{
-		Type:             "settlement",
-		OperatorID:       "op-json",
-		PeriodStart:      time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		PeriodEnd:        time.Date(2026, 1, 8, 0, 0, 0, 0, time.UTC),
-		TotalSat:         42,
-		AcceptedSessions: 3,
-		RejectedSessions: 1,
+		Type:                "settlement",
+		OperatorID:          "op-json",
+		PeriodStart:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:           time.Date(2026, 1, 8, 0, 0, 0, 0, time.UTC),
+		TotalSat:            42,
+		AcceptedSessions:    3,
+		RejectedSessions:    1,
 		AverageCreditAmount: 14.0,
-		GeneratedAt:      time.Date(2026, 1, 8, 12, 0, 0, 0, time.UTC),
+		GeneratedAt:         time.Date(2026, 1, 8, 12, 0, 0, 0, time.UTC),
 	}
 
 	data, err := json.Marshal(report)
@@ -251,15 +251,15 @@ func TestSettlementReport_JSONFormat(t *testing.T) {
 	}
 
 	expectedKeys := map[string]bool{
-		"type":               false,
-		"operator_id":        false,
-		"period_start":       false,
-		"period_end":         false,
-		"total_sat":          false,
-		"accepted_sessions":  false,
-		"rejected_sessions":  false,
+		"type":                  false,
+		"operator_id":           false,
+		"period_start":          false,
+		"period_end":            false,
+		"total_sat":             false,
+		"accepted_sessions":     false,
+		"rejected_sessions":     false,
 		"average_credit_amount": false,
-		"generated_at":       false,
+		"generated_at":          false,
 	}
 	for k := range decoded {
 		if seen, ok := expectedKeys[k]; ok {

@@ -12,15 +12,15 @@ import (
 // Even though NIP-17 is encrypted, this struct is designed as if it could be
 // decrypted someday — only aggregate revenue data leaves the ledger.
 type SettlementReport struct {
-	Type             string    `json:"type"` // always "settlement"
-	OperatorID       string    `json:"operator_id"`
-	PeriodStart      time.Time `json:"period_start"`
-	PeriodEnd        time.Time `json:"period_end"`
-	TotalSat         int       `json:"total_sat"`
-	AcceptedSessions int       `json:"accepted_sessions"`
-	RejectedSessions int       `json:"rejected_sessions"`
+	Type                string    `json:"type"` // always "settlement"
+	OperatorID          string    `json:"operator_id"`
+	PeriodStart         time.Time `json:"period_start"`
+	PeriodEnd           time.Time `json:"period_end"`
+	TotalSat            int       `json:"total_sat"`
+	AcceptedSessions    int       `json:"accepted_sessions"`
+	RejectedSessions    int       `json:"rejected_sessions"`
 	AverageCreditAmount float64   `json:"average_credit_amount"`
-	GeneratedAt      time.Time `json:"generated_at"`
+	GeneratedAt         time.Time `json:"generated_at"`
 }
 
 // BuildSettlementReport reads the ledger for the given operator over the time
@@ -36,14 +36,14 @@ func BuildSettlementReport(l *ledger.Ledger, operatorID string, start, end time.
 	}
 
 	return &SettlementReport{
-		Type:             "settlement",
-		OperatorID:       rev.OperatorID,
-		PeriodStart:      rev.StartTime,
-		PeriodEnd:        rev.EndTime,
-		TotalSat:         rev.TotalSat,
-		AcceptedSessions: rev.AcceptedSessions,
-		RejectedSessions: rev.RejectedSessions,
+		Type:                "settlement",
+		OperatorID:          rev.OperatorID,
+		PeriodStart:         rev.StartTime,
+		PeriodEnd:           rev.EndTime,
+		TotalSat:            rev.TotalSat,
+		AcceptedSessions:    rev.AcceptedSessions,
+		RejectedSessions:    rev.RejectedSessions,
 		AverageCreditAmount: rev.AverageAmount,
-		GeneratedAt:      time.Now().UTC(),
+		GeneratedAt:         time.Now().UTC(),
 	}, nil
 }

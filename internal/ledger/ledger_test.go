@@ -29,7 +29,7 @@ func TestRecordAuth_Accept(t *testing.T) {
 		OperatorID:   "op-test",
 		MAC:          "aa:bb:cc:dd:ee:ff",
 		PaymentType:  "cashu",
-		CreditAmount:    8,
+		CreditAmount: 8,
 		DurationSec:  480,
 		MintURL:      "https://testnut.cashu.space",
 		TokenHash:    "abc123",
@@ -213,8 +213,8 @@ func TestQueryByMAC(t *testing.T) {
 	// Insert 3 entries for mac1.
 	for i := 0; i < 3; i++ {
 		entry := LedgerEntry{
-			EventType: EventAuthAccept,
-			MAC:       mac1,
+			EventType:    EventAuthAccept,
+			MAC:          mac1,
 			CreditAmount: i + 1,
 		}
 		if err := l.RecordAuth(entry); err != nil {
@@ -243,10 +243,10 @@ func TestQueryByOperator(t *testing.T) {
 	// Insert entries for operator A.
 	for i := 0; i < 2; i++ {
 		if err := l.RecordAuth(LedgerEntry{
-			EventType:  EventAuthAccept,
-			OperatorID: "op-alpha",
-			MAC:        fmt.Sprintf("aa:bb:cc:dd:ee:%02x", i),
-			CreditAmount:  5,
+			EventType:    EventAuthAccept,
+			OperatorID:   "op-alpha",
+			MAC:          fmt.Sprintf("aa:bb:cc:dd:ee:%02x", i),
+			CreditAmount: 5,
 		}); err != nil {
 			t.Fatalf("RecordAuth op-alpha: %v", err)
 		}
@@ -254,10 +254,10 @@ func TestQueryByOperator(t *testing.T) {
 
 	// Insert entry for operator B.
 	if err := l.RecordAuth(LedgerEntry{
-		EventType:  EventAuthAccept,
-		OperatorID: "op-beta",
-		MAC:        "ff:ff:ff:ff:ff:ff",
-		CreditAmount:  10,
+		EventType:    EventAuthAccept,
+		OperatorID:   "op-beta",
+		MAC:          "ff:ff:ff:ff:ff:ff",
+		CreditAmount: 10,
 	}); err != nil {
 		t.Fatalf("RecordAuth op-beta: %v", err)
 	}
@@ -285,11 +285,11 @@ func TestGetActiveSession_Active(t *testing.T) {
 
 	// Insert auth_accept with a token_hash.
 	if err := l.RecordAuth(LedgerEntry{
-		EventType:   EventAuthAccept,
-		MAC:         mac,
-		TokenHash:   tokenHash,
-		CreditAmount:   8,
-		DurationSec: 480,
+		EventType:    EventAuthAccept,
+		MAC:          mac,
+		TokenHash:    tokenHash,
+		CreditAmount: 8,
+		DurationSec:  480,
 	}); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
 	}
@@ -318,9 +318,9 @@ func TestGetActiveSession_Stopped(t *testing.T) {
 
 	// Insert auth_accept.
 	if err := l.RecordAuth(LedgerEntry{
-		EventType: EventAuthAccept,
-		MAC:       mac,
-		TokenHash: tokenHash,
+		EventType:    EventAuthAccept,
+		MAC:          mac,
+		TokenHash:    tokenHash,
 		CreditAmount: 8,
 	}); err != nil {
 		t.Fatalf("RecordAuth: %v", err)
@@ -370,10 +370,10 @@ func TestRevenueSummary(t *testing.T) {
 	// Insert accepted sessions.
 	for i := 0; i < 3; i++ {
 		if err := l.RecordAuth(LedgerEntry{
-			EventType:  EventAuthAccept,
-			OperatorID: operatorID,
-			MAC:        fmt.Sprintf("aa:bb:cc:dd:ee:%02x", i),
-			CreditAmount:  10,
+			EventType:    EventAuthAccept,
+			OperatorID:   operatorID,
+			MAC:          fmt.Sprintf("aa:bb:cc:dd:ee:%02x", i),
+			CreditAmount: 10,
 		}); err != nil {
 			t.Fatalf("RecordAuth accept: %v", err)
 		}
@@ -449,10 +449,10 @@ func TestLedgerConcurrentWrites(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			entry := LedgerEntry{
-				EventType:  EventAuthAccept,
-				OperatorID: "op-concurrent",
-				MAC:        fmt.Sprintf("aa:bb:cc:dd:ee:%02x", idx),
-				CreditAmount:  idx + 1,
+				EventType:    EventAuthAccept,
+				OperatorID:   "op-concurrent",
+				MAC:          fmt.Sprintf("aa:bb:cc:dd:ee:%02x", idx),
+				CreditAmount: idx + 1,
 			}
 			if err := l.RecordAuth(entry); err != nil {
 				errors <- fmt.Errorf("goroutine %d: %w", idx, err)
@@ -505,8 +505,8 @@ func TestLedger_PersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("OpenLedger 1: %v", err)
 	}
 	entry := LedgerEntry{
-		EventType: EventAuthAccept,
-		MAC:       "aa:bb:cc:dd:ee:ff",
+		EventType:    EventAuthAccept,
+		MAC:          "aa:bb:cc:dd:ee:ff",
 		CreditAmount: 5,
 	}
 	if err := l1.RecordAuth(entry); err != nil {

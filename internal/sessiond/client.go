@@ -16,7 +16,7 @@ type SessionState struct {
 	AllotmentMs            uint64 // allotment in milliseconds (parsed from Nostr event tags)
 	Metric                 string // "milliseconds" or "bytes"
 	StartTime              int64  // unix timestamp
-	CreditAmount              uint64 // raw token amount in sats (0 if not provided by legacy server)
+	CreditAmount           uint64 // raw token amount in sats (0 if not provided by legacy server)
 	TokenType              string // "cashu" or "lnurlw" ("" if not provided by legacy server)
 	EffectiveRateSecPerSat uint64 // seconds per sat: allotment_seconds / credit_amount (0 if not provided)
 }

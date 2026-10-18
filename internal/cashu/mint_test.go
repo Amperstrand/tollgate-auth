@@ -222,7 +222,7 @@ func TestCheckStateRequest_Serialization(t *testing.T) {
 	}
 
 	var parsed struct {
-		Ys     []string       `json:"Ys"`
+		Ys     []string        `json:"Ys"`
 		Proofs json.RawMessage `json:"proofs"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
