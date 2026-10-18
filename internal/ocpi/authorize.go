@@ -123,7 +123,7 @@ func (a *Authorizer) IssuePrepay(cashuToken string) (*PrepayRecord, error) {
 		CashuTokenHash: tokenHash,
 		AllotmentSec:   result.SessionTimeout,
 		StartedAt:      time.Now(),
-		CreditAmount:      result.CreditAmount,
+		CreditAmount:   result.CreditAmount,
 		MintURL:        result.MintURL,
 		ContractID:     "NPC-OCPI-" + tokenHash[:8],
 	}

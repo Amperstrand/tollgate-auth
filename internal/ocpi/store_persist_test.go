@@ -100,7 +100,7 @@ func TestStoreWithDir_PutPrepay_PersistsAndReloads(t *testing.T) {
 		UID:            "OCPI-PREPAY-1",
 		CashuTokenHash: "deadbeef1234abcd",
 		AllotmentSec:   600,
-		CreditAmount:      60,
+		CreditAmount:   60,
 		MintURL:        "https://testnut.cashu.space",
 		ContractID:     "NPC-OCPI-1",
 		StartedAt:      time.Now().UTC().Truncate(time.Second),

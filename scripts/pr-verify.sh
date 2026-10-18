@@ -62,6 +62,10 @@ fi
 want_leg() { local L; for L in "${wanted[@]}"; do [ "$L" = "$1" ] && return 0; done; return 1; }
 
 for c in git go; do command -v "$c" >/dev/null 2>&1 || die "$c is required but not on PATH"; done
+# go.mod requires go 1.25; pin the verifying toolchain so leg runs are
+# reproducible regardless of the host's Go (resolution of minor-only
+# toolchains can fail behind the bench proxy).
+export GOTOOLCHAIN=go1.25.0
 
 SLUG="$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#.*github\.com[:/]##; s#\.git$##')"
 [ -n "$SLUG" ] || die "cannot derive the GitHub slug from the origin remote"

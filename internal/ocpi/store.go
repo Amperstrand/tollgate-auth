@@ -64,7 +64,7 @@ type PrepayRecord struct {
 	AllotmentSec   int        `json:"allotment_sec"`
 	UsedSec        int        `json:"used_sec"`
 	StartedAt      time.Time  `json:"started_at"`
-	CreditAmount      int        `json:"credit_amount"`
+	CreditAmount   int        `json:"credit_amount"`
 	MintURL        string     `json:"mint_url"`
 	ContractID     string     `json:"contract_id"`
 	Used           bool       `json:"used"`
