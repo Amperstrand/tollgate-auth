@@ -8,26 +8,35 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 )
 
-// HashToCurve computes Y = hash_to_curve(secret) per NUT-12.
+// domainSeparator is the NUT-00 hash_to_curve domain separator, the constant
+// byte string b"Secp256k1_HashToCurve_Cashu_".
+const domainSeparator = "Secp256k1_HashToCurve_Cashu_"
+
+// HashToCurve computes Y = hash_to_curve(secret) per NUT-00.
 //
-// Algorithm matches the cdk-mintd reference (cashubtc/cdk) which most
-// production mints run: Y is found by iterating SHA-256(secret || counter_be32)
-// until the resulting x maps to a valid secp256k1 point with even y.
+//	Y = PublicKey('02' || SHA256(msg_hash || counter))
+//	msg_hash = SHA256(DOMAIN_SEPARATOR || x)
 //
-// The Python cashu wallet uses a slightly different algorithm (chained
-// SHA-256 without a counter) — tokens minted by python-cashu wallets against
-// non-cdk mints may compute Y differently. Test mints like testnut.cashu.space
-// run cdk-mintd and accept the algorithm here.
+// The counter is a uint32 in LITTLE-endian byte order, incremented from 0
+// until the resulting x maps to a valid secp256k1 point. This matches the
+// reference implementations (cashubtc/cdk dhke.rs, cashu-ts core.ts) that
+// production mints run, so locally derived Ys match the mint's Y-keyed
+// state.
 //
 // Exposed so callers build correct NUT-07 /v1/checkstate requests: the mint
 // looks up proof state keyed by Y, not by the raw secret.
 func HashToCurve(secret string) ([]byte, error) {
-	secretBytes := []byte(secret)
+	// Domain-separator pre-hash: SHA256("Secp256k1_HashToCurve_Cashu_" || x).
+	msgHash := sha256.New()
+	msgHash.Write([]byte(domainSeparator))
+	msgHash.Write([]byte(secret))
+	msgHashBytes := msgHash.Sum(nil)
+
 	for counter := uint32(0); counter < 65536; counter++ {
 		h := sha256.New()
-		h.Write(secretBytes)
+		h.Write(msgHashBytes)
 		var counterBytes [4]byte
-		binary.BigEndian.PutUint32(counterBytes[:], counter)
+		binary.LittleEndian.PutUint32(counterBytes[:], counter)
 		h.Write(counterBytes[:])
 		xHash := h.Sum(nil)
 
