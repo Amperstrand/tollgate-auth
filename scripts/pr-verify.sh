@@ -108,13 +108,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git -C "$ROOT" fetch --quiet origin "$HEAD_REF" 2>/dev/null || true
+# PR mode: fork PRs carry a branch the base repo does not have — pull the PR
+# head ref instead (works for same-repo branches too). Issue #23.
+if [ -n "$PR_NUMBER" ]; then
+    git -C "$ROOT" fetch --quiet origin "refs/pull/$PR_NUMBER/head" 2>/dev/null || true
+else
+    git -C "$ROOT" fetch --quiet origin "$HEAD_REF" 2>/dev/null || true
+fi
 git -C "$ROOT" rev-parse --verify --quiet "${HEAD_OID}^{commit}" >/dev/null \
     || die "head commit $HEAD_OID is not local after fetch — rerun"
 git -C "$ROOT" worktree add --quiet --detach "$WT" "$HEAD_OID" || die "worktree add failed for $HEAD_OID"
 echo "== worktree: $WT"
 
-SCRIPT_ID="$(sha256sum "$WT/scripts/pr-verify.sh" 2>/dev/null | cut -c1-12)"
+# Hash the copy that is executing this run, not the worktree copy under test
+# — the stamp must attribute results to the verifier that ran them (issue #23).
+SCRIPT_ID="$(sha256sum "$ROOT/scripts/pr-verify.sh" 2>/dev/null | cut -c1-12)"
 HOST="$(hostname -s 2>/dev/null || echo unknown)"
 
 leg_names=() leg_status=() leg_detail=() leg_secs=()
@@ -139,10 +147,14 @@ run_hygiene() {
 run_go_fmt() {
     echo "== leg: go-fmt"
     local t=$SECONDS log="$LOGDIR/go-fmt.log"
-    local unformatted goroot_gofmt
+    local unformatted rc goroot_gofmt
     goroot_gofmt="$(go env GOROOT)/bin/gofmt"   # resolved toolchain's gofmt (go.mod pins 1.25)
-    unformatted="$("$goroot_gofmt" -l . 2>"$log")"
-    if [ -n "$unformatted" ]; then
+    # gofmt -l prints nothing on stdout for an unparseable file — the exit
+    # status is the only failure signal (issue #23).
+    unformatted="$("$goroot_gofmt" -l . 2>"$log")"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        record go-fmt FAIL "gofmt exited $rc (unparseable input?) — see go-fmt.log" $((SECONDS - t))
+    elif [ -n "$unformatted" ]; then
         echo "$unformatted" >>"$log"
         record go-fmt FAIL "unformatted files — see go-fmt.log" $((SECONDS - t))
     else
