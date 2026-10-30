@@ -33,7 +33,9 @@ const (
 
 // Patterns.
 var (
-	TestMintPattern = regexp.MustCompile(`.*`)
+	// TestMintPattern is the mint allowlist (test mints only, per README).
+	// Security: never widen to `.*` — that accepts every mint (#25).
+	TestMintPattern = regexp.MustCompile(`(?i)test`)
 	MacPattern      = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 )
 

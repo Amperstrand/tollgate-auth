@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -204,5 +205,60 @@ func TestProcessAuthReplayConcurrent(t *testing.T) {
 	}
 	if acceptCount > 1 {
 		t.Errorf("expected at most 1 accept, got %d (replay guard broken)", acceptCount)
+	}
+}
+
+// --- IsTestMint (mint allowlist, issue #25) ---
+
+func TestIsTestMint_Allowlist(t *testing.T) {
+	tests := []struct {
+		mint string
+		want bool
+	}{
+		{"https://testnut.cashu.space", true},
+		{"https://TESTMINT.example.com", true},
+		{"https://mint.example.com", false},
+		{testtoken.NonTestMintURL(), false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := IsTestMint(tc.mint); got != tc.want {
+			t.Errorf("IsTestMint(%q) = %v, want %v", tc.mint, got, tc.want)
+		}
+	}
+}
+
+// Regression for #25: TestMintPattern was `.*` (match-all), so every mint —
+// including mainnet mints — passed the test-mint allowlist.
+func TestProcessAuth_CashuNonTestMint_Rejected(t *testing.T) {
+	deps := &Dependencies{
+		Sessions:   &SessionStore{Dir: t.TempDir()},
+		Verifier:   fakeverity.NewFakeVerifier(),
+		OperatorID: "test-operator",
+		HMACKey:    []byte("test-hmac-key-16bytes!"),
+		AuthMode:   "local",
+	}
+
+	result := ProcessAuth(deps, testtoken.V4TokenNonTestMint(8), "aa:bb:cc:dd:ee:ff", "", "", "", "")
+	if result.Accept {
+		t.Fatalf("non-test mint %q must be rejected, got Accept", testtoken.NonTestMintURL())
+	}
+	if !strings.Contains(result.ReplyMessage, "not allowed") {
+		t.Errorf("ReplyMessage = %q, want mint-not-allowed rejection", result.ReplyMessage)
+	}
+}
+
+func TestProcessAuth_CashuTestMint_Accepted(t *testing.T) {
+	deps := &Dependencies{
+		Sessions:   &SessionStore{Dir: t.TempDir()},
+		Verifier:   fakeverity.NewFakeVerifier(),
+		OperatorID: "test-operator",
+		HMACKey:    []byte("test-hmac-key-16bytes!"),
+		AuthMode:   "local",
+	}
+
+	result := ProcessAuth(deps, testtoken.V4Token(8), "aa:bb:cc:dd:ee:ff", "", "", "", "")
+	if !result.Accept {
+		t.Fatalf("test mint must be accepted, got Reject: %s", result.ReplyMessage)
 	}
 }
