@@ -216,7 +216,10 @@ func TestIsTestMint_Allowlist(t *testing.T) {
 		want bool
 	}{
 		{"https://testnut.cashu.space", true},
-		{"https://TESTMINT.example.com", true},
+		// Anchored default (#30): unknown hosts — even "test"-shaped ones —
+		// are rejected; operators widen via TOLLGATE_TEST_MINT_PATTERN.
+		{"https://TESTMINT.example.com", false},
+		{"https://testnut.cashu.space.evil.example.com", false},
 		{"https://mint.example.com", false},
 		{testtoken.NonTestMintURL(), false},
 		{"", false},

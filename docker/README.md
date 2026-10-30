@@ -111,7 +111,7 @@ COPY scripts/tollgate-auth-radius-delegated-wrapper.sh /usr/local/libexec/tollga
 
 `cdk-cli` is a Rust binary (no Go bindings). The daemon and OCPI shell out to it via `exec.Command`. We considered a sidecar "wallet service" container exposing cdk-cli over HTTP, but that adds a network hop and another failure mode for marginal isolation benefit.
 
-The Dockerfiles for daemon and OCPI both download `cdk-cli` from GitHub releases in a prep stage and copy the static binary in. The version is pinned by build arg `CDK_CLI_VERSION`.
+The Dockerfiles for daemon and OCPI both download `cdk-cli` from GitHub releases in a prep stage and copy the static binary in. The version is pinned by build arg `CDK_CLI_VERSION`, and the download is **sha256-verified** (per-arch `CDK_CLI_SHA_AMD64`/`CDK_CLI_SHA_ARM64`) before the binary is used. Bump procedure: update `CDK_CLI_VERSION` **and both SHAs together** — take them from the release's official `SHA256SUMS` asset.
 
 ### 5. Stateless services use distroless, daemon/settle use alpine
 
