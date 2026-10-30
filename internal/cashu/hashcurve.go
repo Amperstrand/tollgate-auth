@@ -8,26 +8,32 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 )
 
-// HashToCurve computes Y = hash_to_curve(secret) per NUT-12.
+// domainSeparator is the NUT-00 hash_to_curve domain separator
+// (b"Secp256k1_HashToCurve_Cashu_", 28 bytes).
+const domainSeparator = "Secp256k1_HashToCurve_Cashu_"
+
+// HashToCurve computes Y = hash_to_curve(secret) per NUT-00.
 //
-// Algorithm matches the cdk-mintd reference (cashubtc/cdk) which most
-// production mints run: Y is found by iterating SHA-256(secret || counter_be32)
-// until the resulting x maps to a valid secp256k1 point with even y.
+// Construction (byte-exact match to the CDK reference implementation,
+// cashubtc/cdk crates/cashu/src/dhke.rs, which cdk-mintd mints run):
 //
-// The Python cashu wallet uses a slightly different algorithm (chained
-// SHA-256 without a counter) — tokens minted by python-cashu wallets against
-// non-cdk mints may compute Y differently. Test mints like testnut.cashu.space
-// run cdk-mintd and accept the algorithm here.
+//	msg_hash = SHA256(domainSeparator || secret)
+//	for counter = 0..65535 (uint32, little-endian):
+//	    digest = SHA256(msg_hash || counter_le32)
+//	    Y = compressed pubkey 0x02 || digest   // even-y point; valid x wins
 //
 // Exposed so callers build correct NUT-07 /v1/checkstate requests: the mint
-// looks up proof state keyed by Y, not by the raw secret.
+// looks up proof state keyed by Y, not by the raw secret — a non-NUT-00 Y
+// makes spent/pending proofs read as unknown (issue #22).
 func HashToCurve(secret string) ([]byte, error) {
 	secretBytes := []byte(secret)
+	msgHash := sha256.Sum256(append([]byte(domainSeparator), secretBytes...))
+
 	for counter := uint32(0); counter < 65536; counter++ {
 		h := sha256.New()
-		h.Write(secretBytes)
+		h.Write(msgHash[:])
 		var counterBytes [4]byte
-		binary.BigEndian.PutUint32(counterBytes[:], counter)
+		binary.LittleEndian.PutUint32(counterBytes[:], counter)
 		h.Write(counterBytes[:])
 		xHash := h.Sum(nil)
 
