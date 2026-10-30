@@ -25,6 +25,7 @@ type CSMSHandler struct {
 	mu         sync.Mutex
 	emspURL    string
 	activeTxns map[int]*transactionInfo
+	nextTxnID  int
 }
 
 type transactionInfo struct {
@@ -41,6 +42,7 @@ func newCSMSHandler(emspURL string) *CSMSHandler {
 	return &CSMSHandler{
 		emspURL:    emspURL,
 		activeTxns: make(map[int]*transactionInfo),
+		nextTxnID:  1001,
 	}
 }
 
@@ -65,7 +67,9 @@ func (h *CSMSHandler) OnStartTransaction(cpID string, req *core.StartTransaction
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	txnID := len(h.activeTxns) + 1001
+	// IDs must never be reused, even after stops — see issue #22.
+	txnID := h.nextTxnID
+	h.nextTxnID++
 	h.activeTxns[txnID] = &transactionInfo{
 		ID:          txnID,
 		ChargePoint: cpID,
