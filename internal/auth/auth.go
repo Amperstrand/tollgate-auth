@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"tollgate-auth/internal/cashu"
+	"tollgate-auth/internal/config"
 	"tollgate-auth/internal/fakeverity"
 	"tollgate-auth/internal/ledger"
 	"tollgate-auth/internal/radius"
@@ -31,12 +32,26 @@ const (
 	LNURLWDefaultSec = 600
 )
 
-// Patterns.
+// Allowed test mints: the canonical testtoken.TestMint (.space) and
+// testnut.cashu.exchange seen in session records. Was `.*` (issue #25);
+// operators widen via TOLLGATE_TEST_MINT_PATTERN.
+const defaultTestMintPattern = `^https://testnut\.cashu\.(space|exchange)/?$`
+
+var TestMintPattern = compileTestMintPattern(config.GetEnv("TOLLGATE_TEST_MINT_PATTERN", defaultTestMintPattern))
+
+// Invalid operator regex falls back to the anchored default, never to
+// a permissive match (fail closed).
+func compileTestMintPattern(expr string) *regexp.Regexp {
+	re, err := regexp.Compile(expr)
+	if err != nil {
+		log.Printf("auth: TOLLGATE_TEST_MINT_PATTERN %q is not a valid regex (%v); using the default test-mint allowlist", expr, err)
+		return regexp.MustCompile(defaultTestMintPattern)
+	}
+	return re
+}
+
 var (
-	// TestMintPattern is the mint allowlist (test mints only, per README).
-	// Security: never widen to `.*` — that accepts every mint (#25).
-	TestMintPattern = regexp.MustCompile(`(?i)test`)
-	MacPattern      = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
+	MacPattern = regexp.MustCompile(`^[0-9a-fA-F:\-\.]*$`)
 )
 
 // AuthResult holds the outcome of processing a RADIUS auth request.

@@ -6,12 +6,17 @@
 # so /var/lib/cashu-wallet (mode 0770) is accessible.
 
 ARG GO_VERSION=1.25
-ARG CDK_CLI_VERSION=v0.17.2
+ARG CDK_CLI_VERSION=v0.18.3
+# Pinned release checksums (issue #24): verify downloaded bytes before use.
+ARG CDK_CLI_SHA_AMD64=bb7a8b0f1b9c6a164c7e50f931b25c3e6232cdaedbb18df22368ebb0c024b337
+ARG CDK_CLI_SHA_ARM64=e0abad57ba8e152efa311ad2d476def2ab0973cb9bcc6066b024e55496e08235
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 
 FROM alpine:3.20 AS cdk-cli-prep
 ARG CDK_CLI_VERSION
+ARG CDK_CLI_SHA_AMD64
+ARG CDK_CLI_SHA_ARM64
 ARG TARGETARCH
 # SHA256 pins for the official release assets, per arch. To re-derive when
 # bumping CDK_CLI_VERSION: fetch the release's SHA256SUMS asset from
@@ -20,14 +25,14 @@ ARG TARGETARCH
 # Verification fails the build if the downloaded asset does not match (docs/SECURITY_AUDIT_WINDOW3.md).
 RUN apk add --no-cache curl ca-certificates
 RUN case "$TARGETARCH" in \
-      amd64) CDK_ARCH="x86_64";  CDK_SHA256="37ae2bb62dbec8a8edd5b599e09674947ba3fbdf8a8b7997cf3c8058a1705734" ;; \
-      arm64) CDK_ARCH="aarch64"; CDK_SHA256="827b16e2c3e7422718f8f11495cf84f670422b088f55a73f53193c3d84369d55" ;; \
+      amd64) CDK_ARCH="x86_64"; CDK_SHA="$CDK_CLI_SHA_AMD64" ;; \
+      arm64) CDK_ARCH="aarch64"; CDK_SHA="$CDK_CLI_SHA_ARM64" ;; \
       *) echo "unsupported arch: $TARGETARCH"; exit 1 ;; \
     esac && \
     CDK_VER_NO_V="${CDK_CLI_VERSION#v}" && \
     curl -fsSL -o /usr/local/bin/cdk-cli \
       "https://github.com/cashubtc/cdk/releases/download/${CDK_CLI_VERSION}/cdk-cli-${CDK_VER_NO_V}-${CDK_ARCH}" && \
-    echo "${CDK_SHA256}  /usr/local/bin/cdk-cli" | sha256sum -c - && \
+    echo "${CDK_SHA}  /usr/local/bin/cdk-cli" | sha256sum -c - && \
     chmod +x /usr/local/bin/cdk-cli && \
     /usr/local/bin/cdk-cli --version
 
