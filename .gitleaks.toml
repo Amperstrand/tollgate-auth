@@ -34,3 +34,9 @@ paths = [
   '''config/freeradius/mods-available/cashu-exec.*''',
   '''config/freeradius/mods-available/tollgate-acct.*''',
 ]
+
+[[allowlists]]
+description = "The allowlist file itself: its lines are suppression patterns ('secret-key:<path>' prefixes and named demo values) that the generic-api-key rule keys on — the file documents suppressions, it is not a credential"
+paths = [
+  '''scripts/leak-scan-allowlist\.txt''',
+]
