@@ -412,3 +412,124 @@ func TestDecodeV3_SameMintTwiceStillDecodes(t *testing.T) {
 	}
 }
 
+// cdk differential vectors from cashubtc/cdk v0.18.x
+// crates/cashu/src/nuts/nut00/token.rs tests (test_token_padding,
+// test_token_v4_str_round_trip, test_token_accessors_preserve_v3_and_v4_metadata,
+// test_token_proofs_extract_v3_and_v4_proofs, test_token_v4_multi_keyset).
+// Expected values are cdk's own assertions; literals cross-checked with an
+// independent Python base64/JSON decode.
+const (
+	cdkV3TokenPadded = "cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vODMzMy5zcGFjZTozMzM4IiwicHJvb2ZzIjpbeyJhbW91bnQiOjIsImlkIjoiMDA5YTFmMjkzMjUzZTQxZSIsInNlY3JldCI6IjQwNzkxNWJjMjEyYmU2MWE3N2UzZTZkMmFlYjRjNzI3OTgwYmRhNTFjZDA2YTZhZmMyOWUyODYxNzY4YTc4MzciLCJDIjoiMDJiYzkwOTc5OTdkODFhZmIyY2M3MzQ2YjVlNDM0NWE5MzQ2YmQyYTUwNmViNzk1ODU5OGE3MmYwY2Y4NTE2M2VhIn0seyJhbW91bnQiOjgsImlkIjoiMDA5YTFmMjkzMjUzZTQxZSIsInNlY3JldCI6ImZlMTUxMDkzMTRlNjFkNzc1NmIwZjhlZTBmMjNhNjI0YWNhYTNmNGUwNDJmNjE0MzNjNzI4YzcwNTdiOTMxYmUiLCJDIjoiMDI5ZThlNTA1MGI4OTBhN2Q2YzA5NjhkYjE2YmMxZDVkNWZhMDQwZWExZGUyODRmNmVjNjlkNjEyOTlmNjcxMDU5In1dfV0sInVuaXQiOiJzYXQiLCJtZW1vIjoiVGhhbmsgeW91IHZlcnkgbXVjaC4ifQ=="
+
+	cdkV3TokenNoPadding = "cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vODMzMy5zcGFjZTozMzM4IiwicHJvb2ZzIjpbeyJhbW91bnQiOjIsImlkIjoiMDA5YTFmMjkzMjUzZTQxZSIsInNlY3JldCI6IjQwNzkxNWJjMjEyYmU2MWE3N2UzZTZkMmFlYjRjNzI3OTgwYmRhNTFjZDA2YTZhZmMyOWUyODYxNzY4YTc4MzciLCJDIjoiMDJiYzkwOTc5OTdkODFhZmIyY2M3MzQ2YjVlNDM0NWE5MzQ2YmQyYTUwNmViNzk1ODU5OGE3MmYwY2Y4NTE2M2VhIn0seyJhbW91bnQiOjgsImlkIjoiMDA5YTFmMjkzMjUzZTQxZSIsInNlY3JldCI6ImZlMTUxMDkzMTRlNjFkNzc1NmIwZjhlZTBmMjNhNjI0YWNhYTNmNGUwNDJmNjE0MzNjNzI4YzcwNTdiOTMxYmUiLCJDIjoiMDI5ZThlNTA1MGI4OTBhN2Q2YzA5NjhkYjE2YmMxZDVkNWZhMDQwZWExZGUyODRmNmVjNjlkNjEyOTlmNjcxMDU5In1dfV0sInVuaXQiOiJzYXQiLCJtZW1vIjoiVGhhbmsgeW91LiJ9"
+
+	cdkV4Token = "cashuBpGF0gaJhaUgArSaMTR9YJmFwgaNhYQFhc3hAOWE2ZGJiODQ3YmQyMzJiYTc2ZGIwZGYxOTcyMTZiMjlkM2I4Y2MxNDU1M2NkMjc4MjdmYzFjYzk0MmZlZGI0ZWFjWCEDhhhUP_trhpXfStS6vN6So0qWvc2X3O4NfM-Y1HISZ5JhZGlUaGFuayB5b3VhbXVodHRwOi8vbG9jYWxob3N0OjMzMzhhdWNzYXQ="
+
+	cdkV4TokenMultiKeyset = "cashuBo2F0gqJhaUgA_9SLj17PgGFwgaNhYQFhc3hAYWNjMTI0MzVlN2I4NDg0YzNjZjE4NTAxNDkyMThhZjkwZjcxNmE1MmJmNGE1ZWQzNDdlNDhlY2MxM2Y3NzM4OGFjWCECRFODGd5IXVW-07KaZCvuWHk3WrnnpiDhHki6SCQh88-iYWlIAK0mjE0fWCZhcIKjYWECYXN4QDEzMjNkM2Q0NzA3YTU4YWQyZTIzYWRhNGU5ZjFmNDlmNWE1YjRhYzdiNzA4ZWIwZDYxZjczOGY0ODMwN2U4ZWVhY1ghAjRWqhENhLSsdHrr2Cw7AFrKUL9Ffr1XN6RBT6w659lNo2FhAWFzeEA1NmJjYmNiYjdjYzY0MDZiM2ZhNWQ1N2QyMTc0ZjRlZmY4YjQ0MDJiMTc2OTI2ZDNhNTdkM2MzZGNiYjU5ZDU3YWNYIQJzEpxXGeWZN5qXSmJjY8MzxWyvwObQGr5G1YCCgHicY2FtdWh0dHA6Ly9sb2NhbGhvc3Q6MzMzOGF1Y3NhdA=="
+)
+
+// cdk test_token_padding: padded and unpadded base64url encodings must both
+// decode (NUT-00 padding is optional). NB the two cdk fixture strings differ
+// in memo ("Thank you very much." vs "Thank you."), so each variant is
+// checked against its own decoded memo.
+func TestDecodeToken_CdkV3PaddingVariants(t *testing.T) {
+	proofs := []ProofEntry{
+		{
+			Amount: 2,
+			ID:     "009a1f293253e41e",
+			Secret: "407915bc212be61a77e3e6d2aeb4c727980bda51cd06a6afc29e2861768a7837",
+			C:      "02bc9097997d81afb2cc7346b5e4345a9346bd2a506eb7958598a72f0cf85163ea",
+		},
+		{
+			Amount: 8,
+			ID:     "009a1f293253e41e",
+			Secret: "fe15109314e61d7756b0f8ee0f23a624acaa3f4e042f61433c728c7057b931be",
+			C:      "029e8e5050b890a7d6c0968db16bc1d5d5fa040ea1de284f6ec69d61299f671059",
+		},
+	}
+
+	for name, tc := range map[string]struct {
+		token string
+		memo  string
+	}{
+		"padded":   {cdkV3TokenPadded, "Thank you very much."},
+		"unpadded": {cdkV3TokenNoPadding, "Thank you."},
+	} {
+		td, err := DecodeToken(tc.token)
+		if err != nil {
+			t.Fatalf("%s variant decode: %v", name, err)
+		}
+		if td.Mint != "https://8333.space:3338" {
+			t.Errorf("%s: mint = %q, want https://8333.space:3338", name, td.Mint)
+		}
+		if td.Unit != "sat" || td.Memo != tc.memo || td.Amount != 10 || len(td.Proofs) != 2 {
+			t.Errorf("%s: unit=%q memo=%q amount=%d proofs=%d, want sat/%q/10/2",
+				name, td.Unit, td.Memo, td.Amount, len(td.Proofs), tc.memo)
+			continue
+		}
+		for i := range proofs {
+			if td.Proofs[i] != proofs[i] {
+				t.Errorf("%s: proof[%d] = %+v, want %+v", name, i, td.Proofs[i], proofs[i])
+			}
+		}
+	}
+}
+
+// cdk test_token_v4_str_round_trip / test_token_accessors: V4 fields m/u/d/t,
+// entry i (keyset bytes), proof a/s/c.
+func TestDecodeToken_CdkV4Vector(t *testing.T) {
+	td, err := DecodeToken(cdkV4Token)
+	if err != nil {
+		t.Fatalf("V4 decode: %v", err)
+	}
+
+	if td.Mint != "http://localhost:3338" {
+		t.Errorf("mint = %q, want http://localhost:3338", td.Mint)
+	}
+	if td.Unit != "sat" {
+		t.Errorf("unit = %q, want sat", td.Unit)
+	}
+	if td.Memo != "Thank you" {
+		t.Errorf("memo = %q, want \"Thank you\"", td.Memo)
+	}
+	if td.Amount != 1 {
+		t.Errorf("amount = %d, want 1 (cdk: Amount::ONE)", td.Amount)
+	}
+	if len(td.Proofs) != 1 {
+		t.Fatalf("proofs = %d, want 1", len(td.Proofs))
+	}
+	if td.Proofs[0].ID != "00ad268c4d1f5826" {
+		t.Errorf("keyset id = %q, want 00ad268c4d1f5826", td.Proofs[0].ID)
+	}
+}
+
+// cdk test_token_v4_multi_keyset: multiple keyset entries under one mint,
+// total value 4.
+func TestDecodeToken_CdkV4MultiKeysetVector(t *testing.T) {
+	td, err := DecodeToken(cdkV4TokenMultiKeyset)
+	if err != nil {
+		t.Fatalf("V4 multi-keyset decode: %v", err)
+	}
+
+	if td.Mint != "http://localhost:3338" {
+		t.Errorf("mint = %q, want http://localhost:3338", td.Mint)
+	}
+	if td.Unit != "sat" {
+		t.Errorf("unit = %q, want sat", td.Unit)
+	}
+	if td.Amount != 4 {
+		t.Errorf("amount = %d, want 4 (cdk: Amount::from(4))", td.Amount)
+	}
+	if len(td.Proofs) != 3 {
+		t.Fatalf("proofs = %d, want 3", len(td.Proofs))
+	}
+	keysets := map[string]bool{}
+	for _, p := range td.Proofs {
+		keysets[p.ID] = true
+	}
+	for _, want := range []string{"00ffd48b8f5ecf80", "00ad268c4d1f5826"} {
+		if !keysets[want] {
+			t.Errorf("keyset %s missing from decoded token (have %v)", want, keysets)
+		}
+	}
+}
