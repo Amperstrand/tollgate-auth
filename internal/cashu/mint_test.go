@@ -272,3 +272,96 @@ func TestCheckStateResponse_Spent(t *testing.T) {
 		t.Errorf("state = %q, want SPENT", resp.States[0].State)
 	}
 }
+
+// --- NUT-07 conformance sweep (#35): response aggregation must fail closed ---
+//
+// NUT-07 07.md: "state is an enum string field with possible values
+// "UNSPENT", "PENDING", "SPENT"" and "The elements of the states array MUST
+// be returned in the same order as the corresponding Ys checked in the
+// request" — i.e. one state per requested Y. Anything else is a protocol
+// violation and must not aggregate to UNSPENT.
+
+// mintServerFor spins up a local mint stub that answers /v1/checkstate with
+// the given raw JSON body. SSRF protection is relaxed for the test server.
+func mintServerFor(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/checkstate" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ALLOW_LOCALHOST_MINT", "true")
+	return server
+}
+
+func TestCheckTokenState_UnknownStateFailsClosed(t *testing.T) {
+	server := mintServerFor(t, `{"states":[{"state":"FROZEN"}]}`)
+	td := &TokenData{
+		Mint:   server.URL,
+		Proofs: []ProofEntry{{Amount: 8, Secret: "test_secret_12345"}},
+	}
+
+	state, msg := CheckTokenState(td)
+	if state != "" {
+		t.Errorf("unknown NUT-07 state must fail closed, got state=%q msg=%q", state, msg)
+	}
+	if !strings.Contains(msg, "unknown state") {
+		t.Errorf("msg = %q, want it to name the unknown state", msg)
+	}
+}
+
+func TestCheckTokenState_MissingStatesEntryFailsClosed(t *testing.T) {
+	// Two proofs, but the mint answers with only one state: NUT-07 requires
+	// one state per requested Y, so this is a protocol violation.
+	server := mintServerFor(t, `{"states":[{"state":"UNSPENT"}]}`)
+	td := &TokenData{
+		Mint: server.URL,
+		Proofs: []ProofEntry{
+			{Amount: 2, Secret: "secret_one"},
+			{Amount: 8, Secret: "secret_two"},
+		},
+	}
+
+	state, msg := CheckTokenState(td)
+	if state != "" {
+		t.Errorf("short states array must fail closed, got state=%q msg=%q", state, msg)
+	}
+	if !strings.Contains(msg, "state count") && !strings.Contains(msg, "states") {
+		t.Errorf("msg = %q, want it to mention the states mismatch", msg)
+	}
+}
+
+func TestCheckTokenState_PendingSpentTreatedAsSpent(t *testing.T) {
+	// PENDING_SPENT is a cdk wire state (cdk nuts/nut07.rs State enum,
+	// serde UPPERCASE): spent, awaiting the receiver's swap. Spendable-by-us
+	// it is not — must not aggregate as UNSPENT.
+	server := mintServerFor(t, `{"states":[{"state":"PENDING_SPENT"}]}`)
+	td := &TokenData{
+		Mint:   server.URL,
+		Proofs: []ProofEntry{{Amount: 8, Secret: "test_secret_12345"}},
+	}
+
+	state, _ := CheckTokenState(td)
+	if state != StateSpent {
+		t.Errorf("PENDING_SPENT must aggregate as SPENT, got %q", state)
+	}
+}
+
+func TestCheckTokenState_ReservedTreatedAsPending(t *testing.T) {
+	// RESERVED is a cdk wire state: proof reserved for future token
+	// creation — not spendable now, may become available again.
+	server := mintServerFor(t, `{"states":[{"state":"RESERVED"}]}`)
+	td := &TokenData{
+		Mint:   server.URL,
+		Proofs: []ProofEntry{{Amount: 8, Secret: "test_secret_12345"}},
+	}
+
+	state, _ := CheckTokenState(td)
+	if state != StatePending {
+		t.Errorf("RESERVED must aggregate as PENDING, got %q", state)
+	}
+}

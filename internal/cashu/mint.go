@@ -70,14 +70,28 @@ func CheckTokenState(tokenData *TokenData) (ProofState, string) {
 		return "", fmt.Sprintf("Mint response parse error: %v", err)
 	}
 
+	// NUT-07: the states array must contain one entry per requested Y, in
+	// order. A mint that answers with fewer entries is violating the protocol
+	// and must not be interpreted as "all unspent".
+	if len(result.States) != len(tokenData.Proofs) {
+		return "", fmt.Sprintf("Mint response malformed: %d states for %d proofs", len(result.States), len(tokenData.Proofs))
+	}
+
+	// NUT-07 defines state values UNSPENT, PENDING, SPENT. PENDING_SPENT and
+	// RESERVED are cdk wire states (cdk nuts/nut07.rs State enum): the former
+	// is spent awaiting the receiver's swap, the latter is not spendable now.
+	// Both are aggregated conservatively; anything else fails closed.
 	hasSpent := false
 	hasPending := false
 	for _, s := range result.States {
 		switch s.State {
-		case "SPENT":
+		case "SPENT", "PENDING_SPENT":
 			hasSpent = true
-		case "PENDING":
+		case "PENDING", "RESERVED":
 			hasPending = true
+		case "UNSPENT":
+		default:
+			return "", fmt.Sprintf("Mint returned unknown state %q", s.State)
 		}
 	}
 

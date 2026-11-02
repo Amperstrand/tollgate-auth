@@ -160,9 +160,11 @@ func decodeV3(raw string) (*TokenData, error) {
 	var proofs []ProofEntry
 	amount := 0
 	mint := ""
+	mints := map[string]bool{}
 	for _, t := range v3.Token {
 		if t.Mint != "" {
 			mint = t.Mint
+			mints[t.Mint] = true
 		}
 		for _, p := range t.Proofs {
 			amount += p.Amount
@@ -180,6 +182,13 @@ func decodeV3(raw string) (*TokenData, error) {
 	}
 	if mint == "" {
 		return nil, fmt.Errorf("token has no mint URL")
+	}
+	// cdk refuses multi-mint V3 tokens (nut00/token.rs mint_url():
+	// UnsupportedToken) — the proofs cannot be checked or redeemed against a
+	// single mint, and checkstate keyed at the wrong mint returns UNSPENT for
+	// Ys it does not know.
+	if len(mints) > 1 {
+		return nil, fmt.Errorf("multi-mint V3 token not supported (%d mints)", len(mints))
 	}
 
 	return &TokenData{
