@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -359,3 +360,55 @@ func TestTokenHash_Length(t *testing.T) {
 		t.Errorf("SHA256 hex length = %d, want 64", len(h))
 	}
 }
+
+// --- NUT-00 conformance sweep (#35) ---
+
+// NUT-00 V3 tokens carry proofs grouped per mint. cdk refuses V3 tokens with
+// more than one distinct mint (cashu/src/nuts/nut00/token.rs mint_url():
+// "ensure_cdk!(mint_urls.len() == 1, Error::UnsupportedToken)"): the proofs
+// cannot be state-checked or redeemed against a single mint. Our previous
+// decode took the last non-empty mint and silently attributed ALL proofs to
+// it, keying NUT-07 checkstate at the wrong mint.
+func TestDecodeV3_MultiMintTokenRejected(t *testing.T) {
+	proof := V3Proof{Amount: 4, ID: "009a1f293253e41e", Secret: "s", C: "02bc90"}
+	token := encodeV3Token(V3Token{
+		Token: []V3Mint{
+			{Mint: "https://mint-a.example.com", Proofs: []V3Proof{proof}},
+			{Mint: "https://mint-b.example.com", Proofs: []V3Proof{proof}},
+		},
+		Unit: "sat",
+	})
+
+	_, err := DecodeToken(token)
+	if err == nil {
+		t.Fatal("multi-mint V3 token must be rejected (wrong-mint checkstate keying)")
+	}
+	if !strings.Contains(err.Error(), "multi-mint") {
+		t.Errorf("err = %v, want it to name the multi-mint rejection", err)
+	}
+}
+
+// Same mint repeated across entries (no padding, mixed) is NOT multi-mint and
+// must still decode.
+func TestDecodeV3_SameMintTwiceStillDecodes(t *testing.T) {
+	proof := V3Proof{Amount: 4, ID: "009a1f293253e41e", Secret: "s", C: "02bc90"}
+	token := encodeV3Token(V3Token{
+		Token: []V3Mint{
+			{Mint: "https://mint-a.example.com", Proofs: []V3Proof{proof}},
+			{Mint: "https://mint-a.example.com", Proofs: []V3Proof{proof}},
+		},
+		Unit: "sat",
+	})
+
+	td, err := DecodeToken(token)
+	if err != nil {
+		t.Fatalf("same-mint V3 token must decode: %v", err)
+	}
+	if td.Mint != "https://mint-a.example.com" {
+		t.Errorf("mint = %q, want https://mint-a.example.com", td.Mint)
+	}
+	if td.Amount != 8 || len(td.Proofs) != 2 {
+		t.Errorf("amount = %d proofs = %d, want 8 / 2", td.Amount, len(td.Proofs))
+	}
+}
+
