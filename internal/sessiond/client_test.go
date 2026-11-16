@@ -30,17 +30,28 @@ func TestBootstrap_Success(t *testing.T) {
 			t.Errorf("expected Content-Type text/plain, got %s", r.Header.Get("Content-Type"))
 		}
 
-		// Return the mock Nostr event
-		event := nostrEvent{
-			Kind: 1022,
-			Tags: [][]string{
-				{"allotment", "480000"},
-				{"metric", "milliseconds"},
-				{"start-time", "1700000000"},
-			},
-		}
+		// Return the mock Nostr event — tag set mirrors the live tollgate-rs
+		// kind 1022 event (amount_sat, token_type, effective_rate, plus
+		// unrecognized tags p/device-identifier that must be skipped).
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(event)
+		w.Write([]byte(`{
+			"kind": 1022,
+			"tags": [
+				["allotment", "480000"],
+				["metric", "milliseconds"],
+				["start-time", "1700000000"],
+				["amount_sat", "8"],
+				["token_type", "cashu"],
+				["effective_rate", "60"],
+				["p", "aa11...pubkey"],
+				["device-identifier", "mac", "test-mac-123"]
+			],
+			"id": "deadbeef",
+			"pubkey": "aa11...pubkey",
+			"sig": "signature",
+			"created_at": 1700000000,
+			"content": ""
+		}`))
 	}))
 	defer server.Close()
 
@@ -66,6 +77,18 @@ func TestBootstrap_Success(t *testing.T) {
 	if state.StartTime != 1700000000 {
 		t.Errorf("expected StartTime 1700000000, got %d", state.StartTime)
 	}
+
+	if state.CreditAmount != 8 {
+		t.Errorf("expected CreditAmount 8 (amount_sat tag), got %d", state.CreditAmount)
+	}
+
+	if state.TokenType != "cashu" {
+		t.Errorf("expected TokenType cashu, got %s", state.TokenType)
+	}
+
+	if state.EffectiveRateSecPerSat != 60 {
+		t.Errorf("expected EffectiveRateSecPerSat 60, got %d", state.EffectiveRateSecPerSat)
+	}
 }
 
 func TestBootstrap_ErrorResponse(t *testing.T) {
@@ -90,6 +113,25 @@ func TestBootstrap_ErrorResponse(t *testing.T) {
 	errStr := err.Error()
 	if !contains(errStr, "500") {
 		t.Errorf("expected error to contain '500', got: %s", errStr)
+	}
+}
+
+func TestBootstrap_PaymentRejected(t *testing.T) {
+	// Real server rejects a bad/spent token with 402 + JSON error body.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		w.Write([]byte(`{"error":"payment rejected: token already spent","session_id":"test-mac"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+
+	_, err := client.Bootstrap("test-cashu-token", "test-mac")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "402") {
+		t.Errorf("expected error to contain '402', got: %s", err.Error())
 	}
 }
 
@@ -236,18 +278,11 @@ func TestGetSession_Success(t *testing.T) {
 		if r.Header.Get("X-TollGate-MAC") != "aa-bb-cc-dd-ee-ff" {
 			t.Errorf("expected MAC header aa-bb-cc-dd-ee-ff, got %s", r.Header.Get("X-TollGate-MAC"))
 		}
-		resp := SessionResponse{
-			SessionID:      "test-session-1",
-			AccessLevel:    "active",
-			Allotment:      480000,
-			RemainingQuota: 360000,
-			Metric:         "milliseconds",
-			NextCheckinMs:  60000,
-			IsFinal:        false,
-			CreatedAt:      1700000000,
-		}
+		// Real GET /v1/sessions/{mac} response: numbers as JSON numbers,
+		// session_id echoes the MAC, last_usage_update omitted when no
+		// usage has been reported yet.
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		w.Write([]byte(`{"session_id":"aa:bb:cc:dd:ee:ff","access_level":"active","allotment":480000,"remaining_quota":360000,"metric":"milliseconds","next_checkin_ms":5000,"is_final":false,"created_at":1700000000}`))
 	}))
 	defer server.Close()
 
@@ -256,8 +291,8 @@ func TestGetSession_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
-	if state.SessionID != "test-session-1" {
-		t.Errorf("expected SessionID test-session-1, got %s", state.SessionID)
+	if state.SessionID != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("expected SessionID aa:bb:cc:dd:ee:ff, got %s", state.SessionID)
 	}
 	if state.AccessLevel != "active" {
 		t.Errorf("expected AccessLevel active, got %s", state.AccessLevel)
@@ -265,12 +300,21 @@ func TestGetSession_Success(t *testing.T) {
 	if state.RemainingQuota != 360000 {
 		t.Errorf("expected RemainingQuota 360000, got %d", state.RemainingQuota)
 	}
+	if state.NextCheckinMs != 5000 {
+		t.Errorf("expected NextCheckinMs 5000, got %d", state.NextCheckinMs)
+	}
+	if state.CreatedAt != 1700000000 {
+		t.Errorf("expected CreatedAt 1700000000, got %d", state.CreatedAt)
+	}
+	if state.LastUsageUpdate != "" {
+		t.Errorf("expected LastUsageUpdate empty (omitted), got %q", state.LastUsageUpdate)
+	}
 }
 
 func TestGetSession_ErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("session not found"))
+		w.Write([]byte(`{"error":"session not found","session_id":"unknown-mac"}`))
 	}))
 	defer server.Close()
 
@@ -306,15 +350,10 @@ func TestReportUsage_Success(t *testing.T) {
 			t.Errorf("failed to decode request body: %v", err)
 		}
 
-		resp := SessionResponse{
-			SessionID:      "test-session-1",
-			AccessLevel:    "active",
-			RemainingQuota: 240000,
-			Metric:         "milliseconds",
-			IsFinal:        false,
-		}
+		// Real usage-report response: last_usage_update is a unix-seconds
+		// STRING; every other timestamp is a JSON number.
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		w.Write([]byte(`{"session_id":"aa:bb:cc:dd:ee:ff","access_level":"active","allotment":480000,"remaining_quota":240000,"metric":"milliseconds","next_checkin_ms":5000,"is_final":false,"created_at":1700000000,"last_usage_update":"1700000120"}`))
 	}))
 	defer server.Close()
 
@@ -340,6 +379,12 @@ func TestReportUsage_Success(t *testing.T) {
 	}
 	if state.RemainingQuota != 240000 {
 		t.Errorf("expected RemainingQuota 240000, got %d", state.RemainingQuota)
+	}
+	if state.CreatedAt != 1700000000 {
+		t.Errorf("expected CreatedAt 1700000000 (JSON number), got %d", state.CreatedAt)
+	}
+	if state.LastUsageUpdate != "1700000120" {
+		t.Errorf("expected LastUsageUpdate \"1700000120\" (string), got %q", state.LastUsageUpdate)
 	}
 	if receivedBody.Source != "radius-accounting" {
 		t.Errorf("expected source radius-accounting, got %s", receivedBody.Source)
@@ -400,5 +445,25 @@ func TestReportUsage_ErrorResponse(t *testing.T) {
 	errStr := err.Error()
 	if !contains(errStr, "500") {
 		t.Errorf("expected error to contain '500', got: %s", errStr)
+	}
+}
+
+func TestReportUsage_Unauthorized(t *testing.T) {
+	// Real server answers a missing/failed X-API-Key with 401 + JSON error.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	report := UsageReport{Source: "radius-accounting"}
+
+	_, err := client.ReportUsage("aa-bb-cc-dd-ee-ff", report, "wrong-api-key")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "401") {
+		t.Errorf("expected error to contain '401', got: %s", err.Error())
 	}
 }
