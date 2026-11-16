@@ -16,9 +16,9 @@ type SessionState struct {
 	AllotmentMs            uint64 // allotment in milliseconds (parsed from Nostr event tags)
 	Metric                 string // "milliseconds" or "bytes"
 	StartTime              int64  // unix timestamp
-	CreditAmount           uint64 // raw token amount in sats (0 if not provided by legacy server)
+	CreditAmount           uint64 // raw token amount in sats, from the amount_sat tag (0 if not provided by legacy server)
 	TokenType              string // "cashu" or "lnurlw" ("" if not provided by legacy server)
-	EffectiveRateSecPerSat uint64 // seconds per sat: allotment_seconds / credit_amount (0 if not provided)
+	EffectiveRateSecPerSat uint64 // seconds per sat: allotment_seconds / amount_sat (0 if not provided)
 }
 
 // nostrEvent represents a minimal Nostr event for parsing the session response.
@@ -95,10 +95,10 @@ func (c *Client) Bootstrap(token string, mac string) (*SessionState, error) {
 					return nil, fmt.Errorf("parsing start-time: %w", err)
 				}
 				state.StartTime = val
-			case "credit_amount":
+			case "amount_sat":
 				val, err := strconv.ParseUint(tag[1], 10, 64)
 				if err != nil {
-					return nil, fmt.Errorf("parsing credit_amount: %w", err)
+					return nil, fmt.Errorf("parsing amount_sat: %w", err)
 				}
 				state.CreditAmount = val
 			case "token_type":
