@@ -54,6 +54,20 @@ func TestV4TokenDLEQSplit(t *testing.T) {
 	}
 }
 
+func TestV4TokenCdk018(t *testing.T) {
+	tok := V4TokenCdk018()
+	if len(tok) != 962 {
+		t.Fatalf("cdk-0.18 token is %d bytes, want 962", len(tok))
+	}
+	td, err := cashu.DecodeToken(tok)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if td.Amount != 8 {
+		t.Errorf("amount = %d, want 8", td.Amount)
+	}
+}
+
 func TestV3Token(t *testing.T) {
 	tok := V3Token(8)
 	td, err := cashu.DecodeToken(tok)

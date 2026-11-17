@@ -16,6 +16,10 @@
 //
 // Write config from an existing token (no minting):
 //   node mint-testnut.js --token "cashuB..." --write-eapol-config /tmp/eapol.conf
+//
+// Tokens longer than 453 bytes (TOKEN_SPLIT_LEN 200 + RFC 2865 User-Name limit
+// 253) cannot travel split over RADIUS — the script fails loudly instead of
+// writing a config that would truncate the token.
 
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +27,12 @@ const path = require('path');
 const MINT_URL = 'https://testnut.cashu.exchange';
 const RADIUS_ATTR_LIMIT = 253;
 const TOKEN_SPLIT_LEN = 200;
+// Split transport ceiling: password carries TOKEN_SPLIT_LEN bytes, the rest rides
+// in User-Name, which RFC 2865 caps at RADIUS_ATTR_LIMIT (253) octets per
+// attribute — enforced by FreeRADIUS diameter2vp even inside EAP-TTLS tunnels.
+// Tokens longer than this CANNOT travel split; writing a config for one would
+// silently truncate the User-Name tail and corrupt the reassembled token.
+const SPLIT_TRANSPORT_LIMIT = TOKEN_SPLIT_LEN + RADIUS_ATTR_LIMIT;
 
 function parseArgs(argv) {
   const args = {
@@ -84,6 +94,16 @@ function writeEapolConfig(filePath, token, opts) {
     ].join('\n') + '\n';
     desc = `identity-only (${tokenLen}b, fits single field)`;
   } else {
+    if (tokenLen > SPLIT_TRANSPORT_LIMIT) {
+      process.stderr.write(
+        `ERROR: token is ${tokenLen} bytes; the split transport (password=${TOKEN_SPLIT_LEN}b + User-Name tail) ` +
+        `caps at ${SPLIT_TRANSPORT_LIMIT} bytes (RFC 2865 attribute limit, enforced by FreeRADIUS diameter2vp). ` +
+        `Writing an eapol config would silently truncate the username tail and corrupt the token.\n` +
+        `Remedies: mint with --no-dleq (single-proof DLEQ-stripped tokens fit one attribute), ` +
+        `or use an HTTP/captive-portal path for large tokens — see docs/radius-token-size.md.\n`
+      );
+      process.exit(1);
+    }
     // Split token: first TOKEN_SPLIT_LEN bytes in password, rest in identity
     const passwordPart = token.substring(0, TOKEN_SPLIT_LEN);
     const identityPart = token.substring(TOKEN_SPLIT_LEN);
