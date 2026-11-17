@@ -4,6 +4,8 @@
 
 RADIUS attributes (User-Name, User-Password) are limited to **253 bytes**. Cashu V4 tokens with DLEQ proofs are **378 bytes** regardless of the token amount. This means full Cashu tokens **cannot be sent via raw RADIUS** (radclient, simple PAP auth).
 
+> **Update (2026-11-17):** cdk 0.18.x mints larger V4 tokens — **670–962 bytes** measured in cross-repo E2E — which also exceed the split transport's 453-byte ceiling. See the split section below.
+
 ## Token Size Measurements
 
 All tokens minted from `testnut.cashu.exchange`, single proof:
@@ -69,6 +71,12 @@ For full DLEQ tokens (378 bytes), FreeRADIUS's `diameter2vp` function enforces a
 - **Password** (inner): first 200 bytes (starts with `cashuB` prefix)
 - **Identity/Username** (inner): remaining 178 bytes (raw base64url)
 
+**The split transport's hard ceiling is 453 bytes** (`TOKEN_SPLIT_LEN` 200 + RFC 2865 User-Name limit 253). Both attributes are individually capped at 253 bytes — RFC 2865 gives the attribute Length field one octet, so no attribute Value can exceed 253 octets, and FreeRADIUS does not concatenate repeated User-Name attributes.
+
+**cdk 0.18.x tokens do not fit.** Cross-repo E2E (2026-11-17) measured cdk-0.18 V4 tokens at **670–962 bytes**. A 962-byte token split at 200 leaves a 762-byte tail — far over the User-Name cap — which `diameter2vp` truncates or drops, silently corrupting the reassembled token server-side. `scripts/mint-testnut.js --write-eapol-config` therefore **fails loudly** for tokens over 453 bytes instead of writing a config that cannot work. Single-proof DLEQ tokens should be minted `--no-dleq` (230 bytes, single field); multi-proof or otherwise oversized tokens need a non-RADIUS transport (HTTP API / captive portal — see below).
+
+The receiver is deliberately NOT capped at 453: `radiusauth.ExtractPayment` reassembles split tokens up to `MaxInputLen` (8192 bytes), because SSH auth, direct callers, and future HTTP paths deliver full-size tokens without RADIUS attributes. The 453 ceiling belongs to the EAP-TTLS split transport alone.
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │ RADIUS Access-Request (outer)                        │
@@ -88,13 +96,13 @@ The Go binary detects the split (password starts with `cashuB` + username is bas
 
 ## What Works and What Doesn't
 
-| Transport | No-DLEQ (230 bytes) | Full DLEQ (378 bytes) | LNURLw (~50 bytes) |
-|-----------|---------------------|-----------------------|--------------------|
-| **Raw RADIUS (radclient)** | **Yes** — fits in attribute | No — exceeds 253-byte limit | Yes |
-| **EAP-TTLS+PAP (single field)** | **Yes** — token in password or username | No — exceeds 253 in tunnel | Yes |
-| **EAP-TTLS+PAP (split)** | N/A — no split needed | **Yes** — 200b + 178b | Yes |
-| **PEAP+MSCHAPv2** | **Yes** — fits in User-Name | No — must fit in User-Name alone | Yes |
-| **RadSec (TLS transport)** | **Yes** — fits in attribute | No — same 253-byte limit | Yes |
+| Transport | No-DLEQ (230 bytes) | Full DLEQ (378 bytes) | cdk 0.18 V4 (670–962 bytes) | LNURLw (~50 bytes) |
+|-----------|---------------------|-----------------------|------------------------------|--------------------|
+| **Raw RADIUS (radclient)** | **Yes** — fits in attribute | No — exceeds 253-byte limit | No | Yes |
+| **EAP-TTLS+PAP (single field)** | **Yes** — token in password or username | No — exceeds 253 in tunnel | No | Yes |
+| **EAP-TTLS+PAP (split)** | N/A — no split needed | **Yes** — 200b + 178b | No — split ceiling is 453b (200+253); sender rejects loudly | Yes |
+| **PEAP+MSCHAPv2** | **Yes** — fits in User-Name | No — must fit in User-Name alone | No | Yes |
+| **RadSec (TLS transport)** | **Yes** — fits in attribute | No — same 253-byte limit | No | Yes |
 
 **RadSec encrypts the RADIUS transport but does NOT remove the 253-byte attribute limit.** RadSec = TLS for the RADIUS packet itself, not for the inner auth data.
 

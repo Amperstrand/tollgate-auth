@@ -25,6 +25,13 @@ func TestExtractPayment(t *testing.T) {
 
 	splitPW, splitUN := testtoken.V4TokenDLEQSplit()
 
+	fullToken962 := testtoken.V4TokenCdk018()
+	if len(fullToken962) != 962 {
+		t.Fatalf("cdk-0.18 token is %d bytes, want 962", len(fullToken962))
+	}
+	splitPW962 := fullToken962[:200]
+	splitUN962 := fullToken962[200:]
+
 	validLNURLw := testtoken.ValidLNURLw()
 
 	// A V3 token for testing cashuA prefix
@@ -215,6 +222,40 @@ func TestExtractPayment(t *testing.T) {
 			wantSource:  "password",
 			wantType:    PaymentCashu,
 			wantValue:   fullToken378,
+		},
+
+		// --- cdk 0.18-sized token (962 bytes): receiver must reassemble split
+		// delivery even though the RADIUS split transport caps at 453 — SSH and
+		// direct callers exceed that ceiling by design ---
+		{
+			name:        "split 962-byte cdk-0.18 token via password + username",
+			username:    splitUN962,
+			password:    splitPW962,
+			clearTextPw: "",
+			wantFound:   true,
+			wantSource:  "split-password+username",
+			wantType:    PaymentCashu,
+			wantValue:   fullToken962,
+		},
+		{
+			name:        "split 962-byte cdk-0.18 token via cleartext-password + username",
+			username:    splitUN962,
+			password:    "",
+			clearTextPw: splitPW962,
+			wantFound:   true,
+			wantSource:  "split-cleartext+username",
+			wantType:    PaymentCashu,
+			wantValue:   fullToken962,
+		},
+		{
+			name:        "full 962-byte cdk-0.18 token in password",
+			username:    "user1",
+			password:    fullToken962,
+			clearTextPw: "",
+			wantFound:   true,
+			wantSource:  "password",
+			wantType:    PaymentCashu,
+			wantValue:   fullToken962,
 		},
 
 		// --- No token found — empty username and password ---

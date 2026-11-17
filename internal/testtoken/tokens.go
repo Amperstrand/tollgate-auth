@@ -98,6 +98,27 @@ func V4TokenDLEQSplit() (first200, rest178 string) {
 	return full[:200], full[200:]
 }
 
+// V4TokenCdk018 returns a 962-byte V4 token: the upper end of what
+// cdk 0.18.x mints (measured 670-962 bytes in cross-repo E2E). Same
+// structure as V4TokenDLEQ with a longer proof secret. It deliberately
+// exceeds the split RADIUS transport ceiling (200 + 253 = 453 bytes);
+// ExtractPayment must still reassemble it when a non-truncating
+// transport (SSH, direct calls, future HTTP path) delivers it.
+func V4TokenCdk018() string {
+	secret := make([]byte, 615)
+	for i := range secret {
+		secret[i] = 'a' + byte(i%26)
+	}
+	return encodeV4(v4Token{
+		Mint: TestMint,
+		Unit: "sat",
+		Token: []v4Entry{{
+			KeysetID: keysetID,
+			Proofs:   []v4Proof{{Amount: 8, Secret: string(secret), C: c33}},
+		}},
+	})
+}
+
 func V3Token(amount int) string {
 	v3 := map[string]interface{}{
 		"token": []map[string]interface{}{
