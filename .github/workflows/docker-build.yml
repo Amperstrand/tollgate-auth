@@ -5,6 +5,14 @@
 # set PUSH_TO_GHCR to "true" below and ensure the repo has packages:write
 # permission. We're holding off on publishing until we decide if GHCR adds
 # enough value for this project (see docs/SECURITY_AUDIT_WINDOW3.md).
+#
+# Topology: one sequential `build` job and one sequential `scan` job cover
+# all six services (previously a 6-leg matrix per job). Sequential steps run
+# in one job, so checkout/buildx setup happens once per job instead of once
+# per leg, and per-job minute rounding applies to 2 jobs instead of 12.
+# A failing service fails its job immediately and the failing target is
+# named in the red step ("Build image: <service>" / "Run Trivy: <service>");
+# later targets are skipped until the failure is fixed.
 
 name: docker-build
 
@@ -23,6 +31,7 @@ on:
       - 'cmd/**'
       - 'internal/**'
       - '.dockerignore'
+      - '.github/workflows/docker-build.yml'
 
 env:
   PUSH_TO_GHCR: "false"
@@ -30,16 +39,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - tollgate-auth-ocpi
-          - tollgate-csms
-          - tollgate-webssh
-          - tollgate-daemon
-          - tollgate-settle
-          - freeradius
     permissions:
       contents: read
       packages: write
@@ -56,21 +55,76 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image (verify Dockerfile compiles)
+      - name: "Build image: tollgate-auth-ocpi"
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/${{ matrix.service }}/Dockerfile
+          file: docker/tollgate-auth-ocpi/Dockerfile
           platforms: linux/amd64
           push: false
-          tags: ${{ matrix.service }}:ci-verify
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          tags: tollgate-auth-ocpi:ci-verify
+          cache-from: type=gha,scope=tollgate-auth-ocpi
+          cache-to: type=gha,mode=max,scope=tollgate-auth-ocpi
+
+      - name: "Build image: tollgate-csms"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-csms/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-csms:ci-verify
+          cache-from: type=gha,scope=tollgate-csms
+          cache-to: type=gha,mode=max,scope=tollgate-csms
+
+      - name: "Build image: tollgate-webssh"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-webssh/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-webssh:ci-verify
+          cache-from: type=gha,scope=tollgate-webssh
+          cache-to: type=gha,mode=max,scope=tollgate-webssh
+
+      - name: "Build image: tollgate-daemon"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-daemon/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-daemon:ci-verify
+          cache-from: type=gha,scope=tollgate-daemon
+          cache-to: type=gha,mode=max,scope=tollgate-daemon
+
+      - name: "Build image: tollgate-settle"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-settle/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-settle:ci-verify
+          cache-from: type=gha,scope=tollgate-settle
+          cache-to: type=gha,mode=max,scope=tollgate-settle
+
+      - name: "Build image: freeradius"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/freeradius/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: freeradius:ci-verify
+          cache-from: type=gha,scope=freeradius
+          cache-to: type=gha,mode=max,scope=freeradius
 
       - name: Report status
         if: always()
         run: |
-          echo "### Docker build: ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker build (all targets)" >> $GITHUB_STEP_SUMMARY
           echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
 
   summary:
@@ -90,57 +144,253 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: always() && needs.build.result == 'success'
-    strategy:
-      matrix:
-        service:
-          - tollgate-auth-ocpi
-          - tollgate-csms
-          - tollgate-webssh
-          - tollgate-daemon
-          - tollgate-settle
-          - freeradius
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build image for scanning
+      - name: "Build image for scanning: tollgate-auth-ocpi"
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/${{ matrix.service }}/Dockerfile
+          file: docker/tollgate-auth-ocpi/Dockerfile
           platforms: linux/amd64
           push: false
-          tags: ${{ matrix.service }}:scan
+          tags: tollgate-auth-ocpi:scan
           load: true
-          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-from: type=gha,scope=tollgate-auth-ocpi
 
-      - name: Run Trivy vulnerability scanner
+      - name: "Run Trivy: tollgate-auth-ocpi"
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ matrix.service }}:scan
+          image-ref: tollgate-auth-ocpi:scan
           format: table
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
-          output: trivy-${{ matrix.service }}.txt
+          output: trivy-tollgate-auth-ocpi.txt
 
-      - name: Upload scan results
+      - name: "Upload scan results: tollgate-auth-ocpi"
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-scan-${{ matrix.service }}
-          path: trivy-${{ matrix.service }}.txt
+          name: trivy-scan-tollgate-auth-ocpi
+          path: trivy-tollgate-auth-ocpi.txt
 
-      - name: Report
+      - name: "Report: tollgate-auth-ocpi"
         if: always()
         run: |
-          echo "### Trivy scan: ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Trivy scan: tollgate-auth-ocpi" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
           echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cat trivy-${{ matrix.service }}.txt >> $GITHUB_STEP_SUMMARY
+          cat trivy-tollgate-auth-ocpi.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Build image for scanning: tollgate-csms"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-csms/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-csms:scan
+          load: true
+          cache-from: type=gha,scope=tollgate-csms
+
+      - name: "Run Trivy: tollgate-csms"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: tollgate-csms:scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          output: trivy-tollgate-csms.txt
+
+      - name: "Upload scan results: tollgate-csms"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-tollgate-csms
+          path: trivy-tollgate-csms.txt
+
+      - name: "Report: tollgate-csms"
+        if: always()
+        run: |
+          echo "### Trivy scan: tollgate-csms" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
+          echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-tollgate-csms.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Build image for scanning: tollgate-webssh"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-webssh/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-webssh:scan
+          load: true
+          cache-from: type=gha,scope=tollgate-webssh
+
+      - name: "Run Trivy: tollgate-webssh"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: tollgate-webssh:scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          output: trivy-tollgate-webssh.txt
+
+      - name: "Upload scan results: tollgate-webssh"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-tollgate-webssh
+          path: trivy-tollgate-webssh.txt
+
+      - name: "Report: tollgate-webssh"
+        if: always()
+        run: |
+          echo "### Trivy scan: tollgate-webssh" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
+          echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-tollgate-webssh.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Build image for scanning: tollgate-daemon"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-daemon/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-daemon:scan
+          load: true
+          cache-from: type=gha,scope=tollgate-daemon
+
+      - name: "Run Trivy: tollgate-daemon"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: tollgate-daemon:scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          output: trivy-tollgate-daemon.txt
+
+      - name: "Upload scan results: tollgate-daemon"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-tollgate-daemon
+          path: trivy-tollgate-daemon.txt
+
+      - name: "Report: tollgate-daemon"
+        if: always()
+        run: |
+          echo "### Trivy scan: tollgate-daemon" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
+          echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-tollgate-daemon.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Build image for scanning: tollgate-settle"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/tollgate-settle/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: tollgate-settle:scan
+          load: true
+          cache-from: type=gha,scope=tollgate-settle
+
+      - name: "Run Trivy: tollgate-settle"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: tollgate-settle:scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          output: trivy-tollgate-settle.txt
+
+      - name: "Upload scan results: tollgate-settle"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-tollgate-settle
+          path: trivy-tollgate-settle.txt
+
+      - name: "Report: tollgate-settle"
+        if: always()
+        run: |
+          echo "### Trivy scan: tollgate-settle" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
+          echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-tollgate-settle.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: "Build image for scanning: freeradius"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/freeradius/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: freeradius:scan
+          load: true
+          cache-from: type=gha,scope=freeradius
+
+      - name: "Run Trivy: freeradius"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: freeradius:scan
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          output: trivy-freeradius.txt
+
+      - name: "Upload scan results: freeradius"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan-freeradius
+          path: trivy-freeradius.txt
+
+      - name: "Report: freeradius"
+        if: always()
+        run: |
+          echo "### Trivy scan: freeradius" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "exit-code=0 means CRITICAL/HIGH findings are reported but do not fail the build." >> $GITHUB_STEP_SUMMARY
+          echo "Set exit-code to 1 to enforce blocking once the baseline is clean." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-freeradius.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
